@@ -1,0 +1,18 @@
+# WSO2 Devant / Choreo component descriptor.
+#
+# This declares the HTTP endpoint the AFM runtime serves (the `webchat` interface
+# listens on port 8085 at /chat, with a UI at /chat/ui).
+#
+# NOTE: verify `schemaVersion` and field names against the current Devant docs —
+# the schema evolves. If you omit this file, the Devant deploy wizard can detect
+# the port and configure the endpoint interactively instead.
+schemaVersion: 1.2
+endpoints:
+  - name: chat
+    displayName: AFM Chat
+    service:
+      basePath: /
+      port: 8085
+    type: REST
+    networkVisibilities:
+      - Public

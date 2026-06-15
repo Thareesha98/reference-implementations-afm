@@ -25,3 +25,8 @@ COPY --chown=10014:0 resources ./resources
 USER 10014
 
 ENTRYPOINT ["java", "-jar", "afm_ballerina.jar"]
+
+# Default agent file loaded on startup (baked into the image under resources/).
+# On Devant you can override this by passing a different path, or set the
+# `afmFilePath` configurable instead.
+CMD ["resources/agent.afm.md"]
