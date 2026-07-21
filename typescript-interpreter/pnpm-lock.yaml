@@ -19,6 +19,14 @@ importers:
       vitest:
         specifier: ^5.0.2
         version: 5.0.2(@opentelemetry/api@1.9.1)(@types/node@26.0.1)(vite@8.1.0(@types/node@26.0.1)(esbuild@0.28.2)(tsx@4.22.4)(yaml@2.9.0))
+  packages/engine:
+    dependencies:
+      yaml:
+        specifier: ^2.6.0
+        version: 2.9.0
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
 packages:
   "@emnapi/core@1.11.1":
     resolution:
@@ -801,6 +809,9 @@ packages:
     engines:
       node: ">= 14.6"
     hasBin: true
+  zod@3.25.76:
+    resolution:
+      integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==
 snapshots:
   "@emnapi/core@1.11.1":
     dependencies:
@@ -1102,3 +1113,4 @@ snapshots:
       - msw
   why-is-node-running@3.2.2: {}
   yaml@2.9.0: {}
+  zod@3.25.76: {}
