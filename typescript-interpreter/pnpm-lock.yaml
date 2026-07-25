@@ -19,6 +19,7 @@ importers:
       vitest:
         specifier: ^5.0.2
         version: 5.0.2(@opentelemetry/api@1.9.1)(@types/node@26.0.1)(vite@8.1.0(@types/node@26.0.1)(esbuild@0.28.2)(tsx@4.22.4)(yaml@2.9.0))
+  packages/adapters/auth: {}
   packages/engine:
     dependencies:
       yaml:
