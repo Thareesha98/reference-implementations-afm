@@ -1,0 +1,97 @@
+// Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied. See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+import type { SecretRef, ToolCall } from "@afm/engine";
+
+/**
+ * A request the worker answers later, matched to its answer by key. The permission and prompt
+ * bridges below share this shape.
+ */
+function createPendingBridge<K, V>() {
+  const pending = new Map<K, (value: V) => void>();
+  return {
+    /**
+     * Registers the key before the request is sent, so an immediate answer still finds its
+     * resolver.
+     */
+    wait(key: K, abort?: { signal: AbortSignal; value: V }): Promise<V> {
+      return new Promise((resolve) => {
+        if (abort === undefined) {
+          pending.set(key, resolve);
+          return;
+        }
+        const { signal, value } = abort;
+        const giveUp = (): void => {
+          pending.delete(key);
+          resolve(value);
+        };
+        pending.set(key, (answer) => {
+          signal.removeEventListener("abort", giveUp);
+          resolve(answer);
+        });
+        if (signal.aborted) giveUp();
+        else signal.addEventListener("abort", giveUp, { once: true });
+      });
+    },
+    resolve(key: K, value: V): void {
+      const settle = pending.get(key);
+      if (settle !== undefined) {
+        pending.delete(key);
+        settle(value);
+      }
+    },
+  };
+}
+
+export interface PromptBridge {
+  ask: (ref: SecretRef) => Promise<string | null>;
+  resolve: (name: string, value: string | null) => void;
+}
+
+export function createPromptBridge(request: (name: string) => void): PromptBridge {
+  const bridge = createPendingBridge<string, string | null>();
+  return {
+    ask(ref) {
+      const value = bridge.wait(ref.name);
+      request(ref.name);
+      return value;
+    },
+    resolve: bridge.resolve,
+  };
+}
+
+export interface PermissionDecision {
+  allow: boolean;
+  remember: boolean;
+}
+
+export interface PermissionBridge {
+  ask: (call: ToolCall, signal?: AbortSignal) => Promise<PermissionDecision>;
+  resolve: (id: string, decision: PermissionDecision) => void;
+}
+
+export function createPermissionBridge(request: (call: ToolCall) => void): PermissionBridge {
+  const bridge = createPendingBridge<string, PermissionDecision>();
+  return {
+    // A stopped run answers its own open question with a denial.
+    ask(call, signal) {
+      const decision = bridge.wait(call.id, signal && { signal, value: { allow: false, remember: false } });
+      request(call);
+      return decision;
+    },
+    resolve: bridge.resolve,
+  };
+}
