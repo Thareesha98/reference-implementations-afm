@@ -1,0 +1,45 @@
+// Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied. See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+// The passkey this browser enrolled for AFM, so a second saved secret reuses it. A credential id is
+// a public handle, not a secret.
+const CREDENTIAL_KEY = "afm.passkey.credential";
+
+export function rememberCredentialId(id: Uint8Array<ArrayBuffer>): void {
+  try {
+    localStorage.setItem(CREDENTIAL_KEY, btoa(String.fromCharCode(...id)));
+  } catch {
+    // Without this the next save would enrol a second passkey.
+  }
+}
+
+export function knownCredentialId(): Uint8Array<ArrayBuffer> | null {
+  try {
+    const stored = localStorage.getItem(CREDENTIAL_KEY);
+    if (stored === null || stored === "") return null;
+    return Uint8Array.from(atob(stored), (character) => character.charCodeAt(0));
+  } catch {
+    return null;
+  }
+}
+
+export function forgetCredentialId(): void {
+  try {
+    localStorage.removeItem(CREDENTIAL_KEY);
+  } catch {
+    // Nothing to recover: the id is only a hint.
+  }
+}
