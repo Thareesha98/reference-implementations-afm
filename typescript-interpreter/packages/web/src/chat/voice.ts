@@ -1,0 +1,182 @@
+// Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied. See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+import { useCallback, useEffect, useRef, useState } from "react";
+
+// Speech recognition is missing from TypeScript's DOM lib and older Safari prefixes the
+// constructor. Both live here so the lookup and transcript joining are testable without a browser.
+
+export interface SpeechRecognitionResult {
+  readonly length: number;
+  readonly isFinal: boolean;
+  [index: number]: { readonly transcript: string };
+}
+
+export interface SpeechRecognitionResultList {
+  readonly length: number;
+  [index: number]: SpeechRecognitionResult;
+}
+
+export interface SpeechRecognitionEvent extends Event {
+  readonly resultIndex: number;
+  readonly results: SpeechRecognitionResultList;
+}
+
+export interface SpeechRecognitionErrorEvent extends Event {
+  readonly error: string;
+}
+
+interface SpeechRecognition extends EventTarget {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  start(): void;
+  stop(): void;
+  abort(): void;
+  onresult: ((event: SpeechRecognitionEvent) => void) | null;
+  onerror: ((event: SpeechRecognitionErrorEvent) => void) | null;
+  onend: (() => void) | null;
+}
+
+export type SpeechRecognitionConstructor = new () => SpeechRecognition;
+
+interface SpeechWindow {
+  SpeechRecognition?: SpeechRecognitionConstructor;
+  webkitSpeechRecognition?: SpeechRecognitionConstructor;
+}
+
+export function pickSpeechRecognitionCtor(win: SpeechWindow): SpeechRecognitionConstructor | null {
+  return win.SpeechRecognition ?? win.webkitSpeechRecognition ?? null;
+}
+
+// Every event carries all results for the session: settled phrases plus one interim tail. The
+// transcript is rebuilt each time, and final phrases get a trailing space so they do not run
+// together.
+export function buildLiveTranscript(results: SpeechRecognitionResultList): string {
+  let text = "";
+  for (let i = 0; i < results.length; i += 1) {
+    const result = results[i];
+    if (result === undefined) continue;
+    const chunk = result[0]?.transcript ?? "";
+    text += result.isFinal ? `${chunk} ` : chunk;
+  }
+  return text.trim();
+}
+
+function speechWindow(): SpeechWindow {
+  return window as unknown as SpeechWindow;
+}
+
+// How long to keep listening through a pause before treating the speaker as done.
+const SILENCE_TIMEOUT_MS = 5000;
+
+/**
+ * Live dictation: the transcript fills in as the person speaks, including interim words.
+ *
+ * `continuous` keeps listening through pauses; a timer restarted on every result ends the session
+ * after `SILENCE_TIMEOUT_MS`. Recognition is done by the browser's own speech service, which may
+ * send audio to a server. Unsupported browsers get `supported: false` and the caller hides the mic
+ * button.
+ */
+export function useVoiceInput(onUpdate: (text: string) => void) {
+  const [listening, setListening] = useState(false);
+  const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const silenceTimerRef = useRef<number | null>(null);
+  const supported = typeof window !== "undefined" && pickSpeechRecognitionCtor(speechWindow()) !== null;
+
+  const clearSilenceTimer = useCallback(() => {
+    if (silenceTimerRef.current !== null) {
+      window.clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      clearSilenceTimer();
+      recognitionRef.current?.stop();
+    };
+  }, [clearSilenceTimer]);
+
+  const start = useCallback(() => {
+    const Ctor = pickSpeechRecognitionCtor(speechWindow());
+    if (Ctor === null || recognitionRef.current !== null) return;
+    const recognition = new Ctor();
+    recognition.lang = navigator.language || "en-US";
+    recognition.interimResults = true;
+    recognition.continuous = true;
+    recognition.onresult = (event) => {
+      clearSilenceTimer();
+      silenceTimerRef.current = window.setTimeout(() => recognition.stop(), SILENCE_TIMEOUT_MS);
+      const transcript = buildLiveTranscript(event.results);
+      if (transcript !== "") onUpdate(transcript);
+    };
+    recognition.onend = () => {
+      clearSilenceTimer();
+      recognitionRef.current = null;
+      setListening(false);
+    };
+    recognition.onerror = () => {
+      clearSilenceTimer();
+      recognitionRef.current = null;
+      setListening(false);
+    };
+    recognitionRef.current = recognition;
+    setListening(true);
+    recognition.start();
+  }, [onUpdate, clearSilenceTimer]);
+
+  const stop = useCallback(() => {
+    clearSilenceTimer();
+    recognitionRef.current?.stop();
+  }, [clearSilenceTimer]);
+
+  return { supported, listening, start, stop };
+}
+
+/**
+ * Reads a message aloud with the browser's own voice. speechSynthesis is one global queue, so
+ * starting a new utterance stops the previous one.
+ */
+export function useSpeakText() {
+  const [speaking, setSpeaking] = useState(false);
+  const supported = typeof window !== "undefined" && "speechSynthesis" in window;
+
+  useEffect(() => {
+    if (!supported) return;
+    return () => window.speechSynthesis.cancel();
+  }, [supported]);
+
+  const speak = useCallback(
+    (text: string) => {
+      if (!supported || text.trim() === "") return;
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.onend = () => setSpeaking(false);
+      utterance.onerror = () => setSpeaking(false);
+      setSpeaking(true);
+      window.speechSynthesis.speak(utterance);
+    },
+    [supported],
+  );
+
+  const stop = useCallback(() => {
+    if (supported) window.speechSynthesis.cancel();
+    setSpeaking(false);
+  }, [supported]);
+
+  return { supported, speaking, speak, stop };
+}
