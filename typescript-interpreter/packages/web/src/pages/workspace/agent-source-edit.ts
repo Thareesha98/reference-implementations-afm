@@ -1,0 +1,423 @@
+// Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied. See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+import { frontmatterEndOffset } from "@afm/engine";
+
+function frontmatterEnd(content: string): number | null {
+  const closing = frontmatterEndOffset(content);
+  if (closing === 0) return null;
+  const closingBreak = content.indexOf("\n", closing);
+  return closingBreak === -1 ? content.length : closingBreak;
+}
+
+function frontmatterLines(content: string): string[] | null {
+  const end = frontmatterEnd(content);
+  return end === null ? null : content.slice(0, end).split("\n");
+}
+
+// Runs `edit` on the frontmatter's lines and puts the result back, so nothing outside the fences
+// is touched. `edit` returns null to leave the file exactly as it was.
+function editFrontmatter(content: string, edit: (lines: string[]) => string[] | null): string {
+  const end = frontmatterEnd(content);
+  if (end === null) return content;
+  const lines = edit(content.slice(0, end).split("\n"));
+  return lines === null ? content : lines.join("\n") + content.slice(end);
+}
+
+interface Span {
+  start: number;
+  end: number;
+}
+
+function indentOf(line: string | undefined, fallback = ""): string {
+  return line?.match(/^[ \t]*/)?.[0] ?? fallback;
+}
+
+function keyIndent(lines: string[], block: Span, fallback: string): string {
+  return indentOf(lines.slice(block.start + 1, block.end).find((line) => line.trim() !== ""), fallback);
+}
+
+// Where a block ends: the first non-blank line indented no deeper than the line that opened it.
+// Blank lines inside a block belong to it.
+function blockEnd(lines: string[], from: number, parentIndent: number, limit = lines.length): number {
+  let end = from;
+  while (end < limit && (lines[end]?.trim() === "" || indentOf(lines[end]).length > parentIndent)) end += 1;
+  return end;
+}
+
+function valueOf(line: string): string {
+  return line.slice(line.indexOf(":") + 1).trim();
+}
+
+function withValue(line: string, value: string): string {
+  return `${line.slice(0, line.indexOf(":"))}: ${value}`;
+}
+
+/**
+ * Everything below the frontmatter: the Role, the Instructions and other prose. It becomes the
+ * agent's system prompt.
+ */
+export function agentBrief(content: string): string {
+  const end = frontmatterEnd(content);
+  return (end === null ? content : content.slice(end)).trim();
+}
+
+export function envSecretName(value: string): string {
+  return /^\$\{env:([^}]+)\}$/.exec(value.trim())?.[1]?.trim() ?? "";
+}
+
+/**
+ * One YAML scalar as written. Double-quoted follows JSON escapes closely enough for JSON.parse;
+ * single-quoted escapes a quote by doubling it.
+ */
+function unquoteScalar(raw: string): string {
+  if (raw.length >= 2 && raw.startsWith("'") && raw.endsWith("'")) {
+    return raw.slice(1, -1).replace(/''/g, "'");
+  }
+  if (raw.startsWith('"')) {
+    try {
+      return JSON.parse(raw) as string;
+    } catch {
+      return raw;
+    }
+  }
+  return raw;
+}
+
+export function getFrontmatterScalar(content: string, key: string): string {
+  const end = frontmatterEnd(content);
+  if (end === null) return "";
+  const match = new RegExp(`^${key}:\\s*(.*)$`, "m").exec(content.slice(0, end));
+  if (match === null) return "";
+  const raw = (match[1] ?? "").trim();
+  return unquoteScalar(raw);
+}
+
+export type ModelField = "provider" | "name";
+
+const MODEL_LINE = /^model:[ \t]*$/;
+const BLOCK_LINE = /^[ \t]/;
+
+function quoteIfNeeded(value: string): string {
+  // An empty value is written as `""`; a bare `name:` is YAML null and fails validation.
+  if (value === "") return '""';
+  return value.includes(":") || value.includes("#") ? JSON.stringify(value) : value;
+}
+
+function modelBlock(lines: string[]): Span | null {
+  const start = lines.findIndex((line) => MODEL_LINE.test(line));
+  // `model: gpt-4o` on one line is not the nested mapping these controls edit; leave it for Raw
+  // mode.
+  if (start === -1) return null;
+  let end = start + 1;
+  while (end < lines.length && (lines[end] === "" || BLOCK_LINE.test(lines[end] ?? ""))) end += 1;
+  return { start, end };
+}
+
+function fieldLine(lines: string[], block: Span, field: ModelField): number {
+  // Anchored to the block's own indent so a deeper key, such as one under `authentication:`, is
+  // never mistaken for the model's own.
+  const pattern = new RegExp(`^${keyIndent(lines, block, "  ")}${field}:`);
+  for (let i = block.start + 1; i < block.end; i += 1) {
+    if (pattern.test(lines[i] ?? "")) return i;
+  }
+  return -1;
+}
+
+export function getModelField(content: string, field: ModelField): string {
+  const lines = frontmatterLines(content);
+  if (lines === null) return "";
+  const block = modelBlock(lines);
+  if (block === null) return "";
+  const index = fieldLine(lines, block, field);
+  return index === -1 ? "" : unquoteScalar(valueOf(lines[index] ?? ""));
+}
+
+// Rewrites one scalar in the top-level `model:` mapping, creating the mapping or key if missing.
+// Only the target line changes, so comments and key order survive.
+export function setModelField(content: string, field: ModelField, value: string): string {
+  const escaped = quoteIfNeeded(value);
+  return editFrontmatter(content, (lines) => {
+    const block = modelBlock(lines);
+    if (block === null) {
+      const fenceIndex = lines.findIndex((line) => line.trim() === "---");
+      lines.splice(fenceIndex + 1, 0, "model:", `  ${field}: ${escaped}`);
+      return lines;
+    }
+
+    const index = fieldLine(lines, block, field);
+    if (index === -1) {
+      lines.splice(block.start + 1, 0, `${keyIndent(lines, block, "  ")}${field}: ${escaped}`);
+      return lines;
+    }
+
+    lines[index] = withValue(lines[index] ?? "", escaped);
+    return lines;
+  });
+}
+
+// `api_key` sits under `model.authentication`, one level deeper than fieldLine's block indent, so
+// it has its own lookup.
+function apiKeyLine(lines: string[], block: Span): number {
+  let authIndent: string | null = null;
+  for (let i = block.start + 1; i < block.end; i += 1) {
+    const line = lines[i] ?? "";
+    if (line.trim() === "") continue;
+    const indent = indentOf(line);
+    if (authIndent !== null) {
+      if (indent.length <= authIndent.length) return -1;
+      if (/^[ \t]*api_key:/.test(line)) return i;
+      continue;
+    }
+    if (/^[ \t]*authentication:[ \t]*$/.test(line)) authIndent = indent;
+  }
+  return -1;
+}
+
+export function getModelApiKey(content: string): string {
+  const lines = frontmatterLines(content);
+  if (lines === null) return "";
+  const block = modelBlock(lines);
+  if (block === null) return "";
+  const index = apiKeyLine(lines, block);
+  return index === -1 ? "" : unquoteScalar(valueOf(lines[index] ?? ""));
+}
+
+// Rewrites `model.authentication.api_key` in place, keeping the author's quoting. Returns the
+// content untouched when there is no such line instead of inventing an authentication block.
+export function setModelApiKey(content: string, value: string): string {
+  return editFrontmatter(content, (lines) => {
+    const block = modelBlock(lines);
+    if (block === null) return null;
+    const index = apiKeyLine(lines, block);
+    // No key line yet, so create it: writing nothing would make choosing a provider look like it
+    // worked while the file pointed at no key.
+    if (index === -1) {
+      const indent = keyIndent(lines, block, "  ");
+      const authAt = findAuthenticationLine(lines, block);
+      if (authAt === -1) {
+        lines.splice(block.end, 0, `${indent}authentication:`, `${indent}  type: api-key`, `${indent}  api_key: ${value}`);
+      } else {
+        lines.splice(authAt + 1, 0, `${indentOf(lines[authAt], indent)}  api_key: ${value}`);
+      }
+      return lines;
+    }
+
+    const line = lines[index] ?? "";
+    const existing = valueOf(line);
+    const quoted = existing.startsWith('"') || existing.startsWith("'");
+    lines[index] = withValue(line, quoted ? JSON.stringify(value) : value);
+    return lines;
+  });
+}
+
+function findAuthenticationLine(lines: string[], block: Span): number {
+  for (let i = block.start + 1; i < block.end; i += 1) {
+    if (/^[ \t]*authentication:[ \t]*$/.test(lines[i] ?? "")) return i;
+  }
+  return -1;
+}
+
+function sectionBounds(content: string, heading: string): Span | null {
+  const headingRe = new RegExp(`^#\\s+${heading}\\s*$`, "m");
+  const match = headingRe.exec(content);
+  if (match === null) return null;
+  const bodyStart = match.index + match[0].length;
+  const nextHeading = /^#\s+\S/m.exec(content.slice(bodyStart));
+  const bodyEnd = nextHeading ? bodyStart + nextHeading.index : content.length;
+  return { start: bodyStart, end: bodyEnd };
+}
+
+/**
+ * Only blank lines between sections are stripped, never spaces: these two functions round-trip on
+ * every keystroke, so trimming would delete a just-typed space.
+ */
+export function getSection(content: string, heading: string): string {
+  const bounds = sectionBounds(content, heading);
+  if (bounds === null) return "";
+  return content.slice(bounds.start, bounds.end).replace(/^\n+/, "").replace(/\n+$/, "");
+}
+
+export function setSection(content: string, heading: string, body: string): string {
+  const bounds = sectionBounds(content, heading);
+  // A valid file can lack the heading being written into; returning the content unchanged would
+  // make the field look broken.
+  if (bounds === null) {
+    return `${content.replace(/\n+$/, "")}\n\n# ${heading}\n\n${body}\n`;
+  }
+  const before = content.slice(0, bounds.start);
+  const after = content.slice(bounds.end);
+  return `${before}\n${body}\n\n${after.replace(/^\n+/, "")}`;
+}
+
+// Tool selection lives in `tool_filter` on the server that owns the tools, so it survives a reload
+// and travels with the shared file.
+
+function mcpServerRange(lines: string[], serverName: string): (Span & { indent: string }) | null {
+  const toolsAt = lines.findIndex((line) => /^tools:[ \t]*$/.test(line));
+  if (toolsAt === -1) return null;
+
+  let start = -1;
+  let itemIndent = "";
+  for (let i = toolsAt + 1; i < lines.length; i += 1) {
+    const line = lines[i] ?? "";
+    if (line.trim() !== "" && !/^[ \t]/.test(line)) break;
+    const item = /^([ \t]*)-[ \t]+name:[ \t]*"?([^"\n]*?)"?[ \t]*$/.exec(line);
+    if (item === null) continue;
+    if (start !== -1) {
+      // The next server starts here, so ours ends on the previous line.
+      if ((item[1] ?? "").length <= itemIndent.length) return { start, end: i, indent: itemIndent };
+      continue;
+    }
+    if ((item[2] ?? "") === serverName) {
+      start = i;
+      itemIndent = item[1] ?? "";
+    }
+  }
+  if (start === -1) return null;
+  return { start, end: blockEnd(lines, start + 1, itemIndent.length), indent: itemIndent };
+}
+
+/**
+ * Replaces the server's `tool_filter` with an explicit allow-list, or removes it when `allow` is
+ * null. Only that block changes.
+ */
+export function setServerToolFilter(content: string, serverName: string, allow: string[] | null): string {
+  return editFrontmatter(content, (lines) => {
+    const range = mcpServerRange(lines, serverName);
+    if (range === null) return null;
+
+    const prop = `${range.indent}  `;
+    const filterPattern = new RegExp(`^${prop}tool_filter:`);
+    let filterAt = -1;
+    for (let i = range.start + 1; i < range.end && filterAt === -1; i += 1) {
+      if (filterPattern.test(lines[i] ?? "")) filterAt = i;
+    }
+
+    // An empty allow-list is written inline: `allow:` with no items is YAML null, which fails
+    // validation.
+    const block =
+      allow === null
+        ? []
+        : allow.length === 0
+          ? [`${prop}tool_filter:`, `${prop}  allow: []`]
+          : [`${prop}tool_filter:`, `${prop}  allow:`, ...allow.map((name) => `${prop}    - ${name}`)];
+
+    return filterAt !== -1
+      ? [...lines.slice(0, filterAt), ...block, ...lines.slice(blockEnd(lines, filterAt + 1, prop.length, range.end))]
+      : [...lines.slice(0, range.start + 1), ...block, ...lines.slice(range.start + 1)];
+  });
+}
+
+export interface NewMcpServer {
+  name: string;
+  url: string;
+  auth?: { type: string; fields: Record<string, string>; scopes?: string[] };
+}
+
+function yamlValue(value: string): string {
+  // A bare value is fine unless YAML would read it as something else. URLs contain ':' but not ':
+  // ', so they stay bare.
+  return /:\s|^\s|\s$|^[[{>|*&!%@`'"]/.test(value) || value === "" ? JSON.stringify(value) : value;
+}
+
+function serverLines(server: NewMcpServer, indent: string): string[] {
+  const lines = [`${indent}- name: ${yamlValue(server.name)}`, `${indent}  transport:`, `${indent}    type: http`, `${indent}    url: ${yamlValue(server.url)}`];
+  if (server.auth !== undefined) {
+    lines.push(`${indent}    authentication:`, `${indent}      type: ${yamlValue(server.auth.type)}`);
+    for (const [key, value] of Object.entries(server.auth.fields)) {
+      if (value.trim() === "") continue;
+      lines.push(`${indent}      ${key}: ${yamlValue(value)}`);
+    }
+    if (server.auth.scopes !== undefined && server.auth.scopes.length > 0) {
+      lines.push(`${indent}      scopes:`);
+      for (const scope of server.auth.scopes) lines.push(`${indent}        - ${yamlValue(scope)}`);
+    }
+  }
+  return lines;
+}
+
+/**
+ * Appends a server to `tools.mcp`, creating either key when missing. Written as lines so comments,
+ * key order and formatting elsewhere survive.
+ */
+export function addMcpServer(content: string, server: NewMcpServer): string {
+  return editFrontmatter(content, (lines) => {
+    const toolsAt = lines.findIndex((line) => /^tools:[ \t]*$/.test(line));
+    if (toolsAt === -1) {
+      const closing = Math.max(0, lines.length - 1);
+      lines.splice(closing, 0, "tools:", "  mcp:", ...serverLines(server, "    "));
+      return lines;
+    }
+
+    let mcpAt = -1;
+    let end = lines.length;
+    for (let i = toolsAt + 1; i < lines.length; i += 1) {
+      const line = lines[i] ?? "";
+      if (line.trim() !== "" && !/^[ \t]/.test(line)) {
+        end = i;
+        break;
+      }
+      if (/^[ \t]+mcp:[ \t]*$/.test(line)) mcpAt = i;
+    }
+    if (mcpAt === -1) {
+      lines.splice(toolsAt + 1, 0, "  mcp:", ...serverLines(server, "    "));
+      return lines;
+    }
+
+    const first = lines.slice(mcpAt + 1, end).find((line) => /^([ \t]*)-[ \t]+name:/.test(line));
+    const indent = indentOf(first, "    ");
+    let insertAt = mcpAt + 1;
+    for (let i = mcpAt + 1; i < end; i += 1) {
+      if ((lines[i] ?? "").trim() !== "") insertAt = i + 1;
+    }
+    lines.splice(insertAt, 0, ...serverLines(server, indent));
+    return lines;
+  });
+}
+
+export function removeMcpServer(content: string, serverName: string): string {
+  return editFrontmatter(content, (lines) => {
+    const range = mcpServerRange(lines, serverName);
+    if (range === null) return null;
+    lines.splice(range.start, range.end - range.start);
+    return dropEmptyToolsKeys(lines);
+  });
+}
+
+/**
+ * A key with nothing under it is YAML null and fails validation, so one that lost its last child is
+ * removed.
+ */
+function dropEmptyToolsKeys(lines: string[]): string[] {
+  const hasChild = (at: number): boolean => {
+    const indent = indentOf(lines[at]).length;
+    for (let i = at + 1; i < lines.length; i += 1) {
+      const line = lines[i] ?? "";
+      if (line.trim() === "") continue;
+      return indentOf(line).length > indent;
+    }
+    return false;
+  };
+
+  const mcpAt = lines.findIndex((line) => /^[ \t]+mcp:[ \t]*$/.test(line));
+  if (mcpAt !== -1 && !hasChild(mcpAt)) lines.splice(mcpAt, 1);
+
+  const toolsAt = lines.findIndex((line) => /^tools:[ \t]*$/.test(line));
+  if (toolsAt !== -1 && !hasChild(toolsAt)) lines.splice(toolsAt, 1);
+
+  return lines;
+}
