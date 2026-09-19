@@ -1,0 +1,79 @@
+:root {
+  --bg: var(--ground);
+  --surface-2: var(--sunk);
+  --surface-raised: var(--surface);
+  --elevated: var(--surface);
+  --text: var(--ink);
+  --text-subtle: var(--faint);
+  --border: var(--line);
+  --hair: var(--line);
+  --accent-strong: var(--accent-2);
+  --accent-contrast: #ffffff;
+  --danger: var(--bad);
+
+  --shadow: 0 1px 2px rgba(31, 38, 51, 0.06), 0 8px 24px rgba(31, 38, 51, 0.06);
+
+  --risk-read-bg: var(--ok-soft);
+  --risk-read-border: var(--ok);
+  --risk-read-text: var(--ok);
+  --risk-write-bg: var(--warn-soft);
+  --risk-write-border: var(--warn);
+  --risk-write-text: var(--warn);
+
+  --chat-column: 860px;
+
+  --radius: 14px;
+  --radius-sm: 10px;
+  --radius-lg: 20px;
+
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+  --code-bg: #1f2633;
+  --code-text: #e2e8f0;
+  --hl-keyword: #c084fc;
+  --hl-string: #86efac;
+  --hl-comment: #94a3b8;
+  --hl-number: #fca5a5;
+  --hl-func: #93c5fd;
+  --hl-attr: #fcd34d;
+}
+
+[data-theme="dark"] {
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 32px rgba(0, 0, 0, 0.35);
+
+  --code-bg: #0b0d18;
+  --code-text: #e2e8f0;
+}
+
+[data-theme="dark"] .btn.primary {
+  box-shadow:
+    0 6px 18px -6px rgba(124, 132, 240, 0.6),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+/* The conversation in the dark theme: raised surfaces take the raised background with no shadow,
+   and the agent's own colour glows rather than being painted on. */
+[data-theme="dark"] .xc-starter,
+[data-theme="dark"] .xc-used,
+[data-theme="dark"] .xc-live,
+[data-theme="dark"] .xc-act {
+  background: var(--surface-raised);
+  box-shadow: none;
+}
+[data-theme="dark"] .xc-av {
+  box-shadow:
+    0 12px 34px -10px rgba(215, 155, 108, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+[data-theme="dark"] .xc-caret {
+  box-shadow: 0 0 10px rgba(215, 155, 108, 0.8);
+}
+[data-theme="dark"] .xc-used .d {
+  box-shadow: 0 0 8px rgba(87, 190, 142, 0.75);
+}
+[data-theme="dark"] .xc-pulse {
+  box-shadow:
+    0 0 0 4px rgba(215, 155, 108, 0.14),
+    0 0 12px rgba(215, 155, 108, 0.9);
+}
