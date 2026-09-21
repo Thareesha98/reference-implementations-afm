@@ -1,0 +1,342 @@
+/* Long answers get a reading measure - full-width prose is tiring to read. */
+
+
+
+.msg-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.msg-image {
+  max-width: 220px;
+  max-height: 220px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  object-fit: cover;
+  display: block;
+}
+
+
+
+
+
+/* Attachments are the user's own content, so they sit on the user's side of the thread rather
+   than as a system marker down the middle. */
+.attachment-row {
+  align-self: flex-end;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  max-width: 86%;
+  animation: fade-up 0.25s ease;
+}
+.attachment-card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  max-width: 280px;
+  padding: 8px 13px 8px 8px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+.attachment-remove {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  box-shadow: var(--shadow);
+  opacity: 0;
+  transform: scale(0.85);
+  transition: opacity 0.15s ease, transform 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+/* Kept out of the way until the file is the thing being looked at, but always reachable by
+   keyboard - focus-visible has to reveal it too or it can be tabbed to while invisible. */
+.attachment-card:hover .attachment-remove,
+.attachment-card:focus-within .attachment-remove {
+  opacity: 1;
+  transform: none;
+}
+.attachment-remove:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.attachment-badge {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+.attachment-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.attachment-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attachment-meta {
+  font-size: 11.5px;
+  color: var(--text-subtle);
+}
+
+.notice-marker {
+  align-self: center;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-subtle);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 12px;
+  max-width: 86%;
+  text-align: center;
+  animation: fade-up 0.25s ease;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/* Only where a budget meter can appear (the Run page) - Studio's test chat never passes a
+   budget, so its composer keeps its plain top padding. The extra space
+   here is fixed whether or not the meta row has anything in it this turn, so a turn starting
+   or finishing never nudges the composer - or the message list above it. */
+
+.composer-meta-row {
+  position: absolute;
+  top: 6px;
+  left: 24px;
+  right: 24px;
+  max-width: var(--chat-column);
+  margin: 0 auto;
+  padding-left: 14px;
+  min-height: 15px;
+  pointer-events: none;
+}
+.budget-meter {
+  display: block;
+  font-size: 11.5px;
+  color: var(--muted);
+  font-family: var(--mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@media (max-width: 720px) {
+  .composer-meta-row {
+    display: none;
+  }
+}
+.composer-drop-overlay {
+  position: absolute;
+  inset: 6px 16px 8px;
+  display: grid;
+  place-items: center;
+  border: 2px dashed var(--accent);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface) 85%);
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 13px;
+  z-index: 5;
+  pointer-events: none;
+}
+.composer-attach-status {
+  max-width: var(--chat-column);
+  margin: 0 auto 8px;
+  font-size: 12px;
+  color: var(--text-subtle);
+}
+.composer-image-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: var(--chat-column);
+  margin: 0 auto 10px;
+}
+.composer-image-chip {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  flex: none;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+}
+.composer-image-chip img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.composer-image-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  box-shadow: var(--shadow);
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.composer-image-remove:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.composer-attach-menu-anchor {
+  position: relative;
+  flex: none;
+}
+
+
+
+.composer-attach-menu {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 200px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  z-index: 10;
+}
+.composer-attach-menu button {
+  text-align: left;
+  padding: 10px 14px;
+  font-size: 13px;
+  color: var(--text);
+  background: none;
+  border: none;
+}
+.composer-attach-menu button:hover {
+  background: var(--surface-2);
+}
+.composer-attach-menu button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.composer-attach-menu button:disabled:hover {
+  background: none;
+}
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+.scroll-bottom {
+  position: sticky;
+  bottom: 16px;
+  align-self: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  display: grid;
+  place-items: center;
+  box-shadow: var(--shadow);
+  z-index: 5;
+}
+.scroll-bottom:hover {
+  background: var(--surface-2);
+  border-color: var(--accent);
+}
+
+
+
+
+
+/* ---- copy button on code blocks ---- */
+.code-wrap {
+  position: relative;
+}
+.code-copy {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.code-wrap:hover .code-copy {
+  opacity: 1;
+}
+.code-copy:hover {
+  color: var(--text);
+}
