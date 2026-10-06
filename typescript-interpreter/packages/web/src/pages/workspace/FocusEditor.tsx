@@ -119,7 +119,7 @@ export function FocusEditor({ title, hint, value, placeholder, onChange, onClose
           <span className="u-focus-title">{title}</span>
           <span className="u-focus-hint">{hint}</span>
           <WriteModeSwitch mode={mode} onMode={setMode} />
-          <button className="u-ico" onClick={onClose} aria-label="Done" title="Done">
+          <button className="u-ico" onClick={onClose} aria-label="Done" data-tip="Done">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
               strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M9 9L4 4M9 9V4M9 9H4M15 9l5-5M15 9V4M15 9h5M9 15l-5 5M9 15v5M9 15H4M15 15l5 5M15 15v5M15 15h5" />
@@ -138,7 +138,7 @@ export function FocusEditor({ title, hint, value, placeholder, onChange, onClose
                   // Keep the selection in the box: the button never takes focus from it.
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => applyCommand(tool.command)}
-                  title={tool.label}
+                  data-tip={tool.label}
                   aria-label={tool.label}
                 >
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
@@ -154,7 +154,7 @@ export function FocusEditor({ title, hint, value, placeholder, onChange, onClose
               className="u-tbtn"
               onMouseDown={(event) => event.preventDefault()}
               onClick={startLink}
-              title="Link"
+              data-tip="Link"
               aria-label="Link"
             >
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"

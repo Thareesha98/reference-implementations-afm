@@ -30,6 +30,8 @@ const ICON_PATHS = {
   generate: "M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z",
   template: "M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z",
   file: "M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3",
+  back: "M19 12H5M12 19l-7-7 7-7",
+  warn: "M12 9v5M12 17.4h.01M10.3 3.9L2.4 17.4A2 2 0 004.1 20.5h15.8a2 2 0 001.7-3.1L13.7 3.9a2 2 0 00-3.4 0z",
 };
 
 function Glyph({ path, size = 15 }: { path: string; size?: number }) {
@@ -41,9 +43,9 @@ function Glyph({ path, size = 15 }: { path: string; size?: number }) {
   );
 }
 
-function StartOption({ icon, name, desc, onClick }: { icon: ReactNode; name: string; desc: string; onClick: () => void }) {
+function StartOption({ icon, name, desc, onClick, on = false }: { icon: ReactNode; name: string; desc: string; onClick: () => void; on?: boolean }) {
   return (
-    <button className="u-start-opt" onClick={onClick}>
+    <button className={on ? "u-start-opt on" : "u-start-opt"} onClick={onClick}>
       <span className="u-start-ico" aria-hidden="true">
         {icon}
       </span>
@@ -404,11 +406,7 @@ export function StartHere({
             </label>
           </div>
 
-          {keySaved ? (
-            <p className="u-setup-note">
-              Uses the <code>{provider.secretName}</code> you entered. It is kept in memory for this tab only.
-            </p>
-          ) : (
+          {!keySaved && (
             <>
               <label className="u-group">
                 <span className="u-label">{provider.secretName}</span>
@@ -426,16 +424,15 @@ export function StartHere({
                   ? "Saving asks for your fingerprint, Face or PIN and keeps the key on this device behind it."
                   : "Kept in memory for this tab only."}
               </p>
-              <p className="u-setup-note u-warn-note">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-                  strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M12 9v5M12 17.4h.01" />
-                  <path d="M10.3 3.9L2.4 17.4A2 2 0 004.1 20.5h15.8a2 2 0 001.7-3.1L13.7 3.9a2 2 0 00-3.4 0z" />
-                </svg>
-                Your API credits will be used to write this file.
-              </p>
             </>
           )}
+
+          <p className="u-usage-note">
+            <Glyph path={ICON_PATHS.warn} size={15} />
+            <span>
+              Your <strong>{provider.label}</strong> API usage will be used to write this file.
+            </span>
+          </p>
 
           <button className="u-btn primary wide" type="submit" disabled={!canWrite}>
             {writing ? "Writing the file…" : "Write the agent file"}
@@ -451,12 +448,16 @@ export function StartHere({
       {compact ? (
         <p className="u-setup-note">
           The empty agent is already beside you. Fill it in yourself, or start from one of these.
+          <br />
+          Nothing is installed. Everything stays in this tab.
         </p>
       ) : (
         <>
           <h3 className="u-setup-title">An agent is a file. This one is ready.</h3>
           <p className="u-setup-note">
             Edit the fields on the left and press <strong>Run</strong> to start talking to it.
+            <br />
+            Nothing is installed. Everything stays in this tab.
           </p>
 
           <div className="u-divider" />
@@ -466,7 +467,7 @@ export function StartHere({
 
       <div className="u-start-list">
         {/* First: it is what the stage already shows. */}
-        <StartOption icon={<Glyph path={ICON_PATHS.blank} />} name="Blank" onClick={onBlank}
+        <StartOption icon={<Glyph path={ICON_PATHS.blank} />} name="Blank" onClick={onBlank} on
           desc="Write the role and instructions yourself. It is already on the left." />
         <StartOption icon={<Glyph path={ICON_PATHS.generate} />} name="Generate with AI" onClick={() => setView("prompt")}
           desc="Describe what you want and get a first version to edit." />
@@ -475,16 +476,15 @@ export function StartHere({
         <StartOption icon={<Glyph path={ICON_PATHS.file} />} name="Import a file" onClick={() => setView("import")}
           desc="Open an .afm.md you were sent, or paste a link to one." />
       </div>
-
-      <p className="u-hint">Nothing is installed. Everything stays in this tab.</p>
     </SetupColumn>
   );
 }
 
 function BackLink({ onClick }: { onClick: () => void }) {
   return (
-    <button className="u-linkish" onClick={onClick}>
-      ← Back
+    <button className="u-back" onClick={onClick}>
+      <Glyph path={ICON_PATHS.back} size={14} />
+      Back
     </button>
   );
 }

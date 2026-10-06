@@ -270,7 +270,7 @@ export function Composer({
                 className="composer-image-remove"
                 onClick={() => removeImage(index)}
                 aria-label={`Remove ${image.name}`}
-                title="Remove this image"
+                data-tip="Remove this image"
               >
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round">
                   <path d="M18 6 6 18M6 6l12 12" />
@@ -286,12 +286,12 @@ export function Composer({
             type="button"
             className="xc-cbtn"
             aria-label="Attach files, a folder, or an image"
-            title="Attach files, a folder, or an image"
+            data-tip="Attach files, a folder, or an image"
             disabled={disabled}
             onClick={() => setAttachMenuOpen((open) => !open)}
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21.44 11.05 12.25 20.24a5 5 0 0 1-7.07-7.07l9.19-9.19a3.5 3.5 0 0 1 4.95 4.95L9.64 18.36a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+              <path d="m16 6-8.414 8.586a2 2 0 0 0 2.829 2.829l8.414-8.586a4 4 0 1 0-5.657-5.657l-8.379 8.551a6 6 0 1 0 8.485 8.485l8.379-8.551" />
             </svg>
           </button>
           {attachMenuOpen && (
@@ -355,18 +355,17 @@ export function Composer({
             onClick={toggleVoice}
             disabled={disabled}
             aria-label={voice.listening ? "Stop dictation" : "Dictate a message"}
-            title={voice.listening ? "Stop dictation" : "Dictate a message"}
+            data-tip={voice.listening ? "Stop dictation" : "Dictate a message"}
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+              <path d="M12 19v3" />
               <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-              <line x1="12" y1="19" x2="12" y2="23" />
-              <line x1="8" y1="23" x2="16" y2="23" />
+              <rect x="9" y="2" width="6" height="13" rx="3" />
             </svg>
           </button>
         )}
         {streaming ? (
-          <button className="xc-stop" onClick={onStop} aria-label="Stop" title="Stop">
+          <button className="xc-stop" onClick={onStop} aria-label="Stop" data-tip="Stop">
             <i aria-hidden="true" />
           </button>
         ) : (
@@ -377,7 +376,7 @@ export function Composer({
             aria-label="Send"
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 19V5M5.5 11.5L12 5l6.5 6.5" />
+              <path d="m5 12 7-7 7 7M12 19V5" />
             </svg>
           </button>
         )}

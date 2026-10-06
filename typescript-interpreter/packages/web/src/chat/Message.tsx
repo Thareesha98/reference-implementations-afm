@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { useState } from "react";
 import type { ReactNode } from "react";
 import { Markdown } from "./Markdown";
 import { useSpeakText } from "./voice";
@@ -26,13 +27,14 @@ interface Props {
   message: TextMessage;
   streaming: boolean;
   onRegenerate?: () => void;
+  onEdit?: (text: string) => void;
   /** Footnote for what the answer had to do. */
   footnote?: ReactNode;
 }
 
 function Act({ label, path, onClick }: { label: string; path: string; onClick: () => void }) {
   return (
-    <button className="xc-act" onClick={onClick} title={label} aria-label={label}>
+    <button className="xc-act" onClick={onClick} data-tip={label} aria-label={label}>
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
         strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         <path d={path} />
@@ -41,15 +43,18 @@ function Act({ label, path, onClick }: { label: string; path: string; onClick: (
   );
 }
 
-const COPY = "M9 9h11.5v11.5H9zM5.5 15H4.5A1.5 1.5 0 013 13.5v-9A1.5 1.5 0 014.5 3h9A1.5 1.5 0 0115 4.5v1";
-const RETRY = "M3.5 4.5v5h5M4 12a8 8 0 108-8 8 8 0 00-7.4 5";
-const SPEAK = "M11 5L6 9H2v6h4l5 4zM15.5 8.5a5 5 0 010 7";
+const COPY = "M10 8h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2zM4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2";
+const EDIT = "M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497zM15 5l4 4";
+const RETRY = "M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8M3 3v5h5";
+const SPEAK = "M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298zM16 9a5 5 0 0 1 0 6M19.364 18.364a9 9 0 0 0 0-12.728";
 
 /** The person's words get a bubble; the agent's do not. */
-export function Message({ message, streaming, onRegenerate, footnote }: Props) {
+export function Message({ message, streaming, onRegenerate, onEdit, footnote }: Props) {
   const isUser = message.kind === "user";
   const { copied, copy } = useCopyFeedback();
   const voice = useSpeakText();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
 
   const images = message.kind === "user" && message.images !== undefined && message.images.length > 0 && (
     <div className="msg-images">
@@ -64,11 +69,65 @@ export function Message({ message, streaming, onRegenerate, footnote }: Props) {
     </div>
   );
 
+  if (isUser && editing) {
+    const send = () => {
+      if (draft.trim() === "") return;
+      setEditing(false);
+      onEdit?.(draft.trim());
+    };
+    return (
+      <div className="xc-turn is-user">
+        <div className="xc-edit">
+          <textarea
+            className="xc-edit-field"
+            value={draft}
+            rows={3}
+            autoFocus
+            aria-label="Edit your message"
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") setEditing(false);
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                send();
+              }
+            }}
+          />
+          <div className="xc-edit-bar">
+            <button className="u-btn quiet sm" onClick={() => setEditing(false)}>
+              Cancel
+            </button>
+            <button className="u-btn primary sm" disabled={draft.trim() === ""} onClick={send}>
+              Send
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (isUser) {
     return (
       <div className="xc-turn is-user">
         {images}
-        {message.text.trim() !== "" && <div className="xc-user">{message.text}</div>}
+        {message.text.trim() !== "" && (
+          <>
+            <div className="xc-user">{message.text}</div>
+            <span className="xc-uacts">
+              <Act label={copied ? "Copied" : "Copy"} path={COPY} onClick={() => copy(message.text)} />
+              {onEdit !== undefined && (
+                <Act
+                  label="Edit"
+                  path={EDIT}
+                  onClick={() => {
+                    setDraft(message.text);
+                    setEditing(true);
+                  }}
+                />
+              )}
+            </span>
+          </>
+        )}
       </div>
     );
   }

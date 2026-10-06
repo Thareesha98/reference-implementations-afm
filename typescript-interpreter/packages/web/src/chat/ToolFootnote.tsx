@@ -19,16 +19,19 @@ import type { UiMessage } from "../chat-state";
 
 type ToolMessage = Extract<UiMessage, { kind: "tool" }>;
 
+const clip = (text: string) => (text.length > 240 ? `${text.slice(0, 240)}…` : text);
+
 /**
- * What the agent did, as a footnote: no tool or server name, only that it checked and how long it
- * took. The duration is measured here because the transcript carries none.
+ * What the agent did, as a footnote that opens to show the call. The duration is measured here
+ * because the transcript carries none.
  */
-export function ToolFootnote({ tool }: { tool: ToolMessage }) {
+export function ToolFootnote({ tool, server }: { tool: ToolMessage; server?: string }) {
   const startedAt = useRef(Date.now());
   // A call already finished on mount came from a stored transcript and has no recorded duration, so
   // it gets no number.
   const watched = useRef(tool.status === "running");
   const [elapsed, setElapsed] = useState<number | null>(null);
+  const [open, setOpen] = useState(false);
 
   useEffect(() => {
     if (tool.status === "running" || !watched.current) return;
@@ -39,25 +42,35 @@ export function ToolFootnote({ tool }: { tool: ToolMessage }) {
     return (
       <span className="xc-live">
         <span className="xc-pulse" aria-hidden="true" />
-        Looking that up…
+        Using {server ?? "a tool"}…
       </span>
     );
   }
 
-  if (tool.status === "failed") {
-    return (
-      <span className="xc-used is-bad">
-        <span className="d" aria-hidden="true" />
-        Couldn’t check that
-      </span>
-    );
-  }
-
+  const failed = tool.status === "failed";
   return (
-    <span className="xc-used">
-      <span className="d" aria-hidden="true" />
-      Looked it up
-      {elapsed !== null && <span className="xc-meta">{(elapsed / 1000).toFixed(1)}s</span>}
+    <span className={`xc-tool ${open ? "is-open" : ""}`}>
+      <button type="button" className={`xc-used ${failed ? "is-bad" : ""}`} aria-expanded={open} onClick={() => setOpen(!open)}>
+        <span className="d" aria-hidden="true" />
+        <span className="xc-used-name">{server === undefined ? tool.name : `${server} · ${tool.name}`}</span>
+        <span className="xc-meta">{failed ? "failed" : elapsed !== null ? `${(elapsed / 1000).toFixed(1)}s` : ""}</span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"
+          strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="m6 9 6 6 6-6" />
+        </svg>
+      </button>
+      {open && (
+        <div className="xc-toolbody">
+          <span className="u-label">Asked with</span>
+          <code>{clip(JSON.stringify(tool.args ?? {}))}</code>
+          {tool.result !== undefined && (
+            <>
+              <span className="u-label">Got back</span>
+              <code>{clip(tool.result)}</code>
+            </>
+          )}
+        </div>
+      )}
     </span>
   );
 }

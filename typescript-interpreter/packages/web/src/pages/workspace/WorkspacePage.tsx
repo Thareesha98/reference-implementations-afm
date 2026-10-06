@@ -28,6 +28,7 @@ import { ModelPanel } from "./ModelPanel";
 import { ServerPanel } from "./ServerPanel";
 import { usePasskeySupport } from "../../passkey/usePasskeySupport";
 import { SidePane } from "./SideWindow";
+import { ChatHead, StatusPill, headerStatus } from "./ChatHead";
 import type { ToolInfo } from "../../protocol";
 import { useStandaloneSession } from "../../worker-client/useStandaloneSession";
 import { previewAgent, buildableAgent, collectAfmIssues } from "../../agent-validation";
@@ -112,6 +113,7 @@ export function WorkspacePage() {
   // tools out of the diagram or stop it being saved. Running stays strict below.
   const readable = buildableAgent(content);
   const agentLabel = (readable.ok ? readable.metadata.name : undefined) ?? "Untitled agent";
+  const agentIcon = readable.ok ? (readable.metadata.icon_url ?? "") : "";
   const settledContentForRead = useSettled(content);
 
   useEffect(() => {
@@ -228,6 +230,11 @@ export function WorkspacePage() {
   // Asked once per agent: the tool_filter written to the file settles it for reloads and shares.
   const servers = readable.ok ? (readable.metadata.tools?.mcp ?? []) : [];
   const nameByUrl = serverNameByUrl(servers);
+  const chatState = headerStatus(
+    testSession.state.status,
+    activity.phase,
+    activity.serverId === undefined ? undefined : nameByUrl.get(activity.serverId),
+  );
   // Servers this browser holds a grant for, so a tool_filter alone does not count as settled.
   const grantedServers = new Set(
     permissions
@@ -433,7 +440,6 @@ export function WorkspacePage() {
               setServerEditing(name);
               openSide("tools");
             }}
-            step={running ? testSession.state.budget : null}
             showRaw={rawRequest}
             onOpenPanel={(panel) => openSide(panel)}
           />
@@ -456,11 +462,17 @@ export function WorkspacePage() {
         <aside className="u-side" aria-hidden={side === null}>
           <SidePane
             title="Chat"
+            heading={
+              chatFull ? (
+                <StatusPill status={chatState} />
+              ) : (
+                <ChatHead name={agentLabel} iconUrl={agentIcon} status={chatState} />
+              )
+            }
             onClose={closeSide}
-            expanded={chatFull}
-            onExpand={() => setChatFull((full) => !full)}
+            onExpand={chatFull ? undefined : () => setChatFull(true)}
+            floating={chatFull}
             flush
-            bare
           >
             <ChatPane
               session={testSession}
@@ -471,6 +483,7 @@ export function WorkspacePage() {
               onChooseTools={chooseTools}
               description={readable.ok ? (readable.metadata.description ?? "") : ""}
               role={getSection(content, "Role")}
+              iconUrl={agentIcon}
             />
           </SidePane>
 
@@ -481,7 +494,7 @@ export function WorkspacePage() {
                 overPanel === "tools" && serverEditing !== null ? serverEditing : SIDE_TITLE[overPanel]
               }
               onClose={closeSide}
-              flush={overPanel === "model" || overPanel === "tools"}
+              flush={overPanel === "model" || overPanel === "tools" || overPanel === "info" || overPanel === "share"}
             >
               {overPanel === "agents" && (
                 <AgentPicker
@@ -531,9 +544,12 @@ export function WorkspacePage() {
               )}
               {overPanel === "info" && (
                 <InfoPanel
+                  content={content}
                   metadata={readable.ok ? readable.metadata : null}
                   saved={library.agents.find((agent) => agent.id === agentId)}
                   onToggleFavorite={() => agentId !== null && library.toggleFavorite(agentId)}
+                  onApply={setContent}
+                  onClose={closeSide}
                 />
               )}
               {overPanel === "model" && (

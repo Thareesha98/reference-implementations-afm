@@ -106,6 +106,41 @@ export function getFrontmatterScalar(content: string, key: string): string {
   return unquoteScalar(raw);
 }
 
+function yamlText(value: string): string {
+  const plain = /^[A-Za-z][\w .,()/-]*$/.test(value) && !/^(true|false|null|yes|no|on|off)$/i.test(value);
+  return plain ? value : JSON.stringify(value);
+}
+
+function keyLines(key: string, value: string | string[] | Record<string, string>): string[] {
+  if (typeof value === "string") return value === "" ? [] : [`${key}: ${yamlText(value)}`];
+  const rows = Array.isArray(value)
+    ? value.map((item) => `  - ${yamlText(item)}`)
+    : Object.entries(value)
+        .filter(([, item]) => item !== "")
+        .map(([name, item]) => `  ${name}: ${yamlText(item)}`);
+  return rows.length === 0 ? [] : [`${key}:`, ...rows];
+}
+
+export function setFrontmatterValue(
+  content: string,
+  key: string,
+  value: string | string[] | Record<string, string>,
+): string {
+  return editFrontmatter(content, (lines) => {
+    const next = keyLines(key, value);
+    const start = lines.findIndex((line) => line.startsWith(`${key}:`));
+    if (start === -1) {
+      lines.splice(lines.findIndex((line) => line.trim() === "---") + 1, 0, ...next);
+      return lines;
+    }
+    let end = start + 1;
+    while (end < lines.length && /^(\s|- |$)/.test(lines[end] ?? "")) end += 1;
+    while (end > start + 1 && (lines[end - 1] ?? "").trim() === "") end -= 1;
+    lines.splice(start, end - start, ...next);
+    return lines;
+  });
+}
+
 export type ModelField = "provider" | "name";
 
 const MODEL_LINE = /^model:[ \t]*$/;

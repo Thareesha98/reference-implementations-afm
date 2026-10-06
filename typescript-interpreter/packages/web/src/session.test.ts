@@ -151,6 +151,26 @@ describe("AgentSession", () => {
     expect(followUp.at(-1)).toEqual({ role: "user", content: "and tomorrow?" });
   });
 
+  it("starts again from an earlier message when told how many turns to keep", async () => {
+    const seen: ChatMessage[][] = [];
+    const model = async () => ({
+      async *stream(request: { messages: ChatMessage[] }) {
+        seen.push(request.messages);
+        yield { type: "text-delta" as const, text: "ok" };
+        yield { type: "finish" as const, reason: "stop" as const };
+      },
+    });
+    const { session } = makeSession(model);
+    await session.load(VALID);
+    await session.send("one");
+    await session.send("two");
+    await session.send("two, again", undefined, 1);
+    const last = seen.at(-1) ?? [];
+    expect(last.map((message) => message.role)).toEqual(["user", "assistant", "user"]);
+    expect(last[0]?.content).toBe("one");
+    expect(last.at(-1)?.content).toBe("two, again");
+  });
+
   it("errors when sending before loading", async () => {
     const { session, emitted } = makeSession();
     await session.send("hi");

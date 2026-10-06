@@ -58,16 +58,10 @@ export function SettingsPanel({ session }: Props) {
               const remembered = session.state.passkeySecrets.includes(name);
               return (
                 <div className="u-row u-key-row" key={name}>
-                  {/* The name gets whatever width is left; only a remembered key carries a chip. */}
+                  {/* The name gets whatever width is left. */}
                   <span className="u-row-name mono" title={name}>
                     {name}
                   </span>
-                  {remembered && (
-                    <span className="u-chip ok">
-                      <span className="u-dot" aria-hidden="true" />
-                      passkey
-                    </span>
-                  )}
                   {!remembered && canRemember && (
                     <button
                       className="u-btn quiet sm"

@@ -36,6 +36,7 @@ interface Props {
   /** What the agent says about itself, for the opening state. */
   description?: string;
   role?: string;
+  iconUrl?: string;
 }
 
 export function ChatPane({
@@ -47,6 +48,7 @@ export function ChatPane({
   onChooseTools,
   description = "",
   role = "",
+  iconUrl = "",
 }: Props) {
   const {
     state,
@@ -57,6 +59,7 @@ export function ChatPane({
     detachFile,
     saveSecret,
     regenerate,
+    editMessage,
     unlockPasskey,
     skipPasskeyUnlock,
     decideSecretApproval,
@@ -134,6 +137,7 @@ export function ChatPane({
           streaming={state.status === "streaming"}
           status={state.status}
           agentName={state.agentName}
+          iconUrl={iconUrl}
           loadSteps={state.loadSteps}
           notReady={state.notReady}
           description={description}
@@ -151,7 +155,9 @@ export function ChatPane({
           }}
           onRetry={() => loadContent(content)}
           onRegenerate={regenerate}
+          onEdit={editMessage}
           onDetachFile={detachFile}
+          serverOf={(toolName) => serverNameByUrl.get(state.tools.find((tool) => tool.name === toolName)?.serverId ?? "")}
         />
       )}
 

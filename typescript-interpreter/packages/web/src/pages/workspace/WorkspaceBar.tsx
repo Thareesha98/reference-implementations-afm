@@ -50,7 +50,7 @@ function Ico({
   return (
     <button
       className={`u-ico ${on ? "on" : ""}`}
-      title={label}
+      data-tip={label}
       aria-label={label}
       onClick={onClick}
       disabled={disabled}

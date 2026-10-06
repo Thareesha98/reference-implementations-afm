@@ -48,7 +48,7 @@ describe("readiness", () => {
     expect(sentence(r)).toBe("Ready");
   });
 
-  it("counts the tools it is allowed to use", () => {
+  it("does not mention how many tools it has", () => {
     const metadata = {
       name: "A",
       model: MODEL,
@@ -59,21 +59,7 @@ describe("readiness", () => {
         ],
       },
     } as unknown as AgentMetadata;
-    expect(sentence(readiness(input({ metadata })))).toBe("Ready - 3 tools");
-  });
-
-  it("offers no count when one server's tools have not been chosen", () => {
-    const metadata = {
-      name: "A",
-      model: MODEL,
-      tools: {
-        mcp: [
-          { name: "web", transport: { type: "http", url: "u1" }, tool_filter: { allow: ["a"] } },
-          { name: "stock", transport: { type: "http", url: "u2" } },
-        ],
-      },
-    } as unknown as AgentMetadata;
-    expect(sentence(readiness(input({ metadata, steps: [] })))).toBe("Ready");
+    expect(sentence(readiness(input({ metadata })))).toBe("Ready");
   });
 
   it("names a missing role before anything else", () => {

@@ -37,8 +37,6 @@ interface Props {
   activity: AgentActivity;
   /** Servers heard from, and ones tried and not reached. */
   reach: ServerReach;
-  /** Progress through its budget for a running agent. */
-  step?: { iteration: number; maxIterations: number } | null;
 }
 
 /** Evidence, not assumption: green means the server answered. */
@@ -61,19 +59,15 @@ function serverSummary(server: McpServer): { tools: string; state: "ready" | "si
 /** A button rather than a click on the text: clicking into a field means place the cursor. */
 function ExpandButton({ onClick }: { onClick: () => void }) {
   return (
-    <button className="u-ico tiny" onClick={onClick} title="Write in a bigger window"
+    <button className="u-ico tiny" onClick={onClick} data-tip="Write in a bigger window"
       aria-label="Write in a bigger window">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"
         aria-hidden="true">
-        <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+        <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+        <path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" />
       </svg>
     </button>
   );
-}
-
-function Step({ n }: { n: number | null }) {
-  if (n === null) return null;
-  return <span className="u-step">{n}</span>;
 }
 
 /** Green claims the address works, so it is only shown once something has answered from it. */
@@ -95,7 +89,6 @@ export function BuildPane({
   onOpenServer,
   activity,
   reach,
-  step: runStep = null,
 }: Props) {
   const [focus, setFocus] = useState<"Role" | "Instructions" | null>(null);
   const { phase } = activity;
@@ -152,12 +145,11 @@ export function BuildPane({
               <span className="u-field-ico">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"
                   strokeLinejoin="round" aria-hidden="true">
-                  <path d="M4 19.5A2.5 2.5 0 016.5 17H20" />
-                  <path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z" />
+                  <circle cx="12" cy="8" r="5" />
+                  <path d="M20 21a8 8 0 0 0-16 0" />
                 </svg>
               </span>
-              <span className="u-field-name">ROLE</span>
-              <Step n={step("role")} />
+              <span className="u-field-name">Role</span>
               <span className="u-field-hint">{step("role") !== null ? "say who it is" : "who it is"}</span>
               <span className="u-field-tools">
                 <ExpandButton onClick={() => setFocus("Role")} />
@@ -181,8 +173,7 @@ export function BuildPane({
                   <path d="M4 6h16M4 12h16M4 18h11" />
                 </svg>
               </span>
-              <span className="u-field-name">INSTRUCTIONS</span>
-              <Step n={step("instructions")} />
+              <span className="u-field-name">Instructions</span>
               <span className="u-field-hint">
                 {step("instructions") !== null ? "say how it should behave" : "how it should behave"}
               </span>
@@ -203,12 +194,7 @@ export function BuildPane({
       </div>
 
       <div className="u-rail">
-        {runStep !== null && (
-          <div className="u-rail-top live" title="How many steps it may take on its own">
-            step <b>{runStep.iteration}</b> of {runStep.maxIterations}
-          </div>
-        )}
-
+        <div className="u-rail-label">MODEL</div>
         <div className="u-rail-row">
           <span
             className={lead(phase === "thinking", phase === "from-model" || phase === "answering", activity.modelBroken)}
@@ -229,14 +215,24 @@ export function BuildPane({
                   : (findProvider(metadata.model?.provider ?? "")?.label ?? metadata.model?.provider ?? "")}
               </span>
             </span>
-            <Step n={step("model")} />
           </button>
         </div>
 
         <div className="u-rail-gap" />
-        <div className="u-rail-label">TOOLS</div>
+        <div className="u-rail-label">
+          TOOLS
+          {servers.length > 0 && (
+            <button className="u-node-add-sm" onClick={() => onOpenServer(null)} data-tip="Connect tools"
+              aria-label="Connect tools">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round"
+                aria-hidden="true">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+            </button>
+          )}
+        </div>
 
-        {servers.map((server, index) => {
+        {servers.map((server) => {
           const summary = serverSummary(server);
           const state = heard(server);
           return (
@@ -256,15 +252,6 @@ export function BuildPane({
                   </span>
                 </span>
               </button>
-              {index === 0 && (
-                <button className="u-node-add-sm" onClick={() => onOpenServer(null)} title="Connect tools"
-                  aria-label="Connect tools">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round"
-                    aria-hidden="true">
-                    <path d="M12 5v14M5 12h14" />
-                  </svg>
-                </button>
-              )}
             </div>
           );
         })}

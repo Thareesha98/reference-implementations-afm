@@ -56,6 +56,7 @@ export function LoadChecklist({ steps }: { steps: LoadStep[] }) {
 interface Props {
   status: AgentStatus;
   agentName: string;
+  iconUrl?: string;
   loadSteps: LoadStep[];
   notReady: string | null;
   onRetry: () => void;
@@ -72,7 +73,7 @@ export function rejectedKey(reason: string | null): boolean {
   return reason !== null && /\b(api[ _-]?key|invalid[ _-]?key)\b/i.test(reason);
 }
 
-export function EmptyState({ status, agentName, loadSteps, notReady, onRetry, description = "", role = "", onAsk, onReplaceKey }: Props) {
+export function EmptyState({ status, agentName, iconUrl = "", loadSteps, notReady, onRetry, description = "", role = "", onAsk, onReplaceKey }: Props) {
   if (status === "connecting" || status === "testing") {
     const label = status === "connecting" ? "Starting the agent" : "Testing the agent";
     return (
@@ -135,7 +136,7 @@ export function EmptyState({ status, agentName, loadSteps, notReady, onRetry, de
   const says = selfDescription(description, role);
   return (
     <div className="xc-col">
-        <ThreadHead name={agentName || "AFM Agent"} />
+        <ThreadHead name={agentName || "AFM Agent"} iconUrl={iconUrl} />
         {says !== "" && <p className="xc-say">{says}</p>}
         {onAsk !== undefined && (
           <div className="xc-starters">

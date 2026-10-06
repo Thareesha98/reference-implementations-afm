@@ -54,10 +54,8 @@ describe("the shipped Content-Security-Policy", () => {
     expect(directive("form-action")).toEqual(["'none'"]);
   });
 
-  it("still keeps img-src to no remote host", () => {
-    for (const value of directive("img-src")) {
-      expect(value.startsWith("https:")).toBe(false);
-    }
+  it("lets img-src load https images for agent icons, and nothing wider", () => {
+    expect(directive("img-src")).toEqual(["'self'", "data:", "blob:", "https:"]);
   });
 
   // This is the clickjacking control: without it, another site can frame the real app and

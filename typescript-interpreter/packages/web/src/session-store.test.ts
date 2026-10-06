@@ -23,42 +23,30 @@ const SOURCE = "---\nname: Demo\n---\n\n# Role\nr\n\n# Instructions\ni\n";
 const ORIGIN = "https://afm.example";
 
 describe("buildShareLink", () => {
-  it("inline + run only -> chat view, agent in the fragment", () => {
-    const link = buildShareLink(ORIGIN, "inline", "run", SOURCE, null)!;
+  it("inline -> the trust-screen view, agent in the fragment", () => {
+    const link = buildShareLink(ORIGIN, "inline", SOURCE, null)!;
     expect(link.startsWith(`${ORIGIN}/?view=chat#afm=`)).toBe(true);
-    expect(decodeInlineAfm(link.split("#afm=")[1]!)).toBe(SOURCE);
-  });
-
-  it("inline + edit -> workspace with the editor open", () => {
-    const link = buildShareLink(ORIGIN, "inline", "edit", SOURCE, null)!;
-    expect(link.startsWith(`${ORIGIN}/#afm=`)).toBe(true);
     expect(decodeInlineAfm(link.split("#afm=")[1]!)).toBe(SOURCE);
   });
 
   // A fragment is never sent to the server, so sharing an agent never uploads it. Putting the
   // source in the query string instead would hand it to whoever serves the page.
-  it("keeps the inline agent out of the query string either way", () => {
-    expect(buildShareLink(ORIGIN, "inline", "run", SOURCE, null)).not.toContain("?afm=");
-    expect(buildShareLink(ORIGIN, "inline", "edit", SOURCE, null)).not.toContain("?afm=");
+  it("keeps the inline agent out of the query string", () => {
+    expect(buildShareLink(ORIGIN, "inline", SOURCE, null)).not.toContain("?afm=");
   });
 
-  it("url + run only -> chat view with the encoded file url", () => {
-    const link = buildShareLink(ORIGIN, "url", "run", SOURCE, "https://gist.github.com/u/a/raw");
+  it("url -> the trust-screen view with the encoded file url", () => {
+    const link = buildShareLink(ORIGIN, "url", SOURCE, "https://gist.github.com/u/a/raw");
     expect(link).toBe(`${ORIGIN}/?view=chat&file=${encodeURIComponent("https://gist.github.com/u/a/raw")}`);
   });
 
-  it("url + edit -> workspace with the encoded file url", () => {
-    const link = buildShareLink(ORIGIN, "url", "edit", SOURCE, "https://gist.github.com/u/a/raw");
-    expect(link).toBe(`${ORIGIN}/?file=${encodeURIComponent("https://gist.github.com/u/a/raw")}`);
-  });
-
   it("returns null for the url method until a url is supplied", () => {
-    expect(buildShareLink(ORIGIN, "url", "run", SOURCE, null)).toBeNull();
-    expect(buildShareLink(ORIGIN, "url", "edit", SOURCE, "")).toBeNull();
+    expect(buildShareLink(ORIGIN, "url", SOURCE, null)).toBeNull();
+    expect(buildShareLink(ORIGIN, "url", SOURCE, "")).toBeNull();
   });
 
   it("never leaks the agent source into a url-method link", () => {
-    const link = buildShareLink(ORIGIN, "url", "run", SOURCE, "https://example.com/a.afm.md")!;
+    const link = buildShareLink(ORIGIN, "url", SOURCE, "https://example.com/a.afm.md")!;
     expect(link).not.toContain("afm=");
   });
 });

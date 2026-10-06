@@ -90,7 +90,7 @@ export function AgentPicker({ currentId, onPick, onNew }: Props) {
                   <button
                     className="u-ico"
                     aria-label={`Delete ${agent.name}`}
-                    title="Delete this agent"
+                    data-tip="Delete this agent"
                     onClick={() => {
                       // The conversation belongs to the agent: it goes with it and returns with it.
                       const conversations = history.entries.filter((entry) => entry.agentId === agent.id);

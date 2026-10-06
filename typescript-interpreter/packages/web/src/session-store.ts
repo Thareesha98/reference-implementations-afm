@@ -71,29 +71,25 @@ export function toSeededConversation(messages: UiMessage[]): ChatMessage[] {
 }
 
 export type ShareMethod = "inline" | "url";
-export type ShareAccess = "run" | "edit";
 
 /**
- * Share links over the one workspace route: "run" opens as a chat, "edit" with the file in front.
- * The inline form carries the agent in the fragment, which is never sent to a server; the url form
- * carries only the address of a hosted file.
+ * Share links over the one workspace route. Whoever opens one is shown what the file sets up and
+ * chooses to run it or open it in the builder. The inline form carries the agent in the fragment,
+ * which is never sent to a server; the url form carries only the address of a hosted file.
  */
 export function buildShareLink(
   origin: string,
   method: ShareMethod,
-  access: ShareAccess,
   agentSource: string,
   fileUrl: string | null,
 ): string | null {
-  const chatOnly = access === "run" ? "?view=chat" : "";
   if (method === "inline") {
-    return `${origin}/${chatOnly}#afm=${encodeInlineAfm(agentSource)}`;
+    return `${origin}/?view=chat#afm=${encodeInlineAfm(agentSource)}`;
   }
   if (fileUrl === null || fileUrl === "") {
     return null;
   }
-  const file = `file=${encodeURIComponent(fileUrl)}`;
-  return `${origin}/?${access === "run" ? `view=chat&${file}` : file}`;
+  return `${origin}/?view=chat&file=${encodeURIComponent(fileUrl)}`;
 }
 
 const CREDENTIAL_FIELDS = ["token", "password", "api_key", "client_secret", "refresh_token", "assertion", "signing_key"];

@@ -19,7 +19,7 @@
  * read.
  */
 export function markColour(name: string): string {
-  const palette = ["#3B41B4", "#0B6E4F", "#8E6210", "#7A50C8", "#AE3A2E", "#1E7A55"];
+  const palette = ["#2B2B2B", "#0B6E4F", "#8E6210", "#7A50C8", "#AE3A2E", "#1E7A55"];
   let hash = 0;
   for (const ch of name) hash = (hash * 31 + ch.charCodeAt(0)) % 997;
   return palette[hash % palette.length] as string;

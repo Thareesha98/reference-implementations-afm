@@ -14,18 +14,16 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { agentInitial } from "./starters";
+import { AgentAvatar } from "./AgentAvatar";
 
 /** The agent, once, at the top of the thread; alignment already says who is speaking. */
-export function ThreadHead({ name, small = false }: { name: string; small?: boolean }) {
+export function ThreadHead({ name, iconUrl = "" }: { name: string; iconUrl?: string }) {
   return (
     <div className="xc-hero">
       <div className="xc-glow" aria-hidden="true" />
       <div className="xc-row">
-        <span className={`xc-av ${small ? "sm" : ""}`} aria-hidden="true">
-          {agentInitial(name)}
-        </span>
-        <span className={small ? "xc-name-sm" : "xc-name"}>{name}</span>
+        <AgentAvatar className="xc-av" name={name} iconUrl={iconUrl} />
+        <span className="xc-name">{name}</span>
       </div>
     </div>
   );

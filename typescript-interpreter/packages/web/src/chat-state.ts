@@ -149,6 +149,7 @@ export type ChatAction =
   | { type: "agent-cleared" }
   | { type: "regenerate-start" }
   | { type: "edit-last" }
+  | { type: "rewind"; id: number }
   | { type: "server"; message: ServerMessage }
   | { type: "secret-dismissed" }
   | { type: "passkey-unlock-dismissed" }
@@ -260,6 +261,12 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       const index = lastUserIndex(state.messages);
       if (index === -1) return state;
       return { ...state, status: "streaming", error: null, messages: state.messages.slice(0, index + 1) };
+    }
+    case "rewind": {
+      const index = state.messages.findIndex((message) => message.id === action.id);
+      if (index === -1) return state;
+      const files = state.messages.slice(index).filter((message) => message.kind === "attachment");
+      return { ...state, messages: [...state.messages.slice(0, index), ...files] };
     }
     case "edit-last": {
       const index = lastUserIndex(state.messages);

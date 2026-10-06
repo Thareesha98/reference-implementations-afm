@@ -158,7 +158,7 @@ export class AgentSession {
     }
   }
 
-  async send(text: string, images?: ImageAttachment[]): Promise<void> {
+  async send(text: string, images?: ImageAttachment[], keep?: number): Promise<void> {
     const content: string | ContentPart[] =
       images !== undefined && images.length > 0
         ? [
@@ -166,10 +166,10 @@ export class AgentSession {
             ...images.map((image) => ({ type: "image" as const, data: image.data, mediaType: image.mediaType })),
           ]
         : text;
-    await this.sendContent(content);
+    await this.sendContent(content, keep);
   }
 
-  private async sendContent(content: string | ContentPart[]): Promise<void> {
+  private async sendContent(content: string | ContentPart[], keep?: number): Promise<void> {
     const loaded = this.loaded;
     const model = this.model;
     const tools = this.tools;
@@ -184,6 +184,8 @@ export class AgentSession {
       this.deps.emit({ type: "error", message: "This agent is still answering - wait for it to finish, or press Stop." });
       return;
     }
+
+    if (keep !== undefined) this.history = this.history.slice(0, this.userTurnStart(keep));
 
     const controller = new AbortController();
     this.controller = controller;
@@ -247,6 +249,11 @@ export class AgentSession {
       if (this.history[i]?.role === "user") return i;
     }
     return -1;
+  }
+
+  private userTurnStart(count: number): number {
+    const starts = this.history.flatMap((message, index) => (message.role === "user" ? [index] : []));
+    return starts[count] ?? this.history.length;
   }
 
   async regenerate(): Promise<void> {

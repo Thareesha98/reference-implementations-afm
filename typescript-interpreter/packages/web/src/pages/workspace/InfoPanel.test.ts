@@ -17,7 +17,8 @@
 
 import { describe, expect, it } from "vitest";
 import type { AgentMetadata } from "@afm/engine";
-import { aboutRows } from "./InfoPanel";
+import { buildableAgent } from "../../agent-validation";
+import { aboutRows, applyAbout, startingDraft, versionError } from "./InfoPanel";
 
 const value = (rows: ReturnType<typeof aboutRows>, label: string) => rows.find((row) => row.label === label)?.value;
 
@@ -49,5 +50,97 @@ describe("aboutRows", () => {
   it("counts blank or empty details as not set", () => {
     const metadata = { name: "A", version: "  ", authors: [], license: "" } as AgentMetadata;
     expect(aboutRows(metadata).map((row) => row.value)).toEqual([null, null, null, null]);
+  });
+});
+
+describe("editing the details", () => {
+  const FILE = `---
+name: Paper Navigator
+description: Reads papers
+version: "1.0.0"
+authors:
+  - Ada
+provider:
+  name: Example Co
+  url: https://example.com
+license: MIT
+model:
+  provider: openai
+  name: gpt-4o
+---
+
+# Role
+r
+`;
+
+  function edit(change: Partial<ReturnType<typeof startingDraft>>, providerUrl = "https://example.com") {
+    const metadata = {
+      name: "Paper Navigator",
+      description: "Reads papers",
+      version: "1.0.0",
+      authors: ["Ada"],
+      provider: { name: "Example Co", url: providerUrl },
+      license: "MIT",
+    } as AgentMetadata;
+    const start = startingDraft(metadata);
+    return applyAbout(FILE, start, { ...start, ...change }, providerUrl);
+  }
+
+  it("starts from what the file says, blank where it says nothing", () => {
+    expect(startingDraft(null)).toEqual({
+      name: "",
+      description: "",
+      icon: "",
+      version: "",
+      authors: "",
+      provider: "",
+      license: "",
+    });
+    expect(startingDraft({ name: "A", icon_url: "https://x.example/i.png", version: "2.0.0" } as AgentMetadata)).toMatchObject({
+      name: "A",
+      icon: "https://x.example/i.png",
+      version: "2.0.0",
+    });
+  });
+
+  it("leaves the file untouched when nothing was edited", () => {
+    expect(edit({})).toBe(FILE);
+  });
+
+  it("writes the name, icon and version under the keys the spec defines", () => {
+    const next = edit({ name: "Paper Guide", icon: "https://x.example/i.png", version: "1.1.0" });
+    const read = buildableAgent(next);
+    expect(read.ok && read.metadata.name).toBe("Paper Guide");
+    expect(read.ok && read.metadata.icon_url).toBe("https://x.example/i.png");
+    expect(read.ok && read.metadata.version).toBe("1.1.0");
+    expect(next).toContain('version: "1.1.0"');
+  });
+
+  it("changes one detail without touching the others", () => {
+    const next = edit({ license: "Apache-2.0" });
+    expect(next).toBe(FILE.replace("license: MIT", "license: Apache-2.0"));
+  });
+
+  it("writes the authors as a list and keeps the provider's link when the name changes", () => {
+    const next = edit({ authors: "Ada, Grace , ", provider: "Other Co" });
+    const read = buildableAgent(next);
+    expect(read.ok && read.metadata.authors).toEqual(["Ada", "Grace"]);
+    expect(read.ok && read.metadata.provider).toEqual({ name: "Other Co", url: "https://example.com" });
+  });
+
+  it("removes a detail that was cleared", () => {
+    const next = edit({ icon: "", license: "" });
+    expect(next).not.toContain("icon_url");
+    expect(next).not.toContain("license");
+  });
+});
+
+describe("versionError", () => {
+  it("accepts a blank version and semantic versions", () => {
+    for (const ok of ["", "  ", "0.0.0", "1.2.3", "1.0.0-beta.1", "2.0.0+build.5"]) expect(versionError(ok)).toBeNull();
+  });
+
+  it("says what shape is expected otherwise", () => {
+    for (const bad of ["1", "1.0", "v1.0.0", "one", "1.0.0.0"]) expect(versionError(bad)).toMatch(/MAJOR\.MINOR\.PATCH/);
   });
 });

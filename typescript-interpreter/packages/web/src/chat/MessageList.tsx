@@ -19,7 +19,6 @@ import type { UiMessage, AgentStatus } from "../chat-state";
 import type { LoadStep } from "../protocol";
 import { Message } from "./Message";
 import { ToolFootnote } from "./ToolFootnote";
-import { ThreadHead } from "./ThreadHead";
 import { EmptyState } from "./EmptyState";
 import { attachedFilesOf, attachedFileKey, attachmentBadge, describeAttachment } from "./attachment";
 
@@ -28,6 +27,7 @@ interface Props {
   streaming: boolean;
   status: AgentStatus;
   agentName: string;
+  iconUrl?: string;
   loadSteps: LoadStep[];
   notReady: string | null;
   onRetry: () => void;
@@ -38,6 +38,8 @@ interface Props {
   /** Only offered before the conversation starts. */
   onAsk?: (question: string) => void;
   onReplaceKey?: () => void;
+  serverOf?: (toolName: string) => string | undefined;
+  onEdit?: (messageId: number, text: string) => void;
 }
 
 type ToolMessage = Extract<UiMessage, { kind: "tool" }>;
@@ -68,8 +70,8 @@ function toolsBeforeAnswers(messages: UiMessage[]): Map<number, ToolMessage[]> {
 }
 
 export function MessageList(props: Props) {
-  const { messages, streaming, status, agentName, loadSteps, notReady, onRetry, onRegenerate, onDetachFile,
-    description, role, onAsk, onReplaceKey } = props;
+  const { messages, streaming, status, agentName, iconUrl = "", loadSteps, notReady, onRetry, onRegenerate, onDetachFile,
+    description, role, onAsk, onReplaceKey, serverOf, onEdit } = props;
   const endRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [atBottom, setAtBottom] = useState(true);
@@ -90,6 +92,7 @@ export function MessageList(props: Props) {
         <EmptyState
           status={status}
           agentName={agentName}
+          iconUrl={iconUrl}
           loadSteps={loadSteps}
           notReady={notReady}
           onRetry={onRetry}
@@ -118,9 +121,6 @@ export function MessageList(props: Props) {
   return (
     <div className="xc-wrap" ref={scrollRef} onScroll={onScroll}>
       <div className="xc-col">
-        <ThreadHead name={agentName} small />
-        <div className="xc-rule" style={{ marginTop: "20px" }} aria-hidden="true" />
-
         <div className="xc-thread">
           {messages.map((message, index) => {
             if (message.kind === "tool") return null;
@@ -141,7 +141,7 @@ export function MessageList(props: Props) {
                           className="attachment-remove"
                           onClick={() => onDetachFile?.(message.id, attachedFileKey(file))}
                           aria-label={`Remove ${file.name}`}
-                          title="Remove this file"
+                          data-tip="Remove this file"
                         >
                           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
                             <path d="M18 6 6 18M6 6l12 12" />
@@ -167,11 +167,12 @@ export function MessageList(props: Props) {
                 message={message}
                 streaming={streaming && index === lastIndex && message.kind === "assistant"}
                 onRegenerate={canAct && index === lastAssistant ? onRegenerate : undefined}
+                onEdit={canAct && onEdit !== undefined ? (text) => onEdit(message.id, text) : undefined}
                 footnote={
                   did === undefined ? undefined : (
                     <>
                       {did.map((tool) => (
-                        <ToolFootnote key={tool.id} tool={tool} />
+                        <ToolFootnote key={tool.id} tool={tool} server={serverOf?.(tool.name)} />
                       ))}
                     </>
                   )
@@ -182,7 +183,7 @@ export function MessageList(props: Props) {
 
           {openTools.map((tool) => (
             <div className="xc-turn" key={tool.id}>
-              <ToolFootnote tool={tool} />
+              <ToolFootnote tool={tool} server={serverOf?.(tool.name)} />
             </div>
           ))}
 

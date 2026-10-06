@@ -45,19 +45,6 @@ export interface ReadinessInput {
   connectedUrls: ReadonlySet<string>;
 }
 
-function toolCount(metadata: AgentMetadata | null): number | null {
-  const servers = metadata?.tools?.mcp ?? [];
-  if (servers.length === 0) return 0;
-  let total = 0;
-  for (const server of servers) {
-    const allowed = server.tool_filter?.allow;
-    // One server without a chosen tool list makes the count a guess, so no number is offered.
-    if (allowed === undefined) return null;
-    total += allowed.length;
-  }
-  return total;
-}
-
 /**
  * One sentence saying whether the agent can run and, if not, what is missing.
  *
@@ -126,9 +113,7 @@ export function readiness(input: ReadinessInput): Readiness {
     return { tone: "ok", lead: "Ready - will ask which tools to allow" };
   }
 
-  const tools = toolCount(metadata);
-  if (tools === null || tools === 0) return { tone: "ok", lead: "Ready" };
-  return { tone: "ok", lead: "Ready - ", subject: `${tools} tool${tools === 1 ? "" : "s"}` };
+  return { tone: "ok", lead: "Ready" };
 }
 
 /**

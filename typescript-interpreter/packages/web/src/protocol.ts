@@ -36,7 +36,7 @@ export type ClientMessage =
       permissionSeed?: string[];
       loadId: string;
     }
-  | { type: "send"; text: string; images?: ImageAttachment[] }
+  | { type: "send"; text: string; images?: ImageAttachment[]; keep?: number }
   | { type: "attach-files"; files: { name: string; path: string; text: string; pages?: number }[] }
   | { type: "detach-file"; path: string }
   | { type: "cancel" }

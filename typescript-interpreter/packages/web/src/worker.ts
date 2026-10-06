@@ -283,7 +283,7 @@ scope.addEventListener("message", (event) => {
       attachedFiles.delete(message.path);
       break;
     case "send":
-      void session.send(message.text, message.images);
+      void session.send(message.text, message.images, message.keep);
       break;
     case "regenerate":
       void session.regenerate();

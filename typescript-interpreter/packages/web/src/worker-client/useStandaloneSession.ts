@@ -189,6 +189,15 @@ export function useStandaloneSession(hooks: SessionHooks = {}) {
     post({ type: "regenerate" });
   }
 
+  function editMessage(id: number, text: string): void {
+    const original = state.messages.find((message) => message.id === id);
+    const images = original?.kind === "user" ? original.images : undefined;
+    const keep = state.messages.filter((message) => message.kind === "user" && message.id < id).length;
+    dispatch({ type: "rewind", id });
+    dispatch({ type: "user-message", text, images });
+    post({ type: "send", text, images, keep });
+  }
+
   /** Puts the pane back to "no agent yet" when the editor moves to a different agent. */
   function clearAgent(): void {
     lastLoadIdRef.current = "";
@@ -329,6 +338,7 @@ export function useStandaloneSession(hooks: SessionHooks = {}) {
     detachFile,
     clearAgent,
     regenerate,
+    editMessage,
     submitSecret,
     saveSecret,
     storeMcpSecret,

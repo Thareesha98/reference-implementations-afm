@@ -81,6 +81,16 @@ describe("chatReducer", () => {
     ]);
   });
 
+  it("rewinds to an earlier message, keeping the files attached after it", () => {
+    let state = chatReducer(initialChatState, { type: "user-message", text: "one" });
+    state = chatReducer(state, { type: "server", message: { type: "text-delta", text: "answer" } });
+    state = chatReducer(state, { type: "user-message", text: "two" });
+    state = chatReducer(state, { type: "files-attached", files: [{ name: "a.pdf", path: "a.pdf", chars: 3 }] });
+    const second = state.messages.find((message) => message.kind === "user" && message.text === "two");
+    state = chatReducer(state, { type: "rewind", id: second?.id ?? -1 });
+    expect(state.messages.map((message) => message.kind)).toEqual(["user", "assistant", "attachment"]);
+  });
+
   it("tracks a secret request and clears it on dismiss", () => {
     let state = chatReducer(initialChatState, {
       type: "server",

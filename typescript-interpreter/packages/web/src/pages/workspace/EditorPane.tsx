@@ -40,7 +40,6 @@ interface Props extends EditableProps {
   /* The panels these open live in the side window; the stage only says which one. */
   onOpenModel: () => void;
   onOpenServer: (name: string | null) => void;
-  step?: { iteration: number; maxIterations: number } | null;
   /** Bumped when something outside asks to see the file itself, such as a problem in it. */
   showRaw?: number;
   onOpenPanel?: (panel: "model" | "tools") => void;
@@ -56,7 +55,7 @@ function agentFilename(content: string): string | undefined {
   return `${slug === "" ? "agent" : slug}.afm.md`;
 }
 
-export function EditorPane({ content, onChange, activity, reach, onOpenModel, onOpenServer, step, showRaw = 0, onOpenPanel }: Props) {
+export function EditorPane({ content, onChange, activity, reach, onOpenModel, onOpenServer, showRaw = 0, onOpenPanel }: Props) {
   const [mode, setMode] = useState<EditorMode>("simple");
   // Not on mount: only a later request switches the view, so opening an agent with a problem still
   // starts on the diagram.
@@ -99,7 +98,6 @@ export function EditorPane({ content, onChange, activity, reach, onOpenModel, on
           reach={reach}
           onOpenModel={onOpenModel}
           onOpenServer={onOpenServer}
-          step={step}
         />
       )}
     </>
@@ -147,7 +145,6 @@ function SimpleEditor({
   reach,
   onOpenModel,
   onOpenServer,
-  step,
   onFix,
 }: EditableProps & {
   buildable: BuildableAgent;
@@ -156,7 +153,6 @@ function SimpleEditor({
   reach: ServerReach;
   onOpenModel: () => void;
   onOpenServer: (name: string | null) => void;
-  step?: { iteration: number; maxIterations: number } | null;
   onFix: (target: import("./issue-words").IssueTarget) => void;
 }) {
   if (!buildable.ok) {
@@ -189,7 +185,6 @@ function SimpleEditor({
           onOpenServer={onOpenServer}
           activity={activity}
           reach={reach}
-        step={step}
       />
     </div>
   );

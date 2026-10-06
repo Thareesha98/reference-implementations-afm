@@ -52,7 +52,7 @@ function ServerRow({
           className="u-info-btn"
           onClick={() => onInfo(entry)}
           aria-label={`About ${entry.title}`}
-          title={`About ${entry.title}`}
+          data-tip={`About ${entry.title}`}
         >
           i
         </button>

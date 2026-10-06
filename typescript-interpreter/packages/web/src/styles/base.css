@@ -25,7 +25,7 @@ button {
 
 /* Keyboard focus had no visible state anywhere. :where() keeps this at zero specificity so any
    component that wants its own treatment still wins without needing !important. */
-:where(button, a, [role="button"]):focus-visible {
+:where(button, a, [role="button"], input, textarea, select):focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }

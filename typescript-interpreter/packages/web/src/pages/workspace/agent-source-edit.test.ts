@@ -15,8 +15,8 @@
 // under the License.
 
 import { describe, it, expect } from "vitest";
-import { getModelField, setModelField, getModelApiKey, setModelApiKey, setServerToolFilter, agentBrief, envSecretName, getFrontmatterScalar, addMcpServer, removeMcpServer, getSection, setSection } from "./agent-source-edit";
-import { previewAgent } from "../../agent-validation";
+import { getModelField, setModelField, getModelApiKey, setModelApiKey, setServerToolFilter, agentBrief, envSecretName, getFrontmatterScalar, addMcpServer, removeMcpServer, getSection, setSection, setFrontmatterValue } from "./agent-source-edit";
+import { previewAgent, buildableAgent } from "../../agent-validation";
 
 const FULL = `---
 name: Tester
@@ -511,5 +511,81 @@ describe("setting the model key", () => {
     const next = setModelApiKey(withAuth, "${env:OPENAI_API_KEY}");
     expect(getModelApiKey(next)).toBe("${env:OPENAI_API_KEY}");
     expect(next.match(/authentication:/g)).toHaveLength(1);
+  });
+});
+
+describe("setFrontmatterValue", () => {
+  const ABOUT = `---
+name: Tester
+description: Old words
+authors:
+- Ada
+- Lin
+
+provider:
+  name: Example Co
+  url: https://example.com
+license: MIT
+model:
+  provider: openai
+  name: gpt-4o
+---
+
+# Role
+r
+`;
+
+  it("replaces one line and leaves the rest of the file alone", () => {
+    const next = setFrontmatterValue(ABOUT, "license", "Apache-2.0");
+    expect(next).toBe(ABOUT.replace("license: MIT", "license: Apache-2.0"));
+  });
+
+  it("replaces a whole list, including items written at the key's own indent", () => {
+    const next = setFrontmatterValue(ABOUT, "authors", ["Grace"]);
+    expect(next).toContain("authors:\n  - Grace\n\nprovider:");
+    expect(next).not.toContain("Ada");
+    const read = buildableAgent(next);
+    expect(read.ok && read.metadata.authors).toEqual(["Grace"]);
+  });
+
+  it("rewrites a mapping without touching the model's own provider", () => {
+    const next = setFrontmatterValue(ABOUT, "provider", { name: "Other Co", url: "https://example.com" });
+    expect(next).toContain('provider:\n  name: Other Co\n  url: "https://example.com"\nlicense: MIT');
+    expect(getModelField(next, "provider")).toBe("openai");
+  });
+
+  it("removes the key when the value is empty", () => {
+    expect(setFrontmatterValue(ABOUT, "description", "")).not.toContain("description");
+    expect(setFrontmatterValue(ABOUT, "authors", [])).not.toContain("authors");
+    expect(setFrontmatterValue(ABOUT, "provider", { name: "", url: "" })).not.toContain("Example Co");
+  });
+
+  it("adds a missing key below the opening fence", () => {
+    const next = setFrontmatterValue(FULL, "description", "Helps people");
+    expect(next.startsWith("---\ndescription: Helps people\nname: Tester")).toBe(true);
+  });
+
+  it("replaces a multi-line value without leaving pieces of it behind", () => {
+    const source = ABOUT.replace("description: Old words", "description: >\n  first\n  second");
+    const next = setFrontmatterValue(source, "description", "New");
+    expect(next).toContain("description: New\nauthors:");
+    expect(next).not.toContain("second");
+  });
+
+  it("quotes what plain YAML would misread, so it reads back unchanged", () => {
+    const text = "Line one\nline: two # three";
+    const next = setFrontmatterValue(ABOUT, "description", text);
+    const result = buildableAgent(next);
+    expect(result.ok && result.metadata.description).toBe(text);
+    const yes = buildableAgent(setFrontmatterValue(ABOUT, "license", "no"));
+    expect(yes.ok && yes.metadata.license).toBe("no");
+  });
+
+  it("keeps the body byte-identical", () => {
+    expect(setFrontmatterValue(ABOUT, "description", "x").endsWith("---\n\n# Role\nr\n")).toBe(true);
+  });
+
+  it("does nothing to a file with no frontmatter", () => {
+    expect(setFrontmatterValue("# Role\nr\n", "license", "MIT")).toBe("# Role\nr\n");
   });
 });

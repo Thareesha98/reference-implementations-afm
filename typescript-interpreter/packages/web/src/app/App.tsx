@@ -23,6 +23,7 @@ import { AgentsLibraryProvider } from "../agents/AgentsLibraryContext";
 import { HistoryProvider } from "../history/HistoryContext";
 import { PermissionsLedgerProvider } from "../permissions/PermissionsLedgerContext";
 import { WorkspacePage } from "../pages/workspace/WorkspacePage";
+import { Tip } from "./Tip";
 
 // The top strip acts on the agent being viewed; it is not page navigation.
 function RootLayout() {
@@ -31,6 +32,7 @@ function RootLayout() {
       <div className="root-content">
         <Outlet />
       </div>
+      <Tip />
     </div>
   );
 }
