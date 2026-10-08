@@ -96,8 +96,8 @@ export function TrustScreen({ metadata, source, savedSecrets, onRun, onOpenBuild
         </div>
 
         <p className="u-hint">
-          Tools on other servers ask before they run, unless you have allowed them before. A key you enter stays in
-          memory for this tab unless you choose to save it on this device.
+          Tools on other servers ask before they run, unless you have allowed them in this tab. A key you enter stays
+          in memory for this tab unless you choose to save it on this device.
         </p>
         <div className="u-trust-actions">
           <button className="u-btn ghost" onClick={onOpenBuilder}>

@@ -289,8 +289,8 @@ export function useStandaloneSession(hooks: SessionHooks = {}) {
     const request = state.pendingPermission;
     dispatch({ type: "permission-dismissed" });
     post({ type: "permission-response", id, decision: allow ? "allow" : "deny", remember });
-    // The worker only remembers while it lives; recording it here makes "don't ask again" survive a
-    // reload or restart.
+    // The worker forgets on every load; recording it here keeps "don't ask again" across loads in
+    // this tab.
     if (remember && request !== null && request.id === id) {
       hooksRef.current.onRememberPermission?.(request, allow);
     }

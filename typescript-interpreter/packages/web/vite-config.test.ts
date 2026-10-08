@@ -58,10 +58,11 @@ describe("the shipped Content-Security-Policy", () => {
     expect(directive("img-src")).toEqual(["'self'", "data:", "blob:", "https:"]);
   });
 
-  // This is the clickjacking control: without it, another site can frame the real app and
-  // overlay fake controls on top of a real "send my key" / "allow tool" button. Nothing in this
-  // app frames itself (no <iframe> anywhere in src/), so there is no reason for any other origin
-  // to be allowed to frame it either.
+  // The header half of the clickjacking control, for hosts that send headers (Azure Static Web
+  // Apps reads this file). GitHub Pages sends none of them, so frame-guard.ts is what keeps
+  // another site from framing the real app and overlaying fake controls on a "send my key" /
+  // "allow tool" button there. Nothing in this app frames itself (no <iframe> anywhere in src/),
+  // so there is no reason for any other origin to be allowed to frame it either.
   it("refuses to be framed by anyone", () => {
     expect(directive("frame-ancestors")).toEqual(["'none'"]);
     expect(config.globalHeaders["X-Frame-Options"]).toBe("DENY");
@@ -76,6 +77,13 @@ describe("the shipped Content-Security-Policy", () => {
     expect(meta).not.toContain("frame-ancestors");
     expect(meta).toContain("connect-src");
     expect(meta).toContain("script-src 'self'");
+  });
+});
+
+describe("index.html", () => {
+  it("sends no referrer with anything the page requests", () => {
+    const html = readFileSync(fileURLToPath(new URL("./index.html", import.meta.url)), "utf8");
+    expect(html).toContain('<meta name="referrer" content="no-referrer" />');
   });
 });
 

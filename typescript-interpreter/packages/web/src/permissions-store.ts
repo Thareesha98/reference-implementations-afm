@@ -14,49 +14,31 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { loadJsonArray, saveJson } from "./local-json-store";
-
 export type PermissionRule = "auto-allow" | "always-ask";
 
 export interface PermissionEntry {
   agentId: string;
   toolName: string;
-  // Absent on entries saved before permissions were scoped to a server. They are ignored, not
-  // migrated: guessing the server would re-grant a decision the user never made for it.
   serverId?: string;
   rule: PermissionRule;
   risk: "read" | "write";
   updatedAt: number;
 }
 
-const PERMISSIONS_KEY = "afm.permissions.v1";
-
-export function loadPermissions(): PermissionEntry[] {
-  return loadJsonArray<PermissionEntry>(PERMISSIONS_KEY);
-}
-
-// A failed write must not fail the call, so the result of saveJson is ignored.
-function persist(entries: PermissionEntry[]): PermissionEntry[] {
-  saveJson(PERMISSIONS_KEY, entries);
-  return entries;
-}
-
 export function setPermission(
+  entries: PermissionEntry[],
   agentId: string,
   toolName: string,
   rule: PermissionRule,
   risk: "read" | "write",
   serverId?: string,
 ): PermissionEntry[] {
-  const rest = loadPermissions().filter(
-    (e) => !(e.agentId === agentId && e.toolName === toolName && e.serverId === serverId),
-  );
-  return persist([...rest, { agentId, toolName, serverId, rule, risk, updatedAt: Date.now() }]);
+  const rest = entries.filter((e) => !(e.agentId === agentId && e.toolName === toolName && e.serverId === serverId));
+  return [...rest, { agentId, toolName, serverId, rule, risk, updatedAt: Date.now() }];
 }
 
-export function resetPermissions(agentId?: string): PermissionEntry[] {
-  if (agentId === undefined) return persist([]);
-  return persist(loadPermissions().filter((e) => e.agentId !== agentId));
+export function resetPermissions(entries: PermissionEntry[], agentId?: string): PermissionEntry[] {
+  return agentId === undefined ? [] : entries.filter((e) => e.agentId !== agentId);
 }
 
 // A tool unticked on a server is no longer offered, but its grant stays on file and would apply

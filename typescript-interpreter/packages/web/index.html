@@ -5,6 +5,7 @@
     <!-- viewport-fit=cover lets env(safe-area-inset-*) report real values, which the composer
          and other bottom-docked controls use to clear the home indicator on notched phones. -->
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="referrer" content="no-referrer" />
     <title>AFM Browser Runtime</title>
     <!--
       PRODUCTION headers (the real values, kept here so this comment can't drift from
@@ -30,12 +31,13 @@
       frame-ancestors/X-Frame-Options govern who may put THIS app in a frame - unrelated to
       the (currently removed) <afm-agent> widget, which was us framing someone else's page's
       content in an iframe we controlled, the opposite direction. They're 'none'/DENY because
-      nothing has ever needed to frame this app, which is also what stops clickjacking: an
-      attacker page can't overlay fake controls on a real one it isn't allowed to render. When
-      embed returns, loosening this to 'self' (or an explicit partner list) is a deliberate
-      decision to make then, not an oversight to fix - vite.config.ts's cspForMetaTag() also
-      has to keep stripping frame-ancestors from the <meta> copy regardless of its value, since
-      browsers ignore that directive there no matter what it says.
+      nothing has ever needed to frame this app, which is what stops clickjacking where the host
+      sends headers. GitHub Pages sends none, so src/frame-guard.ts keeps the app from rendering
+      in any frame. When embed returns, loosening this to 'self' (or an explicit partner list) is
+      a deliberate decision to make then, not an oversight to fix - frame-guard.ts has to change
+      with it, and vite.config.ts's cspForMetaTag() also has to keep stripping frame-ancestors
+      from the <meta> copy regardless of its value, since browsers ignore that directive there no
+      matter what it says.
     -->
   </head>
   <body>

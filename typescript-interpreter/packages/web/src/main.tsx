@@ -16,6 +16,7 @@
 
 import { createRoot } from "react-dom/client";
 import { RouterRoot } from "./app/App";
+import { isFramed } from "./frame-guard";
 import { clearLegacyRefreshTokens, relayOAuthCallbackIfPopup } from "./oauth-signin";
 // The two faces the interface design is set in, shipped with the build rather than fetched from
 // Google at runtime.
@@ -29,7 +30,7 @@ import "@fontsource/ibm-plex-mono/500.css";
 import "@fontsource/ibm-plex-mono/600.css";
 import "./styles/index.css";
 
-if (!relayOAuthCallbackIfPopup()) {
+if (!isFramed() && !relayOAuthCallbackIfPopup()) {
   clearLegacyRefreshTokens();
 
   const container = document.getElementById("root");

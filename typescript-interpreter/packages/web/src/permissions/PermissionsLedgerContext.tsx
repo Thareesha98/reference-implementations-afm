@@ -16,7 +16,7 @@
 
 import { createContext, useContext, useState } from "react";
 import type { ReactNode } from "react";
-import { loadPermissions, setPermission, resetPermissions } from "../permissions-store";
+import { setPermission, resetPermissions } from "../permissions-store";
 import type { PermissionEntry, PermissionRule } from "../permissions-store";
 
 interface PermissionsLedgerValue {
@@ -29,13 +29,14 @@ interface PermissionsLedgerValue {
 const PermissionsLedgerContext = createContext<PermissionsLedgerValue | null>(null);
 
 export function PermissionsLedgerProvider({ children }: { children: ReactNode }) {
-  const [entries, setEntries] = useState<PermissionEntry[]>(() => loadPermissions());
+  const [entries, setEntries] = useState<PermissionEntry[]>([]);
 
   const value: PermissionsLedgerValue = {
     entries,
     forAgent: (agentId) => entries.filter((e) => e.agentId === agentId),
-    set: (agentId, toolName, rule, risk, serverId) => setEntries(setPermission(agentId, toolName, rule, risk, serverId)),
-    reset: (agentId) => setEntries(resetPermissions(agentId)),
+    set: (agentId, toolName, rule, risk, serverId) =>
+      setEntries((current) => setPermission(current, agentId, toolName, rule, risk, serverId)),
+    reset: (agentId) => setEntries((current) => resetPermissions(current, agentId)),
   };
 
   return <PermissionsLedgerContext.Provider value={value}>{children}</PermissionsLedgerContext.Provider>;

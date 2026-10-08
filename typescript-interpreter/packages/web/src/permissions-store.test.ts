@@ -15,7 +15,9 @@
 // under the License.
 
 import { describe, it, expect } from "vitest";
-import { grantsToRevoke, permissionScopeFor } from "./permissions-store";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { grantsToRevoke, permissionScopeFor, resetPermissions, setPermission } from "./permissions-store";
 import type { PermissionEntry } from "./permissions-store";
 
 const SOURCE = "---\nname: Demo\n---\n\n# Role\nr\n\n# Instructions\ni\n";
@@ -68,5 +70,60 @@ describe("permissionScopeFor", () => {
   it("falls back to the text for an agent that was never saved", () => {
     expect(permissionScopeFor(null, SOURCE)).toMatch(/^content:/);
     expect(permissionScopeFor(null, SOURCE)).not.toBe(permissionScopeFor(null, SOURCE + "x"));
+  });
+});
+
+describe("setPermission", () => {
+  const A = "https://a.example/mcp";
+  const B = "https://b.example/mcp";
+
+  it("adds the grant to what is already there", () => {
+    const first = setPermission([], "agent:1", "search", "auto-allow", "read", A);
+    const both = setPermission(first, "agent:1", "fetch", "auto-allow", "read", A);
+    expect(both.map((entry) => entry.toolName)).toEqual(["search", "fetch"]);
+  });
+
+  it("replaces the answer for the same agent, tool and server", () => {
+    const granted = setPermission([], "agent:1", "search", "auto-allow", "read", A);
+    const taken = setPermission(granted, "agent:1", "search", "always-ask", "read", A);
+    expect(taken).toHaveLength(1);
+    expect(taken[0]?.rule).toBe("always-ask");
+  });
+
+  it("keeps the same tool apart across servers and agents", () => {
+    let entries = setPermission([], "agent:1", "search", "auto-allow", "read", A);
+    entries = setPermission(entries, "agent:1", "search", "auto-allow", "read", B);
+    entries = setPermission(entries, "agent:2", "search", "auto-allow", "read", A);
+    expect(entries).toHaveLength(3);
+  });
+
+  it("leaves the list it was given alone", () => {
+    const before: PermissionEntry[] = [];
+    setPermission(before, "agent:1", "search", "auto-allow", "read", A);
+    expect(before).toEqual([]);
+  });
+});
+
+describe("resetPermissions", () => {
+  const entries = [
+    ...setPermission([], "agent:1", "search", "auto-allow", "read"),
+    ...setPermission([], "agent:2", "search", "auto-allow", "read"),
+  ];
+
+  it("forgets one agent and keeps the rest", () => {
+    expect(resetPermissions(entries, "agent:1").map((entry) => entry.agentId)).toEqual(["agent:2"]);
+  });
+
+  it("forgets everything when no agent is named", () => {
+    expect(resetPermissions(entries)).toEqual([]);
+  });
+});
+
+describe("the grants", () => {
+  it("never reach a browser store", () => {
+    for (const file of ["permissions-store.ts", "permissions/PermissionsLedgerContext.tsx"]) {
+      const source = readFileSync(fileURLToPath(new URL(`./${file}`, import.meta.url)), "utf8");
+      expect(source).not.toMatch(/localStorage|sessionStorage|indexedDB|local-json-store/);
+    }
   });
 });
