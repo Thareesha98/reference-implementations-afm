@@ -105,6 +105,15 @@ describe("passkey vault", () => {
     expect(posted.find((m) => m.type === "unlock-secret" && m.name === "K")).toBeUndefined();
   });
 
+  it("answers the worker's request last, once every other key has been sent", async () => {
+    put("K1", A, "v1");
+    put("K2", A, "v2");
+    const posted: { type: string; name?: string }[] = [];
+    await unlockAll((message) => posted.push(message), { id: "r1", name: "K1", credentialId: A, salt: new Uint8Array([1]) });
+    expect(posted.map((m) => m.type)).toEqual(["unlock-secret", "passkey-unlock-response"]);
+    expect(posted[0]!.name).toBe("K2");
+  });
+
   it("seal reuses the known credential", async () => {
     h.known.current = A;
     const posted: { type: string; name?: string; credentialId?: Uint8Array }[] = [];

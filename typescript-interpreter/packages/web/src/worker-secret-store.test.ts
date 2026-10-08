@@ -21,10 +21,15 @@ import { encryptString } from "./passkey/crypto";
 import type { StoredSecret } from "./passkey/store";
 
 const disk = new Map<string, StoredSecret>();
+// A name here is not readable from disk until its promise settles.
+const slowReads = new Map<string, Promise<void>>();
 
 vi.mock("./passkey/store", () => ({
   saveBlob: async (name: string, blob: StoredSecret) => void disk.set(name, blob),
-  loadBlob: async (name: string) => disk.get(name) ?? null,
+  loadBlob: async (name: string) => {
+    await slowReads.get(name);
+    return disk.get(name) ?? null;
+  },
   removeBlob: async (name: string) => void disk.delete(name),
   listNames: async () => [...disk.keys()],
 }));
@@ -55,7 +60,10 @@ function setup(answerUnlocksWith?: CryptoKey | null) {
 }
 
 describe("the worker secret store", () => {
-  beforeEach(() => disk.clear());
+  beforeEach(() => {
+    disk.clear();
+    slowReads.clear();
+  });
   afterEach(() => vi.useRealTimers());
 
   describe("values held in memory", () => {
@@ -305,6 +313,30 @@ describe("the worker secret store", () => {
       store.acceptUnlock("API_KEY", key);
       await vi.waitFor(() => expect(lastNames()).toEqual(["API_KEY"]));
       expect(await store.memoryPort.resolve(ref("API_KEY"))).toEqual({ status: "resolved", value: "sk-1" });
+    });
+
+    it("lets keys sent ahead of the answer finish opening, so one unlock covers every sealed name", async () => {
+      const modelKey = await newKey();
+      const refreshKey = await newKey();
+      const { store, messages } = setup();
+      await sealedOnDisk("API_KEY", "sk-1", modelKey);
+      await sealedOnDisk("afm.oauth.x.refresh", "R0", refreshKey);
+      let release!: () => void;
+      slowReads.set("afm.oauth.x.refresh", new Promise<void>((resolve) => (release = resolve)));
+
+      const resolved = store.passkeyPort.resolve(ref("API_KEY"));
+      await vi.waitFor(() => expect(messages.some((m) => m.type === "passkey-unlock-request")).toBe(true));
+      const request = messages.find((m) => m.type === "passkey-unlock-request") as { id: string };
+      store.acceptUnlock("afm.oauth.x.refresh", refreshKey);
+      store.resolveUnlock(request.id, modelKey);
+      setTimeout(release);
+
+      expect(await resolved).toEqual({ status: "resolved", value: "sk-1" });
+      // Not awaited: asking again would wait for an answer that never comes.
+      void store.loadSealedRefresh("afm.oauth.x.refresh");
+
+      await vi.waitFor(() => expect(store.refreshStore.get("afm.oauth.x.refresh")).toBe("R0"));
+      expect(messages.filter((m) => m.type === "passkey-unlock-request")).toHaveLength(1);
     });
   });
 

@@ -68,6 +68,9 @@ export function createWorkerSecretStore(emit: (message: ServerMessage) => void):
 
   const pendingUnlocks = new Map<string, (key: CryptoKey | null) => void>();
   let unlockCounter = 0;
+  // Keys the main thread sent ahead of an answer are still being opened. The answer waits for them,
+  // so the run it unblocks does not find a name empty that the same unlock is about to fill.
+  let unlocking: Promise<unknown> = Promise.resolve();
 
   function postNames(): void {
     emit({ type: "secrets-list", names: Object.keys(values) });
@@ -190,7 +193,9 @@ export function createWorkerSecretStore(emit: (message: ServerMessage) => void):
     },
 
     acceptUnlock(name, key) {
-      void sealedBlob(name).then((blob) => (blob === null ? null : decryptInto(name, key, blob)));
+      unlocking = unlocking
+        .then(() => sealedBlob(name))
+        .then((blob) => (blob === null ? null : decryptInto(name, key, blob)));
     },
 
     seal(name, key, credentialId, salt) {
@@ -227,7 +232,7 @@ export function createWorkerSecretStore(emit: (message: ServerMessage) => void):
       const settle = pendingUnlocks.get(id);
       if (settle !== undefined) {
         pendingUnlocks.delete(id);
-        settle(key);
+        void unlocking.then(() => settle(key));
       }
     },
   };

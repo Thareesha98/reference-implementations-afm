@@ -134,7 +134,7 @@ export async function seal(post: Post, name: string): Promise<boolean> {
 
 /**
  * Opens every sealed secret with one ceremony per distinct passkey. `answering` is the worker's own
- * unlock request, resolved first so a waiting run continues.
+ * unlock request, answered last so the run it unblocks finds every other key already sent.
  */
 export async function unlockAll(post: Post, answering?: UnlockRequest): Promise<boolean> {
   const entries = await sealedEntries();
@@ -143,7 +143,7 @@ export async function unlockAll(post: Post, answering?: UnlockRequest): Promise<
     credentials.sort((a, b) => Number(sameBytes(b, answering.credentialId)) - Number(sameBytes(a, answering.credentialId)));
   }
   const opened: Opened[] = [];
-  let answered = false;
+  let answer: CryptoKey | null = null;
   for (const credentialId of credentials) {
     let prfOutput: BufferSource;
     try {
@@ -155,15 +155,11 @@ export async function unlockAll(post: Post, answering?: UnlockRequest): Promise<
     for (const { name, blob } of entries) {
       if (!sameBytes(blob.credentialId, credentialId)) continue;
       const key = await deriveAesKeyFromPrf(prfOutput, blob.salt);
-      if (answering !== undefined && answering.name === name && !answered) {
-        post({ type: "passkey-unlock-response", id: answering.id, key });
-        answered = true;
-      } else {
-        post({ type: "unlock-secret", name, key });
-      }
+      if (answering?.name === name) answer = key;
+      else post({ type: "unlock-secret", name, key });
     }
   }
-  if (answering !== undefined && !answered) post({ type: "passkey-unlock-response", id: answering.id, key: null });
+  if (answering !== undefined) post({ type: "passkey-unlock-response", id: answering.id, key: answer });
   await consolidate(post, entries, opened);
   return opened.length > 0;
 }
