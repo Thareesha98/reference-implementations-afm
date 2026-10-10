@@ -27,17 +27,30 @@ const loaded = (name: string, mcpServers: string[] = []): ServerMessage => ({
 });
 
 describe("chatReducer", () => {
-  it("goes connecting -> testing -> ready across the load handshake", () => {
+  it("goes connecting -> ready when the agent is loaded, with no check of its own in between", () => {
     let state = chatReducer(initialChatState, { type: "agent-loading", content: "x", keepMessages: false });
     expect(state.status).toBe("connecting");
     expect(state.agentSource).toBe("x");
     state = chatReducer(state, { type: "server", message: loaded("Agent A", ["context7"]) });
-    expect(state.status).toBe("testing");
+    expect(state.status).toBe("ready");
     expect(state.agentName).toBe("Agent A");
     expect(state.mcpServers).toEqual(["context7"]);
-    state = chatReducer(state, { type: "server", message: { type: "agent-ready", toolCount: 2, tools: [] } });
+  });
+
+  it("learns which tools there are after the agent is ready, without changing its state", () => {
+    const tools = [{ name: "search", description: "Search", serverId: "https://docs.example.com/mcp" }];
+    let state = chatReducer(initialChatState, { type: "server", message: loaded("Agent A") });
+    expect(state.tools).toEqual([]);
+    state = chatReducer(state, { type: "server", message: { type: "tools-listed", tools } });
     expect(state.status).toBe("ready");
-    expect(state.toolCount).toBe(2);
+    expect(state.tools).toEqual(tools);
+  });
+
+  it("keeps an agent that is answering answering when the tool list arrives", () => {
+    let state = chatReducer(initialChatState, { type: "server", message: loaded("A") });
+    state = chatReducer(state, { type: "user-message", text: "hi" });
+    state = chatReducer(state, { type: "server", message: { type: "tools-listed", tools: [] } });
+    expect(state.status).toBe("streaming");
   });
 
   it("drops a permission question that is still open when the turn finishes", () => {

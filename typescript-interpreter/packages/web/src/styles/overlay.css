@@ -16,6 +16,7 @@
   width: 100%;
   max-width: 420px;
   padding: 22px;
+  animation: fade-up 0.25s ease;
 }
 .modal h3 {
   margin: 0 0 4px;

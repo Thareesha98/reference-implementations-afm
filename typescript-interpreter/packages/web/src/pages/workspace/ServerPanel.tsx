@@ -40,11 +40,6 @@ interface Props {
   editing: string | null;
   metadata: AgentMetadata;
   onApply: (content: string) => void;
-  /**
-   * Ticking a tool is the user allowing the agent to use it; recording that as a standing
-   * permission stops the chat asking again. An unticked tool loses its permission.
-   */
-  onSetAllowedTools: (content: string, serverUrl: string, tools: string[]) => void;
   /** The server at this address is no longer in the file, so nothing allowed for it stays allowed. */
   onServerDropped: (serverUrl: string) => void;
   onProbe: (server: NonNullable<AgentMetadata["tools"]>) => Promise<ProbeResult>;
@@ -163,7 +158,6 @@ export function ServerPanel({
   editing,
   metadata,
   onApply,
-  onSetAllowedTools,
   onServerDropped,
   onProbe,
   onSignIn,
@@ -375,9 +369,6 @@ export function ServerPanel({
     }
     onApply(next);
     if (existingUrl !== "" && existingUrl !== url.trim()) onServerDropped(existingUrl);
-    // Without a list the file's filter was not rewritten, so an empty list means "not looked at",
-    // not "none", and must not take any permission back.
-    if (tools !== null || allowed.length > 0) onSetAllowedTools(next, url.trim(), allowed);
     onClose();
   }
 

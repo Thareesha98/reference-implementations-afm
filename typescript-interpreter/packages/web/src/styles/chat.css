@@ -31,6 +31,10 @@
   max-width: 86%;
   animation: fade-up 0.25s ease;
 }
+.xc-turn,
+.xc-notready {
+  animation: fade-up 0.25s ease;
+}
 .attachment-card {
   position: relative;
   display: flex;

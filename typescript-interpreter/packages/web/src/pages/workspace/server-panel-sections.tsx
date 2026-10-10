@@ -117,6 +117,8 @@ export function ServerTools({ url, probing, found, error, allowed, waiting, onTo
         )}
       </div>
 
+      {found !== null && found.length > 0 && <p className="u-hint">Ticked tools run without asking. Unticked tools stay off.</p>}
+
       {error !== null && (
         <div className="repair">
           <p className="repair-what">{error}</p>
@@ -138,7 +140,7 @@ export function ServerTools({ url, probing, found, error, allowed, waiting, onTo
       ) : found === null ? (
         <p className="u-hint">{waiting}</p>
       ) : (
-        <div className="u-rows scroll">
+        <div className="u-rows scroll is-found">
           {found.map((tool) => (
             <label className="u-row" key={tool.name} onMouseEnter={(event) => showTip(tool, event.currentTarget)} onMouseLeave={hideTip}>
               <input type="checkbox" checked={allowed.includes(tool.name)} onChange={() => onToggle(tool.name)} />

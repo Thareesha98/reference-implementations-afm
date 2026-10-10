@@ -763,6 +763,10 @@ label.u-group {
 .u-group.grow .u-rows.scroll {
   min-height: 180px;
 }
+/* A server's tools arrive once they are found, in place of the skeleton. */
+.u-rows.is-found {
+  animation: fade-up 0.25s ease;
+}
 
 /* Start an agent: Provider and Model share a row evenly - .u-group has no flex-sizing of its
    own (it is normally a lone block), so two of them in a row need telling to split it. */
@@ -827,9 +831,52 @@ label.u-group {
 /* ---- the About panel ---- */
 .u-info-id {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 16px;
+  margin-bottom: 18px;
+}
+.u-desc {
   margin-bottom: 14px;
+}
+.u-desc .u-label {
+  margin-bottom: 6px;
+}
+.u-desc-box {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.u-desc-box:hover {
+  border-color: var(--line-strong);
+}
+.u-desc-box:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.u-desc-box.is-off {
+  background: var(--sunk);
+}
+.u-desc-field {
+  display: block;
+  width: 100%;
+  max-height: 200px;
+  padding: 9px 11px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.55;
+  resize: none;
+  overflow-y: auto;
+}
+.u-desc-field::placeholder {
+  color: var(--faint);
+}
+.u-desc-field:disabled {
+  color: var(--muted);
 }
 .u-info-id-fields {
   flex: 1;
@@ -1088,7 +1135,8 @@ label.u-group {
   position: absolute;
   left: 50%;
   bottom: 22px;
-  transform: translateX(-50%);
+  translate: -50% 0;
+  animation: fade-up 0.25s ease;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -1168,23 +1216,23 @@ label.u-group {
 }
 .u-body:not(.is-chat-full) .xc-field {
   font-size: 13.5px;
-  padding: 8px 4px 8px 8px;
+  padding: 3px 4px 3px 8px;
 }
 .u-body:not(.is-chat-full) .xc-composer {
-  border-radius: 16px;
-  padding: 6px;
+  border-radius: 13px;
+  padding: 4px;
 }
 .u-body:not(.is-chat-full) .xc-cbtn,
 .u-body:not(.is-chat-full) .xc-send,
 .u-body:not(.is-chat-full) .xc-stop {
-  width: 30px;
-  height: 30px;
-  border-radius: 10px;
+  width: 26px;
+  height: 26px;
+  border-radius: 9px;
 }
 .u-body:not(.is-chat-full) .xc-cbtn svg,
 .u-body:not(.is-chat-full) .xc-send svg {
-  width: 15px;
-  height: 15px;
+  width: 14px;
+  height: 14px;
 }
 .u-body:not(.is-chat-full) .xc-starter {
   padding: 12px 14px;

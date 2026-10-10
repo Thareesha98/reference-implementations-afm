@@ -27,6 +27,11 @@ describe("sizing the message box", () => {
     expect(grownHeight(600, 4000)).toBe(MAX_COMPOSER_HEIGHT);
   });
 
+  it("stops at a cap of its own for a box that is not the message box", () => {
+    expect(grownHeight(300, 90, 200)).toBe(90);
+    expect(grownHeight(300, 4000, 200)).toBe(200);
+  });
+
   // The workspace opens with the conversation collapsed to zero width. Measuring the box there
   // returns a wrapped-to-one-character-per-line height, and it stays pinned once the pane opens.
   it("refuses to answer for a box that is not on screen", () => {

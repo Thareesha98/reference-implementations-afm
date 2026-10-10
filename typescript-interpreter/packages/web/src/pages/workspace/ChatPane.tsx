@@ -23,9 +23,8 @@ import type { useStandaloneSession } from "../../worker-client/useStandaloneSess
 // Composer's own fallback ("Load an agent first...") reads as a failed click once an agent exists, so
 // each disabled status short of "ready" says what is happening instead.
 const WAITING_PLACEHOLDER: Partial<Record<AgentStatus, string>> = {
-  "no-agent": "Press Run to start the agent…",
+  "no-agent": "Press Run to start…",
   connecting: "Loading the agent…",
-  testing: "Checking its tools…",
   "not-ready": "The agent didn't start…",
 };
 

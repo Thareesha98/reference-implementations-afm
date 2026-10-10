@@ -23,7 +23,6 @@ export interface SavedAgent {
   name: string;
   description: string;
   source: string;
-  favorite: boolean;
   createdAt: number;
   updatedAt: number;
   origin: AgentOrigin;
@@ -46,7 +45,7 @@ export interface AgentSaveResult {
 }
 
 export function saveAgent(
-  agent: Omit<SavedAgent, "id" | "createdAt" | "updatedAt" | "favorite"> & { id?: string },
+  agent: Omit<SavedAgent, "id" | "createdAt" | "updatedAt"> & { id?: string },
 ): AgentSaveResult {
   const existing = loadAgents();
   const now = Date.now();
@@ -58,7 +57,6 @@ export function saveAgent(
     description: agent.description,
     source: agent.source,
     origin: agent.origin,
-    favorite: previous?.favorite ?? false,
     createdAt: previous?.createdAt ?? now,
     updatedAt: now,
   };
@@ -69,12 +67,6 @@ export function saveAgent(
 
 export function removeAgent(id: string): SavedAgent[] {
   const agents = loadAgents().filter((a) => a.id !== id);
-  persist(agents);
-  return agents;
-}
-
-export function toggleFavorite(id: string): SavedAgent[] {
-  const agents = loadAgents().map((a) => (a.id === id ? { ...a, favorite: !a.favorite } : a));
   persist(agents);
   return agents;
 }

@@ -39,8 +39,8 @@ import { StageFoot } from "./StageFoot";
 import { useAgentActivity } from "./agent-activity";
 import { StartHere } from "./StartHere";
 import { TrustScreen } from "./TrustScreen";
-import { SIDE_TITLE } from "./workspace-view";
-import type { SidePanel } from "./workspace-view";
+import { NOTHING_OPEN, SIDE_TITLE, closePanel, openOver, openPanel, togglePanel } from "./workspace-view";
+import type { SideState, SidePanel } from "./workspace-view";
 import { resolveContent } from "../../load-paths";
 import { EMPTY_TEMPLATE, initialContent, identityFor } from "./workspace-content";
 import { useAgentsLibrary } from "../../agents/AgentsLibraryContext";
@@ -50,7 +50,6 @@ import { permissionKey } from "../../protocol";
 import { usePermissionsLedger } from "../../permissions/PermissionsLedgerContext";
 import { agentBrief, getSection } from "./agent-source-edit";
 import { useSettled } from "./use-settled";
-import { canStartQuietly } from "./quiet-start";
 import { useThemeContext } from "../../app/ThemeContext";
 import { TurnNotificationWatcher } from "../../app/NotificationsContext";
 
@@ -66,16 +65,17 @@ export function WorkspacePage() {
   const [fileLoading, setFileLoading] = useState(() => searchParams.get("file") !== null);
   const [fileError, setFileError] = useState<string | null>(null);
   // What is docked beside the builder, if anything. Closed by default.
-  const [side, setSide] = useState<SidePanel | null>(() => {
-    if (searchParams.get("view") === "chat") return "chat";
+  const [nav, setNav] = useState<SideState>(() => {
+    if (searchParams.get("view") === "chat") return { open: "chat", under: [] };
     // A truly blank agent opens Start.
-    return identityFor(searchParams, location.hash, draftSource) === "blank" ? "start" : null;
+    return identityFor(searchParams, location.hash, draftSource) === "blank" ? { open: "start", under: [] } : NOTHING_OPEN;
   });
+  const side = nav.open;
+  const backToSetup = nav.under[nav.under.length - 1] === "setup";
   const [chatFull, setChatFull] = useState(() => searchParams.get("view") === "chat");
   // A run-only link is someone else's agent about to use your key, so it gets a trust screen first.
   const [trusted, setTrusted] = useState(() => searchParams.get("view") !== "chat");
   const [serverEditing, setServerEditing] = useState<string | null>(null);
-  const [back, setBack] = useState<SidePanel | null>(null);
   // Bumped to ask the stage for the raw file, when the problem is in the file.
   const [rawRequest, setRawRequest] = useState(0);
   const permissions = usePermissionsLedger();
@@ -126,14 +126,7 @@ export function WorkspacePage() {
     setContent(next);
     setSavedContent(next);
     setAgentId(nextId);
-    if (nextId !== null) {
-      if (canStartQuietly(next, testSession.state)) {
-        const previous = history.entries.find((entry) => entry.agentId === nextId);
-        testSession.loadContent(next, previous?.messages);
-      } else {
-        testSession.clearAgent();
-      }
-    }
+    testSession.clearAgent();
   }, [searchParams, location.hash, draftSource]);
 
   // Put a recovered agentId back in the URL, merging so ?code=&state= survive, so a reload after
@@ -257,24 +250,11 @@ export function WorkspacePage() {
     serverNameByUrl: nameByUrl,
   });
 
-  /**
-   * Makes exactly these tools run without asking for one server. Choosing a tool and then being
-   * asked on the first call is the same question twice, and teaches people to click through. A tool
-   * left out is asked about again.
-   */
-  function setAllowedTools(source: string, serverUrl: string, tools: string[]) {
-    // Save first when the agent has no id yet: permissions are filed against the id, and a
-    // content-hash key would be invalidated by the next save, so the user would be asked again.
-    const id = agentIdRef.current ?? persistToLibrary(source).id;
-    const scope = permissionScopeFor(id, source);
-    for (const name of tools) {
-      permissions.set(scope, name, "auto-allow", classifyToolRisk(name, undefined), serverUrl);
-    }
-    revokeGrants(scope, serverUrl, tools);
-  }
-
-  function revokeGrants(scope: string, serverUrl: string, keep: string[]) {
-    for (const entry of grantsToRevoke(permissions.forAgent(scope), serverUrl, keep)) {
+  // A server taken out of the file keeps its "always allow" answers on record, and would get them
+  // back if the same server were added again.
+  function revokeGrants(serverUrl: string) {
+    const scope = permissionScopeFor(agentIdRef.current, contentRef.current);
+    for (const entry of grantsToRevoke(permissions.forAgent(scope), serverUrl)) {
       permissions.set(scope, entry.toolName, "always-ask", entry.risk, serverUrl);
     }
   }
@@ -298,13 +278,7 @@ export function WorkspacePage() {
 
   function configure(row: SetupRow) {
     if (row.kind === "server") setServerEditing(row.name);
-    openSide(row.kind === "model" ? "model" : "tools");
-    setBack("setup");
-  }
-
-  function leavePanel() {
-    if (back === null) closeSide();
-    else openSide(back);
+    show(openOver(nav, row.kind === "model" ? "model" : "tools"));
   }
 
   // Written once typing stops rather than on a button press. Nothing here is destructive (the
@@ -319,26 +293,15 @@ export function WorkspacePage() {
     // persistToLibrary is redefined every render; the content decides whether to write.
   }, [settledContent, savedContent]);
 
-  function openSide(next: SidePanel) {
-    setSide(next);
-    setBack(null);
-    if (next !== "chat") setChatFull(false);
+  function show(next: SideState) {
+    setNav(next);
+    if (next.open !== "chat") setChatFull(false);
   }
 
-  function toggleSide(next: SidePanel) {
-    if (side === next) {
-      setSide(null);
-      setChatFull(false);
-      return;
-    }
-    openSide(next);
-  }
-
-  function closeSide() {
-    setSide(null);
-    setBack(null);
-    setChatFull(false);
-  }
+  const openSide = (next: SidePanel) => show(openPanel(nav, next));
+  const toggleSide = (next: SidePanel) => show(togglePanel(nav, next));
+  const leavePanel = () => show(closePanel(nav));
+  const closeSide = () => show(NOTHING_OPEN);
 
   // What was on screen right before "New agent" or a template, generated or imported file replaced
   // it outright. Autosave catches most of it; this is the net under the last few keystrokes.
@@ -453,7 +416,7 @@ export function WorkspacePage() {
         </div>
 
         {}
-        <div className="u-float-scrim" onClick={closeSide} role="presentation" />
+        <div className="u-float-scrim" onClick={leavePanel} role="presentation" />
 
         {/* Mounted whether or not open: unmounting the conversation would lose its scroll position and the half-typed message. */}
         <aside className="u-side" aria-hidden={side === null}>
@@ -484,11 +447,12 @@ export function WorkspacePage() {
 
           {overPanel !== null && (
             <SidePane
+              key={overPanel}
               over
               title={
                 overPanel === "tools" && serverEditing !== null ? serverEditing : SIDE_TITLE[overPanel]
               }
-              onClose={closeSide}
+              onClose={leavePanel}
               flush={overPanel === "model" || overPanel === "tools" || overPanel === "info" || overPanel === "share" || overPanel === "setup"}
             >
               {overPanel === "agents" && (
@@ -541,9 +505,8 @@ export function WorkspacePage() {
                   content={content}
                   metadata={readable.ok ? readable.metadata : null}
                   saved={library.agents.find((agent) => agent.id === agentId)}
-                  onToggleFavorite={() => agentId !== null && library.toggleFavorite(agentId)}
                   onApply={setContent}
-                  onClose={closeSide}
+                  onClose={leavePanel}
                 />
               )}
               {overPanel === "setup" && (
@@ -569,7 +532,7 @@ export function WorkspacePage() {
                     setup.changed(MODEL_ROW);
                   }}
                   onSaveKey={testSession.storeSecret}
-                  onBack={back === null ? undefined : leavePanel}
+                  onBack={backToSetup ? leavePanel : undefined}
                   onClose={leavePanel}
                 />
               )}
@@ -585,17 +548,14 @@ export function WorkspacePage() {
                     setContent(next);
                     if (serverEditing !== null) setup.changed(serverRowId(serverEditing));
                   }}
-                  onSetAllowedTools={setAllowedTools}
-                  onServerDropped={(serverUrl) =>
-                    revokeGrants(permissionScopeFor(agentIdRef.current, contentRef.current), serverUrl, [])
-                  }
+                  onServerDropped={revokeGrants}
                   onStoreSecret={testSession.storeSecret}
                   knownSecrets={usableSecrets(testSession.state)}
                   issue={serverEditing === null ? null : setup.issueOf(serverRowId(serverEditing))}
                   onProbe={testSession.probeServer}
                   onSignIn={testSession.startOAuthSignIn}
                   onSignOut={testSession.signOutOAuth}
-                  onBack={back === null ? undefined : leavePanel}
+                  onBack={backToSetup ? leavePanel : undefined}
                   onClose={leavePanel}
                 />
               )}

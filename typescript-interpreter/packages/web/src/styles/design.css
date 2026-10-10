@@ -58,8 +58,6 @@ code{font-family:"IBM Plex Mono",monospace;font-size:.86em;background:var(--sunk
 .u-ico.on{background:var(--accent-soft);color:var(--accent);border-color:transparent}
 .u-bar .u-ico.on{background:var(--accent);color:var(--accent-contrast)}
 .u-bar .u-ico.on:hover{background:color-mix(in srgb,var(--accent) 86%,var(--surface))}
-.u-ico.tiny{width:24px;height:24px}
-.u-ico.tiny svg{width:13px;height:13px}
 .u-play{width:0;height:0;border-top:5px solid transparent;border-bottom:5px solid transparent;border-left:8px solid currentColor}
 
 /* ---- segmented ---- */
@@ -302,15 +300,15 @@ code{font-family:"IBM Plex Mono",monospace;font-size:.86em;background:var(--sunk
 
 .xc-dock{flex:none;position:relative;padding-bottom:26px;z-index:2}
 .xc-dock::before{content:"";position:absolute;left:0;right:0;bottom:0;top:-46px;background:linear-gradient(transparent,var(--surface) 40%);pointer-events:none}
-.xc-composer{position:relative;background:var(--sunk);border:1px solid var(--line-strong);border-radius:22px;padding:8px;display:flex;align-items:center;gap:6px}
-.xc-field{flex:1;min-width:0;padding:12px 6px 12px 10px;font-size:15.5px;line-height:1.5;color:var(--ink)}
-.xc-cbtn{width:38px;height:38px;border-radius:13px;border:0;background:none;color:var(--ink2);display:grid;place-items:center;flex:none;cursor:pointer}
-.xc-cbtn svg{width:18px;height:18px;display:block}
-.xc-send{width:38px;height:38px;border-radius:13px;border:0;background:var(--accent);color:var(--accent-contrast);display:grid;place-items:center;flex:none}
-.xc-send svg{width:17px;height:17px;display:block}
+.xc-composer{position:relative;background:var(--sunk);border:1px solid var(--line-strong);border-radius:16px;padding:5px;display:flex;align-items:center;gap:6px}
+.xc-field{flex:1;min-width:0;padding:5px 6px 5px 10px;font-size:15.5px;line-height:1.5;color:var(--ink)}
+.xc-cbtn{width:32px;height:32px;border-radius:11px;border:0;background:none;color:var(--ink2);display:grid;place-items:center;flex:none;cursor:pointer}
+.xc-cbtn svg{width:17px;height:17px;display:block}
+.xc-send{width:32px;height:32px;border-radius:11px;border:0;background:var(--accent);color:var(--accent-contrast);display:grid;place-items:center;flex:none}
+.xc-send svg{width:16px;height:16px;display:block}
 .xc-send.off{background:var(--line);color:var(--faint);box-shadow:none}
 [data-theme="dark"] .xc-send.off{background:#232838;color:#5B6278;box-shadow:inset 0 1px 0 rgba(255,255,255,.04)}
-.xc-stop{width:38px;height:38px;border-radius:13px;border:1px solid var(--line);background:var(--surface);display:grid;place-items:center;flex:none}
+.xc-stop{width:32px;height:32px;border-radius:11px;border:1px solid var(--line);background:var(--surface);display:grid;place-items:center;flex:none}
 [data-theme="dark"] .xc-stop{background:#232838;border-color:#333A4E}
 .xc-stop i{width:11px;height:11px;border-radius:3px;background:var(--ink2);display:block}
 /* ── STARTING ─────────────────────────────────────────────────── */
@@ -345,7 +343,7 @@ code{font-family:"IBM Plex Mono",monospace;font-size:.86em;background:var(--sunk
 .u-issue-body{flex:1;min-width:0}
 .u-issue-where{font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--faint);display:block;margin-top:2px}
 .u-errcard{border:1px solid var(--bad);background:var(--bad-soft);border-radius:11px;padding:11px 12px;font-size:12.5px;color:var(--bad);line-height:1.5}
-.u-toast{position:absolute;left:50%;transform:translateX(-50%);bottom:20px;z-index:9;background:var(--ink);color:#fff;border-radius:999px;padding:8px 8px 8px 18px;font-size:12.5px;display:flex;align-items:center;gap:14px;box-shadow:0 8px 28px rgba(16,20,44,.28);white-space:nowrap}
+.u-toast{position:absolute;left:50%;translate:-50% 0;animation:fade-up .25s ease;bottom:20px;z-index:9;background:var(--ink);color:#fff;border-radius:999px;padding:8px 8px 8px 18px;font-size:12.5px;display:flex;align-items:center;gap:14px;box-shadow:0 8px 28px rgba(16,20,44,.28);white-space:nowrap}
 [data-theme="dark"] .u-toast{background:var(--surface);border:1px solid var(--line);color:var(--ink)}
 .u-toast button{font-family:inherit;font-size:12.5px;font-weight:600;color:#fff;background:none;border:0;cursor:pointer;border-radius:999px;padding:4px 13px}
 

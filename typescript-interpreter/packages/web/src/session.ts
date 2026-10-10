@@ -27,7 +27,7 @@ import type {
 } from "@afm/engine";
 import { compositeToolPort } from "@afm/adapter-tool";
 import type { ServerMessage, ImageAttachment } from "./protocol";
-import { serverMessageFromLoopEvent } from "./protocol";
+import { permissionKey, serverMessageFromLoopEvent } from "./protocol";
 
 const MAX_TOKENS_PER_TURN = 250_000;
 const MAX_WALL_CLOCK_MS = 180_000;
@@ -47,6 +47,19 @@ const FILES_SYSTEM_NOTE =
   "What is attached is listed below and is accurate as of this message, so do not call " +
   "list_files to find out whether something is attached.\n";
 
+/**
+ * The tools the file lists as allowed on each server. Ticking a tool is the person saying yes to it,
+ * and the file is where that tick lives, so it is what decides whether a call needs asking about.
+ */
+function listedAsAllowed(metadata: AgentMetadata): Set<string> {
+  const keys = new Set<string>();
+  for (const server of metadata.tools?.mcp ?? []) {
+    if (server.transport.type !== "http") continue;
+    for (const name of server.tool_filter?.allow ?? []) keys.add(permissionKey(server.transport.url, name));
+  }
+  return keys;
+}
+
 export interface AgentSessionDeps {
   createModel: (model: AgentMetadata["model"]) => Promise<ModelPort>;
   createTools: (metadata: AgentMetadata) => ToolPort;
@@ -59,6 +72,7 @@ export interface AgentSessionDeps {
 
 export class AgentSession {
   private loaded: LoadedAfm | null = null;
+  private allowed = new Set<string>();
   private model: ModelPort | null = null;
   private tools: ToolPort | null = null;
   private history: ChatMessage[] = [];
@@ -106,6 +120,7 @@ export class AgentSession {
         ...loaded,
         systemPrompt: loaded.systemPrompt + FILES_SYSTEM_NOTE,
       };
+      this.allowed = listedAsAllowed(loaded.metadata);
       this.model = model;
       this.tools = tools;
       this.history = seedHistory ?? [];
@@ -124,6 +139,7 @@ export class AgentSession {
       // The agent that was running is gone, so it must stop answering; otherwise a failed load
       // would report "not ready" while the previous agent kept serving.
       this.loaded = null;
+      this.allowed = new Set();
       this.model = null;
       const staleTools = this.tools;
       this.tools = null;
@@ -133,28 +149,24 @@ export class AgentSession {
       return;
     }
     if (this.tools !== null) {
-      await this.selfTest(this.tools, current);
+      await this.reportTools(this.tools, current);
     }
   }
 
-  private async selfTest(tools: ToolPort, current: () => boolean): Promise<void> {
-    this.step("check", "Checking the agent is ready", "active");
+  // Setup has already checked that the model and every server answer, so the agent is usable the
+  // moment it is loaded. Reading the tools now only warms the connections for the first question and
+  // tells the chat which server each tool belongs to; nothing waits on it and nothing here can stop
+  // the agent.
+  private async reportTools(tools: ToolPort, current: () => boolean): Promise<void> {
     try {
       const descriptors = await tools.list();
       if (!current()) return;
-      this.step("check", "Checking the agent is ready", "done");
       this.deps.emit({
-        type: "agent-ready",
-        toolCount: descriptors.length,
+        type: "tools-listed",
         tools: descriptors.map((d) => ({ name: d.name, description: d.description, serverId: d.serverId })),
       });
-    } catch (error) {
-      if (!current()) return;
-      this.step("check", "Checking the agent is ready", "failed", describeError(error));
-      this.deps.emit({
-        type: "agent-not-ready",
-        reason: `Couldn't reach the agent's tools - ${describeError(error)}`,
-      });
+    } catch {
+      // The first question asks again and reports what went wrong.
     }
   }
 
@@ -198,7 +210,7 @@ export class AgentSession {
         messages,
         model,
         tools,
-        permission: this.deps.permission,
+        permission: this.permission,
         budget: {
           maxIterations: loaded.metadata.max_iterations,
           maxTokens: MAX_TOKENS_PER_TURN,
@@ -224,6 +236,12 @@ export class AgentSession {
       if (current()) this.controller = null;
     }
   }
+
+  // A tool the file lists is already allowed, so only the rest go to the person.
+  private readonly permission: PermissionBroker = {
+    request: async (call, signal) =>
+      this.allowed.has(permissionKey(call.serverId, call.name)) ? "allow" : this.deps.permission.request(call, signal),
+  };
 
   cancel(): void {
     this.controller?.abort();

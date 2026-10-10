@@ -102,7 +102,7 @@ export type ServerMessage =
       mcpServers: string[];
       plan: Plan;
     }
-  | { type: "agent-ready"; toolCount: number; tools: ToolInfo[] }
+  | { type: "tools-listed"; tools: ToolInfo[] }
   | { type: "agent-not-ready"; reason: string }
   | { type: "secrets-list"; names: string[] }
   | { type: "passkey-list"; names: string[] }

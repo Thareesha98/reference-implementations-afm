@@ -39,9 +39,8 @@ function chat(status: AgentStatus): string {
 
 describe("the message box before an agent is ready", () => {
   it.each([
-    ["no-agent", "Press Run to start the agent…"],
+    ["no-agent", "Press Run to start…"],
     ["connecting", "Loading the agent…"],
-    ["testing", "Checking its tools…"],
     ["not-ready", "The agent didn&#x27;t start…"],
   ] as const)("says what is going on while the agent is %s", (status, placeholder) => {
     const html = chat(status);
@@ -50,7 +49,7 @@ describe("the message box before an agent is ready", () => {
   });
 
   it("never falls back to asking for an agent once one exists", () => {
-    for (const status of ["connecting", "testing", "not-ready", "ready"] as const) {
+    for (const status of ["connecting", "not-ready", "ready"] as const) {
       expect(chat(status)).not.toContain("Load an agent first");
     }
   });

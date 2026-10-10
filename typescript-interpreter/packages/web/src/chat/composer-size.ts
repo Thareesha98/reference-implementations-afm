@@ -23,7 +23,7 @@ export const MAX_COMPOSER_HEIGHT = 180;
  * The workspace collapses the unused pane to zero width, and a zero-width textarea wraps one
  * character per line, which would pin the height at the cap. Without a width there is no answer.
  */
-export function grownHeight(clientWidth: number, scrollHeight: number): number | null {
+export function grownHeight(clientWidth: number, scrollHeight: number, maxHeight = MAX_COMPOSER_HEIGHT): number | null {
   if (clientWidth <= 0) return null;
-  return Math.min(scrollHeight, MAX_COMPOSER_HEIGHT);
+  return Math.min(scrollHeight, maxHeight);
 }

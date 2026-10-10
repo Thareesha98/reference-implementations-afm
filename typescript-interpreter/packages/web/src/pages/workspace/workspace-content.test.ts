@@ -31,7 +31,7 @@ const params = (query: string) => new URLSearchParams(query);
 describe("initialContent", () => {
   beforeEach(() => {
     vi.unstubAllGlobals();
-    vi.stubGlobal("localStorage", storageHolding([{ id: "a1", name: "Saved", description: "", source: AGENT_SOURCE, favorite: false, createdAt: 1, updatedAt: 1, origin: "blank" }]));
+    vi.stubGlobal("localStorage", storageHolding([{ id: "a1", name: "Saved", description: "", source: AGENT_SOURCE, createdAt: 1, updatedAt: 1, origin: "blank" }]));
   });
 
   it("starts from a draft when one is handed over", () => {

@@ -16,14 +16,13 @@
 
 import { createContext, useContext, useState } from "react";
 import type { ReactNode } from "react";
-import { loadAgents, saveAgent, removeAgent, toggleFavorite, clear as clearAgents } from "../agents-store";
+import { loadAgents, saveAgent, removeAgent, clear as clearAgents } from "../agents-store";
 import type { SavedAgent, AgentOrigin, AgentSaveResult } from "../agents-store";
 
 interface AgentsLibraryValue {
   agents: SavedAgent[];
   save: (agent: { id?: string; name: string; description: string; source: string; origin: AgentOrigin }) => AgentSaveResult;
   remove: (id: string) => void;
-  toggleFavorite: (id: string) => void;
   clear: () => void;
 }
 
@@ -40,7 +39,6 @@ export function AgentsLibraryProvider({ children }: { children: ReactNode }) {
       return result;
     },
     remove: (id) => setAgents(removeAgent(id)),
-    toggleFavorite: (id) => setAgents(toggleFavorite(id)),
     clear: () => setAgents(clearAgents()),
   };
 

@@ -15,7 +15,7 @@
 // under the License.
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { clear, findAgent, loadAgents, removeAgent, saveAgent, toggleFavorite } from "./agents-store";
+import { clear, findAgent, loadAgents, removeAgent, saveAgent } from "./agents-store";
 
 function memoryStorage() {
   const map = new Map<string, string>();
@@ -37,7 +37,7 @@ describe("the agents library", () => {
   it("saves a new agent under a fresh id and reports that it landed", () => {
     const result = saveAgent(draft("Scribe"));
     expect(result.persisted).toBe(true);
-    expect(result.saved).toMatchObject({ name: "Scribe", favorite: false, origin: "blank" });
+    expect(result.saved).toMatchObject({ name: "Scribe", origin: "blank" });
     expect(result.saved.id).not.toBe("");
     expect(loadAgents()).toEqual([result.saved]);
   });
@@ -51,13 +51,11 @@ describe("the agents library", () => {
 
   it("updates in place when an id is given, keeping what is not being changed", () => {
     const created = saveAgent(draft("Scribe")).saved;
-    toggleFavorite(created.id);
     const updated = saveAgent({ ...draft("Scribe v2"), id: created.id }).saved;
 
     expect(loadAgents()).toHaveLength(1);
     expect(updated.id).toBe(created.id);
     expect(updated.name).toBe("Scribe v2");
-    expect(updated.favorite).toBe(true);
     expect(updated.createdAt).toBe(created.createdAt);
     expect(updated.updatedAt).toBeGreaterThanOrEqual(created.updatedAt);
   });
@@ -73,12 +71,6 @@ describe("the agents library", () => {
     const drop = saveAgent(draft("Drop")).saved;
     expect(removeAgent(drop.id)).toEqual([keep]);
     expect(loadAgents()).toEqual([keep]);
-  });
-
-  it("toggles a favourite on and off", () => {
-    const saved = saveAgent(draft("Scribe")).saved;
-    expect(toggleFavorite(saved.id)[0]?.favorite).toBe(true);
-    expect(toggleFavorite(saved.id)[0]?.favorite).toBe(false);
   });
 
   it("clears the library", () => {

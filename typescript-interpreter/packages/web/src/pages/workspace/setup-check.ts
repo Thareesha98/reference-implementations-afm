@@ -154,7 +154,7 @@ function failureResult(failure: Failure, { credential, hadSignIn }: Context): Ro
 
 export function resultOf(probe: ProbeResult, context: Context): RowResult {
   if (probe.failure !== undefined) return failureResult(probe.failure, context);
-  return { state: "ready", note: `${context.answered} · ${context.credential === "key" ? "key accepted" : "answered"}` };
+  return { state: "ready", note: `${context.answered} · ${context.credential === "key" ? "authenticated" : "answered"}` };
 }
 
 export function answeredBy(server: McpServer, reported: number): string {
@@ -193,7 +193,7 @@ export function summaryOf(rows: SetupRow[], keys: KeysState): Summary {
   if (changed.length > 0) {
     return { tone: "neutral", chip: "Changed", text: `You updated ${changed.join(", ")}. Check again to confirm it.` };
   }
-  if (everyRowReady(rows)) return { tone: "ok", chip: "Ready", text: "Everything answered. Press Run to start." };
+  if (everyRowReady(rows)) return { tone: "ok", chip: "Ready", text: "Press Run to start." };
   return { tone: "neutral", chip: "Waiting", text: "Everything this agent needs, checked at once." };
 }
 

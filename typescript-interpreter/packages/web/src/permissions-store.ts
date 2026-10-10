@@ -41,12 +41,10 @@ export function resetPermissions(entries: PermissionEntry[], agentId?: string): 
   return agentId === undefined ? [] : entries.filter((e) => e.agentId !== agentId);
 }
 
-// A tool unticked on a server is no longer offered, but its grant stays on file and would apply
-// again if it were offered later. These are the grants to take back.
-export function grantsToRevoke(entries: PermissionEntry[], serverId: string, allowed: string[]): PermissionEntry[] {
-  return entries.filter(
-    (entry) => entry.serverId === serverId && entry.rule === "auto-allow" && !allowed.includes(entry.toolName),
-  );
+// A server taken out of the file keeps its grants on record, and they would apply again if the same
+// server were added later. These are the grants to take back.
+export function grantsToRevoke(entries: PermissionEntry[], serverId: string): PermissionEntry[] {
+  return entries.filter((entry) => entry.serverId === serverId && entry.rule === "auto-allow");
 }
 
 function agentKeyFor(content: string): string {

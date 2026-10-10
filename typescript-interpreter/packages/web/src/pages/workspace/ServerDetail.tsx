@@ -94,7 +94,7 @@ export function ServerDetail({ entry, onBack, onConnect }: Props) {
           </a>
         </Fact>
 
-        <Fact label="Every tool">asks you before it runs, each time it is called.</Fact>
+        <Fact label="Tools">You choose which ones the agent may use. Ticked tools run without asking.</Fact>
       </div>
 
       <div className="u-panel-foot">

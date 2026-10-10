@@ -88,7 +88,7 @@ export function readiness(input: ReadinessInput): Readiness {
     return { tone: "bad", lead: "Did not start - ", subject: "see why", fix: "chat" };
   }
 
-  return { tone: "ok", lead: current && (status === "ready" || status === "testing") ? "Running" : "Ready" };
+  return { tone: "ok", lead: current && status === "ready" ? "Running" : "Ready" };
 }
 
 type McpServers = NonNullable<NonNullable<AgentMetadata["tools"]>["mcp"]>;

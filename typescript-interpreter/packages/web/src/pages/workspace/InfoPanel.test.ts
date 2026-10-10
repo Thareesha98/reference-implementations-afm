@@ -16,9 +16,11 @@
 
 
 import { describe, expect, it } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import type { AgentMetadata } from "@afm/engine";
 import { buildableAgent } from "../../agent-validation";
-import { aboutRows, applyAbout, startingDraft, versionError } from "./InfoPanel";
+import { aboutRows, applyAbout, InfoPanel, startingDraft, versionError } from "./InfoPanel";
 
 const value = (rows: ReturnType<typeof aboutRows>, label: string) => rows.find((row) => row.label === label)?.value;
 
@@ -142,5 +144,48 @@ describe("versionError", () => {
 
   it("says what shape is expected otherwise", () => {
     for (const bad of ["1", "1.0", "v1.0.0", "one", "1.0.0.0"]) expect(versionError(bad)).toMatch(/MAJOR\.MINOR\.PATCH/);
+  });
+});
+
+describe("the About panel", () => {
+  const metadata = { name: "Paper Navigator", description: "Reads a paper and answers questions about it." } as AgentMetadata;
+  const panel = (over: { metadata?: AgentMetadata | null } = {}) =>
+    renderToStaticMarkup(
+      createElement(InfoPanel, {
+        content: "",
+        metadata: over.metadata === undefined ? metadata : over.metadata,
+        saved: undefined,
+        onApply: () => {},
+        onClose: () => {},
+      }),
+    );
+
+  it("gives the description a label of its own, with the file's text in it", () => {
+    const html = panel();
+    expect(html).toContain(">Description</label>");
+    expect(html).toContain("Reads a paper and answers questions about it.");
+  });
+
+  it("says where the description is shown, and what happens when it is left empty", () => {
+    expect(panel()).toContain("Shown at the top of a new chat. Left empty, it is drawn from the role.");
+  });
+
+  it("ties the hint to the field for people who use a screen reader", () => {
+    const html = panel();
+    const id = /<textarea id="([^"]+)"/.exec(html)?.[1];
+    expect(id).toBeDefined();
+    expect(html).toContain(`aria-describedby="${id}-hint"`);
+    expect(html).toContain(`id="${id}-hint"`);
+  });
+
+  it("has no favourite button", () => {
+    expect(panel().toLowerCase()).not.toContain("favorite");
+    expect(panel().toLowerCase()).not.toContain("favourite");
+  });
+
+  it("locks the description when the settings cannot be read", () => {
+    const html = panel({ metadata: null });
+    expect(html).toContain("is-off");
+    expect(html).toMatch(/<textarea[^>]*disabled/);
   });
 });

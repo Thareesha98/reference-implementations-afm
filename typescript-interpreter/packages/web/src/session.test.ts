@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { AgentSession } from "./session";
 import { inPageToolPort } from "@afm/adapter-tool";
 import { configSecretPort } from "@afm/adapter-secret";
@@ -82,7 +82,7 @@ i
 `;
 
 describe("AgentSession", () => {
-  it("emits 'loaded' then 'agent-ready' after the self-test for a valid file", async () => {
+  it("emits 'loaded' and then the tools it found, for a valid file", async () => {
     const { session, emitted } = makeSession();
     await session.load(VALID);
     expect(emitted).toEqual([
@@ -92,8 +92,67 @@ describe("AgentSession", () => {
         mcpServers: [],
         plan: { runnable: true, issues: [] },
       },
-      { type: "agent-ready", toolCount: 0, tools: [] },
+      { type: "tools-listed", tools: [] },
     ]);
+  });
+
+  it("is usable as soon as it is loaded, without waiting for its tools to be listed", async () => {
+    let release: () => void = () => {};
+    const slowTools = {
+      async list() {
+        await new Promise<void>((resolve) => (release = resolve));
+        return [];
+      },
+      async execute() {
+        return { ok: true, content: "" };
+      },
+    };
+    const emitted: ServerMessage[] = [];
+    const session = new AgentSession({
+      createModel: async () => replyingModel(),
+      createTools: () => slowTools,
+      filesTools: inPageToolPort([]),
+      describeAttachedFiles: () => "no files attached",
+      secrets: configSecretPort({}),
+      permission: allowAllPermissions,
+      emit: (message) => {
+        if (message.type !== "load-step") emitted.push(message);
+      },
+    });
+
+    const loading = session.load(VALID);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(emitted.map((m) => m.type)).toEqual(["loaded"]);
+
+    release();
+    await loading;
+    expect(emitted.map((m) => m.type)).toEqual(["loaded", "tools-listed"]);
+  });
+
+  it("does not take a loaded agent back when a server never answers while its tools are listed", async () => {
+    const silentTools = {
+      async list(): Promise<never> {
+        throw new Error("connect ECONNREFUSED");
+      },
+      async execute() {
+        return { ok: false, content: "" };
+      },
+    };
+    const emitted: ServerMessage[] = [];
+    const session = new AgentSession({
+      createModel: async () => replyingModel(),
+      createTools: () => silentTools,
+      filesTools: inPageToolPort([]),
+      describeAttachedFiles: () => "no files attached",
+      secrets: configSecretPort({}),
+      permission: allowAllPermissions,
+      emit: (message) => {
+        if (message.type !== "load-step") emitted.push(message);
+      },
+    });
+
+    await session.load(VALID);
+    expect(emitted.map((m) => m.type)).toEqual(["loaded"]);
   });
 
   it("streams a reply and finishes when a message is sent", async () => {
@@ -226,7 +285,7 @@ describe("AgentSession", () => {
     await session.load(WITH_SKILLS);
     expect(emitted[0]).toMatchObject({ type: "loaded", name: "Tester" });
     // The agent is ready and its own tools work; only the skill tools are absent.
-    expect(emitted[1]).toMatchObject({ toolCount: 1 });
+    expect(emitted[1]).toMatchObject({ type: "tools-listed" });
 
     await session.send("hi");
     expect(seenSystemPrompts[0]).not.toContain("available_skills");
@@ -263,7 +322,7 @@ describe("AgentSession", () => {
     });
 
     await session.load(VALID);
-    expect(emitted[1]).toMatchObject({ toolCount: 1, tools: [{ name: "list_files" }] });
+    expect(emitted[1]).toMatchObject({ type: "tools-listed", tools: [{ name: "list_files" }] });
 
     await session.send("hi");
     expect(seenSystemPrompts[0]).toContain("## Attached Files");
@@ -372,7 +431,7 @@ describe("AgentSession when two loads overlap", () => {
     await first;
 
     expect(emitted.filter((m) => m.type === "loaded")).toHaveLength(1);
-    expect(emitted.filter((m) => m.type === "agent-ready")).toHaveLength(1);
+    expect(emitted.filter((m) => m.type === "tools-listed")).toHaveLength(1);
     await session.send("hello");
     expect(systems[0]).toContain("second role");
   });
@@ -442,8 +501,6 @@ describe("AgentSession load steps", () => {
       "file:done",
       "model:active",
       "model:done",
-      "check:active",
-      "check:done",
     ]);
   });
 
@@ -464,7 +521,6 @@ describe("AgentSession load steps", () => {
     const model = steps.filter((s) => s.key === "model").at(-1);
     expect(model?.state).toBe("failed");
     expect(model?.note).toContain("no key");
-    expect(steps.some((s) => s.key === "check")).toBe(false);
   });
 });
 
@@ -655,5 +711,127 @@ describe("AgentSession when the conversation is replaced mid-answer", () => {
 
     expect(emitted).toEqual(NEXT_ANSWER);
     expect(seen[1]).toEqual([{ role: "user", content: "after" }]);
+  });
+});
+
+describe("AgentSession permissions", () => {
+  const DOCS = "https://docs.example.com/mcp";
+  const OTHER = "https://other.example.com/mcp";
+
+  const agentWith = (tools: string) => `---
+name: Tester
+interfaces:
+  - type: webchat
+${tools}---
+
+# Role
+r
+
+# Instructions
+i
+`;
+
+  const listing = (url: string, allow?: string[]) =>
+    agentWith(
+      [
+        "tools:",
+        "  mcp:",
+        "    - name: docs",
+        "      transport:",
+        "        type: http",
+        `        url: ${url}`,
+        ...(allow === undefined ? [] : ["      tool_filter:", "        allow:", ...allow.map((name) => `          - ${name}`)]),
+      ].join("\n") + "\n",
+    );
+
+  function serverTools(url: string) {
+    return {
+      async list() {
+        return [{ name: "echo", inputSchema: { type: "object" as const }, serverId: url }];
+      },
+      async execute() {
+        return { ok: true, content: "echoed" };
+      },
+    };
+  }
+
+  function callingEcho() {
+    let turn = 0;
+    return async () => ({
+      async *stream() {
+        turn += 1;
+        if (turn % 2 === 1) yield { type: "tool-call" as const, id: `c${turn}`, name: "echo", args: {} };
+        else yield { type: "text-delta" as const, text: "done" };
+        yield { type: "finish" as const, reason: "stop" as const };
+      },
+    });
+  }
+
+  function sessionOn(serverUrl: string) {
+    const asked: string[] = [];
+    const emitted: ServerMessage[] = [];
+    const session = new AgentSession({
+      createModel: callingEcho(),
+      createTools: () => serverTools(serverUrl),
+      filesTools: inPageToolPort([]),
+      describeAttachedFiles: () => "no files attached",
+      secrets: configSecretPort({}),
+      permission: {
+        request: vi.fn(async (call: { serverId?: string; name: string }) => {
+          asked.push(`${call.serverId}::${call.name}`);
+          return "deny" as const;
+        }),
+      },
+      emit: (message) => {
+        if (message.type !== "load-step") emitted.push(message);
+      },
+    });
+    return { session, asked, emitted };
+  }
+
+  const toolResult = (emitted: ServerMessage[]) => emitted.find((m) => m.type === "tool-result");
+
+  it("runs a tool the file lists as allowed without asking anyone", async () => {
+    const { session, asked, emitted } = sessionOn(DOCS);
+    await session.load(listing(DOCS, ["echo"]));
+    await session.send("go");
+    expect(asked).toEqual([]);
+    expect(toolResult(emitted)).toMatchObject({ ok: true, content: "echoed" });
+  });
+
+  it("asks about a tool the file does not list", async () => {
+    const { session, asked } = sessionOn(DOCS);
+    await session.load(listing(DOCS, ["something_else"]));
+    await session.send("go");
+    expect(asked).toEqual([`${DOCS}::echo`]);
+  });
+
+  it("asks about every tool on a server whose tools the file does not list", async () => {
+    const { session, asked } = sessionOn(DOCS);
+    await session.load(listing(DOCS));
+    await session.send("go");
+    expect(asked).toEqual([`${DOCS}::echo`]);
+  });
+
+  it("does not let a tool allowed on one server be run on another without asking", async () => {
+    const { session, asked } = sessionOn(OTHER);
+    await session.load(listing(DOCS, ["echo"]));
+    await session.send("go");
+    expect(asked).toEqual([`${OTHER}::echo`]);
+  });
+
+  it("stops allowing what an earlier file listed once another agent is loaded", async () => {
+    const { session, asked } = sessionOn(DOCS);
+    await session.load(listing(DOCS, ["echo"]));
+    await session.load(listing(DOCS, ["something_else"]));
+    await session.send("go");
+    expect(asked).toEqual([`${DOCS}::echo`]);
+  });
+
+  it("denies a tool the person denied, and tells the model so", async () => {
+    const { session, emitted } = sessionOn(DOCS);
+    await session.load(listing(DOCS, ["something_else"]));
+    await session.send("go");
+    expect(toolResult(emitted)).toMatchObject({ ok: false, content: "Tool call was denied by the user." });
   });
 });

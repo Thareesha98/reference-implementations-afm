@@ -79,7 +79,7 @@ describe("resultOf", () => {
   });
 
   it("says the key was accepted for the model", () => {
-    expect(resultOf({}, { credential: "key", hadSignIn: false, answered: "OpenAI" })).toEqual({ state: "ready", note: "OpenAI · key accepted" });
+    expect(resultOf({}, { credential: "key", hadSignIn: false, answered: "OpenAI" })).toEqual({ state: "ready", note: "OpenAI · authenticated" });
   });
 
   it("needs setup, not a failure, when nothing was provided", () => {
@@ -179,6 +179,10 @@ describe("summaryOf", () => {
   it("reads Ready only when every row answered", () => {
     expect(summaryOf([row("ready"), row("ready", "linear")], "opened").chip).toBe("Ready");
     expect(summaryOf([row("ready"), row("waiting", "linear")], "none").chip).toBe("Waiting");
+  });
+
+  it("only says to press Run once everything is ready", () => {
+    expect(summaryOf([row("ready"), row("ready", "linear")], "opened").text).toBe("Press Run to start.");
   });
 });
 

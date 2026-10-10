@@ -82,7 +82,6 @@ describe("resolveContent", () => {
       name: "Test agent",
       description: "",
       source: "agent-source",
-      favorite: false,
       createdAt: 0,
       updatedAt: 0,
       origin: "blank",

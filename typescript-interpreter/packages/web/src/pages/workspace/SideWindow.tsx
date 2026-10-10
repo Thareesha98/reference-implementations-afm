@@ -51,7 +51,7 @@ const CLOSE = "M18 6L6 18M6 6l12 12";
 /** One surface in the side window: what it is, a way out, and the body. */
 export function SidePane({ title, heading, onClose, onExpand, over = false, flush = false, floating = false, children }: Props) {
   return (
-    <section className={`u-panel ${over ? "is-over" : ""} ${floating ? "is-floating" : ""}`} aria-label={title}>
+    <section className={`u-panel ${over ? "is-over panel-slide-in" : ""} ${floating ? "is-floating" : ""}`} aria-label={title}>
       <div className="u-panel-head">
         {heading ?? <span className="u-panel-title">{title}</span>}
         <span style={{ marginLeft: "auto", display: "flex", gap: "2px" }}>

@@ -34,23 +34,18 @@ describe("grantsToRevoke", () => {
     updatedAt: 0,
   });
 
-  it("takes back the grant of a tool that is no longer allowed", () => {
+  it("takes back every grant on the server", () => {
     const entries = [entry("search", A), entry("fetch", A)];
-    expect(grantsToRevoke(entries, A, ["search"]).map((e) => e.toolName)).toEqual(["fetch"]);
-  });
-
-  it("takes back every grant on the server when nothing is allowed", () => {
-    const entries = [entry("search", A), entry("fetch", A)];
-    expect(grantsToRevoke(entries, A, [])).toEqual(entries);
+    expect(grantsToRevoke(entries, A)).toEqual(entries);
   });
 
   it("leaves another server's grant alone, even for a tool of the same name", () => {
-    expect(grantsToRevoke([entry("search", B)], A, [])).toEqual([]);
+    expect(grantsToRevoke([entry("search", B)], A)).toEqual([]);
   });
 
   it("leaves alone what already asks, and entries that belong to no server", () => {
     const entries = [entry("search", A, "always-ask"), entry("fetch", undefined)];
-    expect(grantsToRevoke(entries, A, [])).toEqual([]);
+    expect(grantsToRevoke(entries, A)).toEqual([]);
   });
 });
 

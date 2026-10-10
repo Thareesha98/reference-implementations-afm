@@ -24,10 +24,10 @@ import { resolveContent, normalizeAgentFileUrl } from "../../load-paths";
 import { usableSecrets } from "../../chat-state";
 import { KeepOnDevice } from "./KeepOnDevice";
 
-function SetupColumn({ children }: { children: ReactNode }) {
+function SetupColumn({ children, slide = false }: { children: ReactNode; slide?: boolean }) {
   return (
     <div className="u-setup">
-      <div className="u-setup-col">{children}</div>
+      <div className={slide ? "u-setup-col panel-slide-in" : "u-setup-col"}>{children}</div>
     </div>
   );
 }
@@ -162,7 +162,7 @@ export function StartHere({
 
   if (view === "import") {
     return (
-      <SetupColumn>
+      <SetupColumn slide>
         <BackLink onClick={() => setView("menu")} />
         <h3 className="u-setup-title">Import a file</h3>
         <div
@@ -223,7 +223,7 @@ export function StartHere({
 
   if (view === "templates") {
     return (
-      <SetupColumn>
+      <SetupColumn slide>
         <BackLink onClick={() => setView("menu")} />
         <h3 className="u-setup-title">Pick a starting point</h3>
         <div className="u-start-list">
@@ -335,7 +335,7 @@ export function StartHere({
   if (view === "prompt") {
     const canWrite = prompt.trim() !== "" && (keySaved || key.trim() !== "") && !writing;
     return (
-      <SetupColumn>
+      <SetupColumn slide>
         <BackLink onClick={() => setView("menu")} />
         <h3 className="u-setup-title">Describe the agent you want</h3>
         <p className="u-setup-note">

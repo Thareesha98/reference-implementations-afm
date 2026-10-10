@@ -14,10 +14,14 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 import { markColour, providerColour } from "./mark-colour";
 import { ProviderMark } from "./ProviderMark";
 import { MODEL_ROW, summaryOf, type KeysState, type SetupRow } from "./setup-check";
+
+/** Long enough to see the last row turn ready before the chat takes over. */
+const AUTO_RUN_DELAY_MS = 500;
 
 interface Props {
   rows: SetupRow[];
@@ -100,10 +104,10 @@ function Keys({ state, onRetry }: { state: KeysState; onRetry: () => void }) {
       </span>
       <span className="u-run-t">
         <span className="u-run-name">
-          {declined ? "Your device didn't confirm" : state === "opening" ? "Opening your saved keys" : "Saved keys opened"}
+          {declined ? "Your device didn't confirm" : state === "opening" ? "Opening your saved keys" : "Saved keys"}
         </span>
         <span className="u-run-note">
-          {declined ? "Nothing was opened." : state === "opening" ? "Your device is asking." : "Ready for this tab."}
+          {declined ? "Nothing was opened." : state === "opening" ? "Your device is asking." : "Ready"}
         </span>
       </span>
       {declined ? (
@@ -129,6 +133,14 @@ function Keys({ state, onRetry }: { state: KeysState; onRetry: () => void }) {
 }
 
 export function SetupPane({ rows, keys, provider, ready, onConfigure, onCheckAgain, onRetryKeys, onRun }: Props) {
+  const run = useRef(onRun);
+  run.current = onRun;
+  useEffect(() => {
+    if (!ready) return;
+    const timer = window.setTimeout(() => run.current(), AUTO_RUN_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [ready]);
+
   const summary = summaryOf(rows, keys);
   const servers = rows.filter((row) => row.kind === "server");
   const busy = keys === "opening" || rows.some((row) => row.state === "checking");

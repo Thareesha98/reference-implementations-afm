@@ -26,7 +26,6 @@ export interface ChatStatus {
 const IDLE: Record<Exclude<AgentStatus, "streaming">, ChatStatus | null> = {
   ready: { tone: "ok", label: "Ready" },
   connecting: { tone: "warn", label: "Starting" },
-  testing: { tone: "warn", label: "Checking tools" },
   "not-ready": { tone: "bad", label: "Needs attention" },
   "no-agent": null,
 };

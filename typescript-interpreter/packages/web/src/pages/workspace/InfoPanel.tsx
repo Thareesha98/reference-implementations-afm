@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { AgentMetadata } from "@afm/engine";
 import type { SavedAgent } from "../../agents-store";
 import { AgentAvatar, iconUrlError } from "../../chat/AgentAvatar";
@@ -22,12 +22,12 @@ import { hostOf } from "../../load-paths";
 import { whenAgo } from "./AgentPicker";
 import { setFrontmatterValue } from "./agent-source-edit";
 import { LicenseSelect } from "./LicenseSelect";
+import { useAutosize } from "./use-autosize";
 
 interface Props {
   content: string;
   metadata: AgentMetadata | null;
   saved: SavedAgent | undefined;
-  onToggleFavorite: () => void;
   onApply: (content: string) => void;
   onClose: () => void;
 }
@@ -46,6 +46,7 @@ type Field = keyof typeof KEYS;
 type Draft = Record<Field, string>;
 
 const FIELDS = Object.keys(KEYS) as Field[];
+const MAX_DESCRIPTION_HEIGHT = 200;
 const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
 function present(text: string | undefined): string | null {
@@ -98,11 +99,13 @@ export function aboutRows(metadata: AgentMetadata | null): { label: string; valu
 }
 
 /** What the file says about itself and what this browser's library says about the file. */
-export function InfoPanel({ content, metadata, saved, onToggleFavorite, onApply, onClose }: Props) {
+export function InfoPanel({ content, metadata, saved, onApply, onClose }: Props) {
   const [start] = useState(() => startingDraft(metadata));
   const [draft, setDraft] = useState(start);
   const [iconOpen, setIconOpen] = useState(false);
   const [iconText, setIconText] = useState(start.icon);
+  const descriptionId = useId();
+  const descriptionRef = useAutosize(draft.description, MAX_DESCRIPTION_HEIGHT);
   const readOnly = metadata === null;
   const edit = (field: Field, text: string) => setDraft({ ...draft, [field]: text });
   const versionProblem = draft.version.trim() === start.version ? null : versionError(draft.version);
@@ -130,24 +133,7 @@ export function InfoPanel({ content, metadata, saved, onToggleFavorite, onApply,
     <>
       <div className="u-panel-body">
         <div className="u-group">
-          <div className="u-label-row">
-            <span className="u-label">About</span>
-            <div className="u-spacer" />
-            {saved !== undefined && (
-              <button
-                className={`u-ico tiny ${saved.favorite ? "on" : ""}`}
-                data-tip={saved.favorite ? "Remove from favorites" : "Add to favorites"}
-                aria-label={saved.favorite ? "Remove from favorites" : "Add to favorites"}
-                aria-pressed={saved.favorite}
-                onClick={onToggleFavorite}
-              >
-                <svg viewBox="0 0 24 24" fill={saved.favorite ? "currentColor" : "none"} stroke="currentColor"
-                  strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M12 3.5l2.7 5.6 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z" />
-                </svg>
-              </button>
-            )}
-          </div>
+          <span className="u-label">About</span>
 
           <div className="u-info-id">
             <span className="u-info-avatar-wrap">
@@ -175,16 +161,29 @@ export function InfoPanel({ content, metadata, saved, onToggleFavorite, onApply,
                 disabled={readOnly}
                 onChange={(event) => edit("name", event.target.value)}
               />
+            </div>
+          </div>
+
+          <div className="u-desc">
+            <label className="u-label" htmlFor={descriptionId}>
+              Description
+            </label>
+            <div className={`u-desc-box ${readOnly ? "is-off" : ""}`}>
               <textarea
-                className="u-ghost"
+                id={descriptionId}
+                ref={descriptionRef}
+                className="u-desc-field"
                 rows={3}
                 value={draft.description}
-                placeholder="Add a short description"
-                aria-label="Description"
+                placeholder="Say what this agent is for, in a sentence or two"
+                aria-describedby={`${descriptionId}-hint`}
                 disabled={readOnly}
                 onChange={(event) => edit("description", event.target.value)}
               />
             </div>
+            <p className="u-hint" id={`${descriptionId}-hint`}>
+              Shown at the top of a new chat. Left empty, it is drawn from the role.
+            </p>
           </div>
 
           {iconOpen && (

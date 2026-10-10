@@ -101,18 +101,15 @@ export function NotReadyReason({
 }
 
 export function EmptyState({ status, agentName, iconUrl = "", loadSteps, notReady, onRetry, description = "", role = "", onAsk, onReplaceKey }: Props) {
-  if (status === "connecting" || status === "testing") {
-    const label = status === "connecting" ? "Starting the agent" : "Testing the agent";
+  if (status === "connecting") {
     return (
       <div className="empty">
         <div className="loader-block">
           <div className="loader-ring" />
-          <h2>{label}</h2>
+          <h2>Starting the agent</h2>
           <LoadChecklist steps={loadSteps} />
           <div className="loader-steps">
-            <span className={`step ${status === "connecting" ? "active" : "done"}`}>Load</span>
-            <span className="step-line" />
-            <span className={`step ${status === "testing" ? "active" : ""}`}>Test</span>
+            <span className="step active">Load</span>
             <span className="step-line" />
             <span className="step">Ready</span>
           </div>

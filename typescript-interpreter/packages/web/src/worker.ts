@@ -214,11 +214,7 @@ const oauth = createOAuthManager({
 
 const session = new AgentSession({
   createModel: modelFromMetadata,
-  createTools: (metadata) =>
-    toolsFromMetadata(metadata, defaultMcpProxyConfig, oauthDeps, {
-      onServerProgress: (name, state, note) =>
-        scope.postMessage({ type: "load-step", key: `mcp:${name}`, label: `Connecting to ${name}`, state, note }),
-    }),
+  createTools: (metadata) => toolsFromMetadata(metadata, defaultMcpProxyConfig, oauthDeps),
   filesTools: filesPort,
   describeAttachedFiles: () => listFilesText(attachedFiles),
   secrets,

@@ -62,7 +62,6 @@ export interface PendingPermission {
 export type AgentStatus =
   | "no-agent"
   | "connecting"
-  | "testing"
   | "ready"
   | "not-ready"
   | "streaming";
@@ -74,7 +73,6 @@ export interface ChatState {
   mcpServers: string[];
   planIssues: PlanIssue[];
   loadSteps: LoadStep[];
-  toolCount: number;
   tools: ToolInfo[];
   notReady: string | null;
   messages: UiMessage[];
@@ -97,7 +95,6 @@ export const initialChatState: ChatState = {
   mcpServers: [],
   planIssues: [],
   loadSteps: [],
-  toolCount: 0,
   tools: [],
   notReady: null,
   messages: [],
@@ -122,7 +119,7 @@ export function usableSecrets(state: ChatState): string[] {
 }
 
 /** Sealed on disk and not yet opened in this tab: a passkey tap away, and unreadable until then. */
-export function lockedSecrets(state: Pick<ChatState, "savedSecrets" | "passkeySecrets">): string[] {
+export function lockedSecrets(state: ChatState): string[] {
   return state.passkeySecrets.filter((name) => !state.savedSecrets.includes(name));
 }
 
@@ -295,15 +292,15 @@ function applyServerMessage(state: ChatState, message: ServerMessage): ChatState
     case "loaded":
       return {
         ...state,
-        status: "testing",
+        status: "ready",
         agentName: message.name,
         mcpServers: message.mcpServers,
         planIssues: message.plan.issues,
         notReady: null,
         error: null,
       };
-    case "agent-ready":
-      return { ...state, status: "ready", toolCount: message.toolCount, tools: message.tools, notReady: null };
+    case "tools-listed":
+      return { ...state, tools: message.tools };
     case "agent-not-ready":
       return { ...state, status: "not-ready", notReady: message.reason };
     case "secrets-list":

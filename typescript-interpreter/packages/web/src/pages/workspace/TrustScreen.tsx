@@ -96,7 +96,7 @@ export function TrustScreen({ metadata, source, savedSecrets, onRun, onOpenBuild
         </div>
 
         <p className="u-hint">
-          Tools on other servers ask before they run, unless you have allowed them in this tab. A key you enter stays
+          Tools the file lists run without asking. Any other tool asks first, unless you allow it in this tab. A key you enter stays
           in memory for this tab unless you choose to save it on this device.
         </p>
         <div className="u-trust-actions">

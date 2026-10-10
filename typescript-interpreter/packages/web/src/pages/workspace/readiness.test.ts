@@ -109,7 +109,6 @@ describe("readiness", () => {
 
   it("says it is running once the agent on screen has started", () => {
     expect(sentence(readiness(input({ current: true })))).toBe("Running");
-    expect(sentence(readiness(input({ current: true, status: "testing" })))).toBe("Running");
   });
 
   it("goes back to ready when the file has changed since the run", () => {

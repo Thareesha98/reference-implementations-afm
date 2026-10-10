@@ -51,35 +51,7 @@ export class McpProxyRequiredError extends Error {
   }
 }
 
-export type ServerProgress = (name: string, state: "active" | "done" | "failed", note?: string) => void;
-
-// Connecting is lazy (first list()). Wrapping each server lets the loading screen tick them off and
-// name the one that failed.
-function reportingToolPort(port: ToolPort, name: string, report: ServerProgress): ToolPort {
-  let announced = false;
-  return {
-    ...port,
-    async list() {
-      if (!announced) {
-        announced = true;
-        report(name, "active");
-      }
-      try {
-        const descriptors = await port.list();
-        report(name, "done");
-        return descriptors;
-      } catch (error) {
-        report(name, "failed", error instanceof Error ? error.message : String(error));
-        throw error;
-      }
-    },
-    execute: (call, signal) => port.execute(call, signal),
-    dispose: port.dispose === undefined ? undefined : () => port.dispose!(),
-  };
-}
-
 export interface ToolSetupOptions {
-  onServerProgress?: ServerProgress;
   /** Passed to every server. The Add-a-server panel uses a shorter one, since someone is watching. */
   setupTimeoutMs?: number;
 }
@@ -90,7 +62,7 @@ export function mcpServerPort(
   server: McpServer,
   proxy: McpProxyConfig | null,
   authDeps: McpDynamicAuthDeps = {},
-  { onServerProgress, setupTimeoutMs }: ToolSetupOptions = {},
+  { setupTimeoutMs }: ToolSetupOptions = {},
 ): ToolPort | null {
   const { transport } = server;
   if (transport.type !== "http") return null;
@@ -115,9 +87,6 @@ export function mcpServerPort(
   });
   if (server.tool_filter !== undefined) {
     port = filteredToolPort(port, server.tool_filter);
-  }
-  if (onServerProgress !== undefined) {
-    port = reportingToolPort(port, server.name, onServerProgress);
   }
   return port;
 }
