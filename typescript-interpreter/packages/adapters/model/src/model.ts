@@ -40,6 +40,40 @@ export function createAnthropicModel(options: ModelOptions): ModelPort {
   return streamingModelPort(provider(options.model ?? "claude-sonnet-4-5"));
 }
 
+export type KeyCheck = { ok: true } | { ok: false; status: number | null };
+
+const KEY_CHECKS = {
+  openai: (apiKey: string) => ({
+    url: "https://api.openai.com/v1/models",
+    headers: { authorization: `Bearer ${apiKey}` },
+  }),
+  anthropic: (apiKey: string) => ({
+    url: "https://api.anthropic.com/v1/models?limit=1",
+    headers: {
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true",
+    },
+  }),
+};
+
+const KEY_CHECK_TIMEOUT_MS = 12_000;
+const REQUEST_TIMEOUT = 408;
+
+export async function checkModelKey(
+  provider: keyof typeof KEY_CHECKS,
+  apiKey: string,
+  fetchFn: typeof fetch = fetch,
+): Promise<KeyCheck> {
+  const { url, headers } = KEY_CHECKS[provider](apiKey);
+  try {
+    const response = await fetchFn(url, { headers, signal: AbortSignal.timeout(KEY_CHECK_TIMEOUT_MS) });
+    return response.ok ? { ok: true } : { ok: false, status: response.status };
+  } catch (error) {
+    return { ok: false, status: error instanceof DOMException && error.name === "TimeoutError" ? REQUEST_TIMEOUT : null };
+  }
+}
+
 function streamingModelPort(model: LanguageModel): ModelPort {
   return {
     async *stream(request: ModelRequest, signal: AbortSignal): AsyncIterable<ModelEvent> {

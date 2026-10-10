@@ -15,7 +15,7 @@
 // under the License.
 
 import { describe, it, expect } from "vitest";
-import { modelEventsFromPart, toModelMessages, toToolSet, createAnthropicModel, createOpenAIModel } from "./model";
+import { modelEventsFromPart, toModelMessages, toToolSet, createAnthropicModel, createOpenAIModel, checkModelKey } from "./model";
 import type { TextStreamPart, ToolSet } from "ai";
 import type { ChatMessage, ToolDescriptor, ModelPort } from "@afm/engine";
 
@@ -285,5 +285,45 @@ describe("system prompt handling", () => {
     await drain(createOpenAIModel({ apiKey: "k", model: "gpt-4o", fetch: real.fn }), "You are a tutor.");
     const withSystem = real.bodies[0]?.["input"] as { role: string; content: string }[];
     expect(withSystem[0]).toEqual({ role: "system", content: "You are a tutor." });
+  });
+});
+
+describe("checkModelKey", () => {
+  const answering = (status: number) => (async () => new Response("{}", { status })) as typeof fetch;
+
+  it("accepts a key the provider lists models for", async () => {
+    expect(await checkModelKey("openai", "sk-ok", answering(200))).toEqual({ ok: true });
+  });
+
+  it("sends the key the way each provider expects it", async () => {
+    const seen: { url: string; headers: Record<string, string> }[] = [];
+    const record = (async (url: string, init?: RequestInit) => {
+      seen.push({ url, headers: init?.headers as Record<string, string> });
+      return new Response("{}");
+    }) as unknown as typeof fetch;
+    await checkModelKey("openai", "sk-1", record);
+    await checkModelKey("anthropic", "ak-1", record);
+    expect(seen[0]).toEqual({ url: "https://api.openai.com/v1/models", headers: { authorization: "Bearer sk-1" } });
+    expect(seen[1]?.url).toBe("https://api.anthropic.com/v1/models?limit=1");
+    expect(seen[1]?.headers["x-api-key"]).toBe("ak-1");
+    expect(seen[1]?.headers["anthropic-dangerous-direct-browser-access"]).toBe("true");
+  });
+
+  it("reports the status of a refusal", async () => {
+    expect(await checkModelKey("anthropic", "bad", answering(401))).toEqual({ ok: false, status: 401 });
+  });
+
+  it("reports a request that never arrived as no status", async () => {
+    const offline = (async () => {
+      throw new TypeError("Failed to fetch");
+    }) as unknown as typeof fetch;
+    expect(await checkModelKey("openai", "sk", offline)).toEqual({ ok: false, status: null });
+  });
+
+  it("reports a provider that never answers as a timeout", async () => {
+    const timedOut = (async () => {
+      throw new DOMException("The operation timed out.", "TimeoutError");
+    }) as unknown as typeof fetch;
+    expect(await checkModelKey("openai", "sk", timedOut)).toEqual({ ok: false, status: 408 });
   });
 });
