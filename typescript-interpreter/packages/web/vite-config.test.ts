@@ -41,6 +41,10 @@ describe("the shipped Content-Security-Policy", () => {
     }
   });
 
+  it("does not let the page reach an MCP registry", () => {
+    expect(directive("connect-src").join(" ")).not.toContain("registry.modelcontextprotocol.io");
+  });
+
   it("keeps script-src to 'self' with no inline or eval", () => {
     const values = directive("script-src");
     expect(values).toEqual(["'self'"]);

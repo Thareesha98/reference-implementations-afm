@@ -71,6 +71,15 @@ pnpm audit           # dependency vulnerabilities
 
 `pnpm run check` runs typecheck and tests together. CI (`.github/workflows/typescript-interpreter.yml`) runs all three on every push and pull request that touches this directory.
 
+## Adding a Server to the Directory
+
+Connect tools lists the servers written down in `packages/web/src/mcp-directory.ts`; nothing is fetched from a registry. To add one, append an object to `DIRECTORY_ENTRIES` (order does not matter, the list is sorted when shown):
+
+- `url` is the address the publisher's own documentation gives, and `docsUrl` is the page that prints it.
+- `auth` is `{ type: "none" }`, `{ type: "bearer", description }` for a key the person pastes, or `{ type: "oauth2", ... }` for sign-in. Copy `authorizeUrl` and `tokenUrl` from the server's `/.well-known/oauth-authorization-server` document; add `registrationUrl` when it has a `registration_endpoint`, `clientIdMetadata: true` when it sets `client_id_metadata_document_supported`, and `scopes` from its 401 challenge or protected-resource metadata. The endpoints must match that document exactly, because sign-in checks them against it.
+
+`pnpm test` rejects an entry with a duplicate id or address, a non-https URL, or an incomplete sign-in.
+
 ## Building for Production
 
 ```bash
@@ -104,7 +113,7 @@ typescript-interpreter/
 
 The agent's plaintext credentials stay in the Web Worker: the main thread never holds one in the clear, and a typed secret lives only for the tab unless the user chooses to seal it behind a device passkey. Saved chats and the agent library are stored in the browser (IndexedDB/localStorage) unencrypted - only sealed keys are encrypted.
 
-The page's Content-Security-Policy has no `unsafe-eval` and a `connect-src` allowlist of exactly `'self'`, `api.openai.com`, `api.anthropic.com`, `registry.modelcontextprotocol.io`, `raw.githubusercontent.com`, `gist.githubusercontent.com`, and the configured MCP proxy origin. This policy is sent as an HTTP response header on every file the site serves, not only `index.html`: a `<meta>` CSP would not apply to the worker scripts at all (workers are not governed by the CSP of the page that created them), so the real enforcement has to come from the header, on the worker's own response.
+The page's Content-Security-Policy has no `unsafe-eval` and a `connect-src` allowlist of exactly `'self'`, `api.openai.com`, `api.anthropic.com`, `raw.githubusercontent.com`, `gist.githubusercontent.com`, and the configured MCP proxy origin. This policy is sent as an HTTP response header on every file the site serves, not only `index.html`: a `<meta>` CSP would not apply to the worker scripts at all (workers are not governed by the CSP of the page that created them), so the real enforcement has to come from the header, on the worker's own response.
 
 The proxy blocks requests to private/loopback/link-local addresses and plain `http://` targets (SSRF protection, `AFM_ALLOW_LOOPBACK` excepted for local development only), strips hop-by-hop and forwarding headers, and enforces size, rate and time limits on every request - see `packages/mcp-proxy/src` for the specifics.
 
