@@ -29,6 +29,7 @@ export interface ModelOption {
 export interface ProviderOption {
   id: string;
   label: string;
+  host: string;
   // The environment variable this provider's key is conventionally read from.
   secretName: string;
   models: ModelOption[];
@@ -38,6 +39,7 @@ export const MODEL_PROVIDERS: ProviderOption[] = [
   {
     id: "openai",
     label: "OpenAI",
+    host: "api.openai.com",
     secretName: "OPENAI_API_KEY",
     models: [
       { id: "gpt-4o", label: "GPT-4o", short: "GPT-4o", note: "general purpose" },
@@ -49,6 +51,7 @@ export const MODEL_PROVIDERS: ProviderOption[] = [
   {
     id: "anthropic",
     label: "Anthropic",
+    host: "api.anthropic.com",
     secretName: "ANTHROPIC_API_KEY",
     models: [
       { id: "claude-opus-5", label: "Claude Opus 5", short: "Opus 5", note: "most capable" },

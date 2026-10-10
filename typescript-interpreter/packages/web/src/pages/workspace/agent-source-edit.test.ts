@@ -193,6 +193,20 @@ describe("setServerToolFilter", () => {
     expect(next).toContain("    - name: deepwiki\n      transport:");
   });
 
+  it("writes the tools turned off as a deny-list beside the allow-list", () => {
+    const next = setServerToolFilter(WITH_SERVERS, "gitlab", ["list_issues"], ["delete_issue", "close_issue"]);
+    expect(next).toContain(
+      "      tool_filter:\n        allow:\n          - list_issues\n        deny:\n          - delete_issue\n          - close_issue",
+    );
+  });
+
+  it("writes no deny-list when nothing is turned off, and replaces one that was there", () => {
+    const once = setServerToolFilter(WITH_SERVERS, "gitlab", ["a"], ["b"]);
+    const twice = setServerToolFilter(once, "gitlab", ["a", "b"]);
+    expect(twice).not.toContain("deny");
+    expect(twice.match(/tool_filter:/g)).toHaveLength(1);
+  });
+
   it("keeps every other line of the file exactly as it was", () => {
     const next = setServerToolFilter(WITH_SERVERS, "gitlab", ["list_issues"]);
     expect(next).toContain("url: https://gitlab.com/api/v4/mcp");

@@ -14,8 +14,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { createOpenAIModel, createAnthropicModel } from "@afm/adapter-model";
+import { createOpenAIModel, createAnthropicModel, checkModelKey } from "@afm/adapter-model";
+import type { KeyCheck } from "@afm/adapter-model";
 import type { AgentMetadata, ModelPort } from "@afm/engine";
+import { MissingCredentialError } from "./failure";
 
 // A blank value is not a key: clearing the Model panel field writes `api_key: ""`, which `??` would
 // pass through and send as an empty Authorization header.
@@ -23,6 +25,10 @@ function apiKeyOf(model: AgentMetadata["model"]): string | null {
   const auth = model?.authentication;
   const key = auth?.api_key ?? auth?.token ?? null;
   return key === null || key.trim() === "" ? null : key;
+}
+
+function unsupported(provider: string): Error {
+  return new Error(`Unsupported model provider for the browser: '${provider}'. Use 'openai' or 'anthropic'.`);
 }
 
 export async function modelFromMetadata(model: AgentMetadata["model"]): Promise<ModelPort> {
@@ -40,8 +46,15 @@ export async function modelFromMetadata(model: AgentMetadata["model"]): Promise<
     case "anthropic":
       return createAnthropicModel({ apiKey, model: name });
     default:
-      throw new Error(
-        `Unsupported model provider for the browser: '${provider}'. Use 'openai' or 'anthropic'.`,
-      );
+      throw unsupported(provider);
   }
+}
+
+export async function checkModelFromMetadata(model: AgentMetadata["model"]): Promise<KeyCheck> {
+  const provider = (model?.provider ?? "openai").toLowerCase();
+  const apiKey = apiKeyOf(model);
+
+  if (apiKey === null) throw new MissingCredentialError("api_key");
+  if (provider !== "openai" && provider !== "anthropic") throw unsupported(provider);
+  return checkModelKey(provider, apiKey);
 }

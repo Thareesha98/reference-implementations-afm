@@ -19,7 +19,7 @@ import type { UiMessage, AgentStatus } from "../chat-state";
 import type { LoadStep } from "../protocol";
 import { Message } from "./Message";
 import { ToolFootnote } from "./ToolFootnote";
-import { EmptyState } from "./EmptyState";
+import { EmptyState, NotReadyReason } from "./EmptyState";
 import { attachedFilesOf, attachedFileKey, attachmentBadge, describeAttachment } from "./attachment";
 
 interface Props {
@@ -196,6 +196,11 @@ export function MessageList(props: Props) {
             </div>
           )}
         </div>
+        {status === "not-ready" && (
+          <div className="xc-notready">
+            <NotReadyReason notReady={notReady} onRetry={onRetry} onReplaceKey={onReplaceKey} />
+          </div>
+        )}
         <div ref={endRef} />
       </div>
       {!atBottom && (

@@ -49,7 +49,7 @@ const FILES_SYSTEM_NOTE =
 
 export interface AgentSessionDeps {
   createModel: (model: AgentMetadata["model"]) => Promise<ModelPort>;
-  createTools: (metadata: AgentMetadata, loadId: string) => ToolPort;
+  createTools: (metadata: AgentMetadata) => ToolPort;
   filesTools: ToolPort;
   describeAttachedFiles: () => string;
   secrets: SecretPort;
@@ -73,7 +73,7 @@ export class AgentSession {
     this.deps.emit({ type: "load-step", key, label, state, note });
   }
 
-  async load(content: string, seedHistory?: ChatMessage[], loadId = ""): Promise<void> {
+  async load(content: string, seedHistory?: ChatMessage[]): Promise<void> {
     this.endTurn();
     // Loads can overlap; only the newest may install an agent or report on it.
     const number = ++this.loadCount;
@@ -97,7 +97,7 @@ export class AgentSession {
       this.step("model", `Connecting to ${modelLabel === "" ? "the model" : modelLabel}`, "done");
 
       stage = "tools";
-      const mcpTools = this.deps.createTools(loaded.metadata, loadId);
+      const mcpTools = this.deps.createTools(loaded.metadata);
 
       // `skills:` stays valid in a file, but this runtime does not load them.
       const tools = compositeToolPort([mcpTools, this.deps.filesTools]);

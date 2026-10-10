@@ -324,53 +324,6 @@ describe("AgentSession", () => {
     await session.load(VALID);
     expect(disposed).toEqual([0]);
   });
-
-  it("passes each load's own loadId to createTools, unaffected by a later, overlapping load", async () => {
-    const toolsLoadIds: string[] = [];
-    const gates = new Map<string, () => void>();
-    function gatedList(loadId: string): Promise<[]> {
-      return new Promise((resolve) => {
-        gates.set(loadId, () => resolve([]));
-      });
-    }
-
-    const session = new AgentSession({
-      createModel: () => Promise.resolve(replyingModel()),
-      createTools: (_metadata, loadId) => {
-        toolsLoadIds.push(loadId);
-        return {
-          list: () => gatedList(loadId),
-          execute: () => Promise.resolve({ ok: true, content: "" }),
-          dispose: () => Promise.resolve(),
-        };
-      },
-        filesTools: inPageToolPort([]),
-      describeAttachedFiles: () => "no files attached",
-      secrets: configSecretPort({}),
-      permission: allowAllPermissions,
-      emit: () => {},
-    });
-
-    async function flushUntil(predicate: () => boolean): Promise<void> {
-      for (let i = 0; i < 50 && !predicate(); i++) {
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      }
-    }
-
-    const loadA = session.load(VALID, undefined, "load-A");
-    await flushUntil(() => toolsLoadIds.length === 1);
-    const loadB = session.load(VALID, undefined, "load-B");
-    await flushUntil(() => toolsLoadIds.length === 2);
-
-    expect(toolsLoadIds).toEqual(["load-A", "load-B"]);
-
-    gates.get("load-B")?.();
-    await loadB;
-    gates.get("load-A")?.();
-    await loadA;
-
-    expect(toolsLoadIds).toEqual(["load-A", "load-B"]);
-  });
 });
 
 describe("AgentSession when two loads overlap", () => {

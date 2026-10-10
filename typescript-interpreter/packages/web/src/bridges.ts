@@ -14,11 +14,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type { SecretRef, ToolCall } from "@afm/engine";
+import type { ToolCall } from "@afm/engine";
 
 /**
- * A request the worker answers later, matched to its answer by key. The permission and prompt
- * bridges below share this shape.
+ * A request the worker answers later, matched to its answer by key.
  */
 function createPendingBridge<K, V>() {
   const pending = new Map<K, (value: V) => void>();
@@ -53,23 +52,6 @@ function createPendingBridge<K, V>() {
         settle(value);
       }
     },
-  };
-}
-
-export interface PromptBridge {
-  ask: (ref: SecretRef) => Promise<string | null>;
-  resolve: (name: string, value: string | null) => void;
-}
-
-export function createPromptBridge(request: (name: string) => void): PromptBridge {
-  const bridge = createPendingBridge<string, string | null>();
-  return {
-    ask(ref) {
-      const value = bridge.wait(ref.name);
-      request(ref.name);
-      return value;
-    },
-    resolve: bridge.resolve,
   };
 }
 

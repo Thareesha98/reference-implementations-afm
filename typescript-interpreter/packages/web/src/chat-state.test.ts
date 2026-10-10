@@ -15,7 +15,7 @@
 // under the License.
 
 import { describe, it, expect } from "vitest";
-import { chatReducer, initialChatState, usableSecrets } from "./chat-state";
+import { chatReducer, initialChatState, lockedSecrets, usableSecrets } from "./chat-state";
 import type { ServerMessage } from "./protocol";
 import type { ChatState } from "./chat-state";
 
@@ -91,16 +91,6 @@ describe("chatReducer", () => {
     expect(state.messages.map((message) => message.kind)).toEqual(["user", "assistant", "attachment"]);
   });
 
-  it("tracks a secret request and clears it on dismiss", () => {
-    let state = chatReducer(initialChatState, {
-      type: "server",
-      message: { type: "secret-request", name: "OPENAI_API_KEY" },
-    });
-    expect(state.pendingSecret).toBe("OPENAI_API_KEY");
-    state = chatReducer(state, { type: "secret-dismissed" });
-    expect(state.pendingSecret).toBeNull();
-  });
-
   it("tracks a permission request and clears it on dismiss", () => {
     let state = chatReducer(initialChatState, {
       type: "server",
@@ -111,57 +101,24 @@ describe("chatReducer", () => {
     expect(state.pendingPermission).toBeNull();
   });
 
-  it("tracks a pending oauth sign-in and clears it on dismiss", () => {
+  it("clears a stale permission prompt when the user views a different agent, before it's even loaded", () => {
     let state = chatReducer(initialChatState, {
-      type: "server",
-      message: {
-        type: "oauth-signin-needed",
-        provider: { authorizeUrl: "https://gitlab.example/authorize", tokenUrl: "https://gitlab.example/token", clientId: "old-client-id" },
-        loadId: "load-1",
-      },
-    });
-    expect(state.pendingOAuthSignIn).toEqual({
-      provider: { authorizeUrl: "https://gitlab.example/authorize", tokenUrl: "https://gitlab.example/token", clientId: "old-client-id" },
-    });
-    state = chatReducer(state, { type: "oauth-signin-dismissed" });
-    expect(state.pendingOAuthSignIn).toBeNull();
-  });
-
-  it("clears a stale pending sign-in (and secret/permission prompts) when the user views a different agent, before it's even loaded", () => {
-    let state = chatReducer(initialChatState, {
-      type: "server",
-      message: {
-        type: "oauth-signin-needed",
-        provider: { authorizeUrl: "https://gitlab.example/authorize", tokenUrl: "https://gitlab.example/token", clientId: "old-client-id" },
-        loadId: "load-1",
-      },
-    });
-    state = chatReducer(state, { type: "server", message: { type: "secret-request", name: "API_KEY" } });
-    state = chatReducer(state, {
       type: "server",
       message: { type: "permission-request", id: "c1", name: "multiply", args: {} },
     });
-    expect(state.pendingOAuthSignIn).not.toBeNull();
-    expect(state.pendingSecret).not.toBeNull();
     expect(state.pendingPermission).not.toBeNull();
 
     state = chatReducer(state, { type: "viewing-different-agent" });
-    expect(state.pendingOAuthSignIn).toBeNull();
-    expect(state.pendingSecret).toBeNull();
     expect(state.pendingPermission).toBeNull();
   });
 
-  it("also clears stale prompts once a different agent actually starts loading", () => {
+  it("also clears a stale prompt once a different agent actually starts loading", () => {
     let state = chatReducer(initialChatState, {
       type: "server",
-      message: {
-        type: "oauth-signin-needed",
-        provider: { authorizeUrl: "https://gitlab.example/authorize", tokenUrl: "https://gitlab.example/token", clientId: "old-client-id" },
-        loadId: "load-1",
-      },
+      message: { type: "permission-request", id: "c1", name: "multiply", args: {} },
     });
     state = chatReducer(state, { type: "agent-loading", content: "new agent source", keepMessages: false });
-    expect(state.pendingOAuthSignIn).toBeNull();
+    expect(state.pendingPermission).toBeNull();
   });
 
   it("records an error", () => {
@@ -416,5 +373,23 @@ describe("usableSecrets", () => {
     const state = afterReload(["SEALED"], ["IN_MEMORY"]);
     expect(state.passkeySecrets).toEqual(["SEALED"]);
     expect(state.savedSecrets).toEqual(["IN_MEMORY"]);
+  });
+});
+
+describe("lockedSecrets", () => {
+  it("lists what is sealed on disk and not yet open in this tab", () => {
+    expect(lockedSecrets(afterReload(["OPENAI_API_KEY", "HF_TOKEN"]))).toEqual(["OPENAI_API_KEY", "HF_TOKEN"]);
+  });
+
+  it("leaves out a sealed value once it is open in memory", () => {
+    expect(lockedSecrets(afterReload(["OPENAI_API_KEY", "HF_TOKEN"], ["OPENAI_API_KEY"]))).toEqual(["HF_TOKEN"]);
+  });
+
+  it("leaves out a value that was never sealed", () => {
+    expect(lockedSecrets(afterReload([], ["OPENAI_API_KEY"]))).toEqual([]);
+  });
+
+  it("is empty before the worker has said anything", () => {
+    expect(lockedSecrets(initialChatState)).toEqual([]);
   });
 });

@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import type { SecretRef } from "@afm/engine";
 import type { ServerMessage } from "./protocol";
 import { encryptString } from "./passkey/crypto";
@@ -37,7 +37,6 @@ vi.mock("./passkey/store", () => ({
 const { createWorkerSecretStore } = await import("./worker-secret-store");
 
 const ref = (name: string): SecretRef => ({ prefix: "env", name, raw: `\${env:${name}}` });
-const AUTO_LOCK_MS = 5 * 60 * 1000;
 
 const newKey = () => crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
 const credentialId = new Uint8Array([1, 2, 3]);
@@ -47,14 +46,9 @@ async function sealedOnDisk(name: string, value: string, key: CryptoKey): Promis
   disk.set(name, { ...(await encryptString(key, value)), credentialId, salt });
 }
 
-function setup(answerUnlocksWith?: CryptoKey | null) {
+function setup() {
   const messages: ServerMessage[] = [];
-  const store = createWorkerSecretStore((message) => {
-    messages.push(message);
-    if (message.type === "passkey-unlock-request" && answerUnlocksWith !== undefined) {
-      queueMicrotask(() => store.resolveUnlock(message.id, answerUnlocksWith));
-    }
-  });
+  const store = createWorkerSecretStore((message) => void messages.push(message));
   const lastNames = () => (messages.filter((m) => m.type === "secrets-list").at(-1) as { names: string[] } | undefined)?.names;
   return { store, messages, lastNames };
 }
@@ -64,7 +58,6 @@ describe("the worker secret store", () => {
     disk.clear();
     slowReads.clear();
   });
-  afterEach(() => vi.useRealTimers());
 
   describe("values held in memory", () => {
     it("resolves what was set, and only that", async () => {
@@ -86,7 +79,7 @@ describe("the worker secret store", () => {
         const { store } = setup();
         expect((await store.memoryPort.resolve(ref(name))).status).toBe("unresolved");
         expect(store.refreshStore.get(name)).toBeNull();
-        expect(await store.isSaved(name)).toBe(false);
+        expect(store.approvedFor(name, "x.example")).toBe(false);
       },
     );
 
@@ -131,10 +124,11 @@ describe("the worker secret store", () => {
       expect(disk.size).toBe(0);
     });
 
-    it("knows a secret is saved when only the sealed copy exists", async () => {
-      const { store } = setup();
+    it("reports the names sealed on disk", async () => {
+      const { store, messages } = setup();
       await sealedOnDisk("API_KEY", "sk-1", await newKey());
-      expect(await store.isSaved("API_KEY")).toBe(true);
+      store.postSealedNames();
+      await vi.waitFor(() => expect(messages).toContainEqual({ type: "passkey-list", names: ["API_KEY"] }));
     });
 
     it("forgets the sealed copy on request", async () => {
@@ -280,146 +274,119 @@ describe("the worker secret store", () => {
   });
 
   describe("opening a sealed value", () => {
-    it("asks the main thread to unlock, then decrypts with the key it sends back", async () => {
-      const key = await newKey();
-      const { store, messages } = setup(key);
-      await sealedOnDisk("API_KEY", "sk-1", key);
-
-      expect(await store.passkeyPort.resolve(ref("API_KEY"))).toEqual({ status: "resolved", value: "sk-1" });
-      expect(messages.some((m) => m.type === "passkey-unlock-request" && m.name === "API_KEY")).toBe(true);
-    });
-
-    it("is unresolved when nothing was sealed", async () => {
-      const { store } = setup(await newKey());
-      expect((await store.passkeyPort.resolve(ref("API_KEY"))).status).toBe("unresolved");
-    });
-
-    it("is unresolved when the user declines the unlock", async () => {
-      const { store } = setup(null);
-      await sealedOnDisk("API_KEY", "sk-1", await newKey());
-      expect(await store.passkeyPort.resolve(ref("API_KEY"))).toMatchObject({ status: "unresolved", reason: expect.stringContaining("not unlocked") });
-    });
-
-    it("is unresolved when the key does not fit the sealed copy", async () => {
-      const { store } = setup(await newKey());
-      await sealedOnDisk("API_KEY", "sk-1", await newKey());
-      expect(await store.passkeyPort.resolve(ref("API_KEY"))).toMatchObject({ status: "unresolved", reason: expect.stringContaining("could not be unlocked") });
-    });
-
-    it("accepts a key the main thread sends unasked, for a panel that opened one on purpose", async () => {
+    it("decrypts with the key the main thread sends, and tells it which names it now holds", async () => {
       const key = await newKey();
       const { store, lastNames } = setup();
       await sealedOnDisk("API_KEY", "sk-1", key);
       store.acceptUnlock("API_KEY", key);
-      await vi.waitFor(() => expect(lastNames()).toEqual(["API_KEY"]));
+      await store.opened();
+      expect(lastNames()).toEqual(["API_KEY"]);
       expect(await store.memoryPort.resolve(ref("API_KEY"))).toEqual({ status: "resolved", value: "sk-1" });
     });
 
-    it("lets keys sent ahead of the answer finish opening, so one unlock covers every sealed name", async () => {
+    it("holds nothing for a key that does not fit the sealed copy", async () => {
+      const { store } = setup();
+      await sealedOnDisk("API_KEY", "sk-1", await newKey());
+      store.acceptUnlock("API_KEY", await newKey());
+      await store.opened();
+      expect((await store.memoryPort.resolve(ref("API_KEY"))).status).toBe("unresolved");
+    });
+
+    it("holds nothing for a name with no sealed copy", async () => {
+      const { store } = setup();
+      store.acceptUnlock("MISSING", await newKey());
+      await store.opened();
+      expect((await store.memoryPort.resolve(ref("MISSING"))).status).toBe("unresolved");
+    });
+
+    it("lets every key sent before it finish opening, however slowly the disk answers", async () => {
       const modelKey = await newKey();
       const refreshKey = await newKey();
-      const { store, messages } = setup();
+      const { store } = setup();
       await sealedOnDisk("API_KEY", "sk-1", modelKey);
       await sealedOnDisk("afm.oauth.x.refresh", "R0", refreshKey);
       let release!: () => void;
       slowReads.set("afm.oauth.x.refresh", new Promise<void>((resolve) => (release = resolve)));
 
-      const resolved = store.passkeyPort.resolve(ref("API_KEY"));
-      await vi.waitFor(() => expect(messages.some((m) => m.type === "passkey-unlock-request")).toBe(true));
-      const request = messages.find((m) => m.type === "passkey-unlock-request") as { id: string };
       store.acceptUnlock("afm.oauth.x.refresh", refreshKey);
-      store.resolveUnlock(request.id, modelKey);
+      store.acceptUnlock("API_KEY", modelKey);
+      const done = store.opened();
       setTimeout(release);
+      await done;
 
-      expect(await resolved).toEqual({ status: "resolved", value: "sk-1" });
-      // Not awaited: asking again would wait for an answer that never comes.
-      void store.loadSealedRefresh("afm.oauth.x.refresh");
+      expect(store.refreshStore.get("afm.oauth.x.refresh")).toBe("R0");
+      expect(await store.memoryPort.resolve(ref("API_KEY"))).toEqual({ status: "resolved", value: "sk-1" });
+    });
 
-      await vi.waitFor(() => expect(store.refreshStore.get("afm.oauth.x.refresh")).toBe("R0"));
-      expect(messages.filter((m) => m.type === "passkey-unlock-request")).toHaveLength(1);
+    it("keeps a value for the whole tab: nothing locks it after a while", async () => {
+      vi.useFakeTimers();
+      try {
+        const key = await newKey();
+        const { store } = setup();
+        await sealedOnDisk("API_KEY", "sk-1", key);
+        store.acceptUnlock("API_KEY", key);
+        await store.opened();
+        vi.advanceTimersByTime(24 * 60 * 60 * 1000);
+        expect((await store.memoryPort.resolve(ref("API_KEY"))).status).toBe("resolved");
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 
-  describe("auto-lock", () => {
-    beforeEach(() => vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] }));
+  describe("the hosts a value was entered for", () => {
+    it("approves a value only for the host it was entered for", () => {
+      const { store } = setup();
+      store.set("HF_TOKEN", "hf_1", "huggingface.co");
+      expect(store.approvedFor("HF_TOKEN", "huggingface.co")).toBe(true);
+      expect(store.approvedFor("HF_TOKEN", "attacker.example")).toBe(false);
+      expect(store.approvedFor("HF_TOKEN", undefined)).toBe(false);
+    });
 
-    async function unlocked(name = "API_KEY") {
+    it("approves no host for a value entered without one, such as the model key", () => {
+      const { store } = setup();
+      store.set("OPENAI_API_KEY", "sk-1");
+      expect(store.approvedFor("OPENAI_API_KEY", "huggingface.co")).toBe(false);
+    });
+
+    it("forgets the old hosts when the value is entered again for another", () => {
+      const { store } = setup();
+      store.set("TOKEN", "one", "a.example");
+      store.set("TOKEN", "two", "b.example");
+      expect(store.approvedFor("TOKEN", "a.example")).toBe(false);
+      expect(store.approvedFor("TOKEN", "b.example")).toBe(true);
+    });
+
+    it("forgets them when the value is removed", () => {
+      const { store } = setup();
+      store.set("TOKEN", "one", "a.example");
+      store.remove("TOKEN");
+      expect(store.approvedFor("TOKEN", "a.example")).toBe(false);
+    });
+
+    it("saves them with the sealed copy and brings them back when it is opened", async () => {
       const key = await newKey();
-      const setupResult = setup(key);
-      await sealedOnDisk(name, "sk-1", key);
-      await setupResult.store.passkeyPort.resolve(ref(name));
-      return setupResult;
-    }
+      const first = setup();
+      first.store.set("HF_TOKEN", "hf_1", "huggingface.co");
+      first.store.seal("HF_TOKEN", key, credentialId, salt);
+      await vi.waitFor(() => expect(disk.get("HF_TOKEN")?.hosts).toEqual(["huggingface.co"]));
 
-    it("drops an unlocked value after five idle minutes, and says so", async () => {
-      const { store, lastNames } = await unlocked();
-      expect(lastNames()).toEqual(["API_KEY"]);
-
-      vi.advanceTimersByTime(AUTO_LOCK_MS);
-
-      expect((await store.memoryPort.resolve(ref("API_KEY"))).status).toBe("unresolved");
-      expect(lastNames()).toEqual([]);
+      const reloaded = setup();
+      reloaded.store.acceptUnlock("HF_TOKEN", key);
+      await reloaded.store.opened();
+      expect(reloaded.store.approvedFor("HF_TOKEN", "huggingface.co")).toBe(true);
+      expect(reloaded.store.approvedFor("HF_TOKEN", "attacker.example")).toBe(false);
     });
 
-    it("stays unlocked while there is activity", async () => {
-      const { store } = await unlocked();
-      vi.advanceTimersByTime(AUTO_LOCK_MS - 1000);
-      store.touch();
-      vi.advanceTimersByTime(AUTO_LOCK_MS - 1000);
-      expect((await store.memoryPort.resolve(ref("API_KEY"))).status).toBe("resolved");
-    });
+    it("keeps them when the sealed copy moves to another passkey", async () => {
+      const { store } = setup();
+      const from = await newKey();
+      await sealedOnDisk("HF_TOKEN", "hf_1", from);
+      disk.get("HF_TOKEN")!.hosts = ["huggingface.co"];
 
-    it("never locks a value that was only typed, since there is nothing to unlock it from", async () => {
-      const { store } = await unlocked();
-      store.set("TYPED", "typed-value");
-      vi.advanceTimersByTime(AUTO_LOCK_MS);
-      expect((await store.memoryPort.resolve(ref("TYPED"))).status).toBe("resolved");
-      expect((await store.memoryPort.resolve(ref("API_KEY"))).status).toBe("unresolved");
-    });
-
-    it("locks a remembered sign-in that was unlocked for a run, like any other unlocked secret", async () => {
-      const key = await newKey();
-      const { store, lastNames } = setup(key);
-      await sealedOnDisk("afm.oauth.x.refresh", "rt-1", key);
-
-      await store.loadSealedRefresh("afm.oauth.x.refresh");
-      expect(store.refreshStore.get("afm.oauth.x.refresh")).toBe("rt-1");
-      expect(lastNames()).toEqual(["afm.oauth.x.refresh"]);
-
-      vi.advanceTimersByTime(AUTO_LOCK_MS);
-
-      expect(store.refreshStore.get("afm.oauth.x.refresh")).toBeNull();
-    });
-
-    it("keeps re-sealing a rotating sign-in after auto-lock", async () => {
-      const key = await newKey();
-      const { store } = setup(key);
-      await sealedOnDisk("afm.oauth.x.refresh", "R0", key);
-      await store.loadSealedRefresh("afm.oauth.x.refresh");
-      store.refreshStore.set("afm.oauth.x.refresh", "R0");
-
-      vi.advanceTimersByTime(AUTO_LOCK_MS);
-      expect(store.refreshStore.get("afm.oauth.x.refresh")).toBeNull();
-
-      vi.useRealTimers();
-      await store.refreshStore.set("afm.oauth.x.refresh", "R1");
-
-      const blob = disk.get("afm.oauth.x.refresh")!;
-      expect(new TextDecoder().decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv: blob.iv }, key, blob.data))).toBe("R1");
-    });
-
-    it("drops a typed secret's key on auto-lock, so it cannot be silently re-sealed afterwards", async () => {
-      const key = await newKey();
-      const { store } = setup(key);
-      await sealedOnDisk("API_KEY", "sk-1", key);
-      await store.passkeyPort.resolve(ref("API_KEY"));
-
-      vi.advanceTimersByTime(AUTO_LOCK_MS);
-      vi.useRealTimers();
-      await store.refreshStore.set("API_KEY", "sk-2");
-
-      const blob = disk.get("API_KEY")!;
-      expect(new TextDecoder().decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv: blob.iv }, key, blob.data))).toBe("sk-1");
+      store.reseal("HF_TOKEN", from, await newKey(), new Uint8Array([7]), new Uint8Array([8]));
+      await vi.waitFor(() => expect(disk.get("HF_TOKEN")?.credentialId).toEqual(new Uint8Array([7])));
+      expect(disk.get("HF_TOKEN")?.hosts).toEqual(["huggingface.co"]);
     });
   });
 });

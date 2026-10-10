@@ -15,6 +15,7 @@
 // under the License.
 
 import type { AgentMetadata, SecretPort } from "@afm/engine";
+import { MissingCredentialError } from "./failure";
 
 const ENV_REFERENCE = /^\$\{env:([^}]+)\}$/;
 
@@ -55,8 +56,8 @@ async function resolveValues<T extends Record<string, unknown>>(
     const name = ENV_REFERENCE.exec(value.trim())?.[1]?.trim();
     if (name === undefined || name === "") continue;
     const resolution = await secrets.resolve({ prefix: "env", name, raw: value });
-    // Left as written when it cannot be resolved, so the connection fails as it normally would.
-    if (resolution.status === "resolved") resolved[key] = resolution.value;
+    if (resolution.status !== "resolved") throw new MissingCredentialError(name);
+    resolved[key] = resolution.value;
   }
   return resolved as T;
 }

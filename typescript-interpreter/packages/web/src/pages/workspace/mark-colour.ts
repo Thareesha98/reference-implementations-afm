@@ -24,3 +24,9 @@ export function markColour(name: string): string {
   for (const ch of name) hash = (hash * 31 + ch.charCodeAt(0)) % 997;
   return palette[hash % palette.length] as string;
 }
+
+export function providerColour(provider: string): string {
+  if (provider === "openai") return "#10A37F";
+  if (provider === "anthropic") return "#C15F3C";
+  return "var(--accent)";
+}

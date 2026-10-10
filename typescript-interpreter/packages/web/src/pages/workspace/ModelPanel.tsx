@@ -14,11 +14,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { usePasskeySupport } from "../../passkey/usePasskeySupport";
 import { useState } from "react";
 import { MODEL_PROVIDERS, findProvider } from "./model-catalog";
 import type { ProviderOption } from "./model-catalog";
 import { getModelField, setModelField, setModelApiKey, getModelApiKey, envSecretName } from "./agent-source-edit";
+import { KeepOnDevice } from "./KeepOnDevice";
+import type { Issue } from "./setup-check";
 
 interface Props {
   content: string;
@@ -27,8 +28,11 @@ interface Props {
   /** Of those, the ones sealed on disk, which survive a reload. */
   passkeySecrets: string[];
   onApply: (content: string) => void;
-  /** Resolves true when the key was sealed behind a passkey. */
-  onSaveKey: (name: string, value: string, withPasskey: boolean) => Promise<boolean>;
+  /** What Setup found wrong with the model, said in the window it sends the user to. */
+  issue: Issue | null;
+  onSaveKey: (name: string, value: string, keep: boolean) => Promise<boolean>;
+  /** Present when the window was opened from Setup, which it returns to. */
+  onBack?: () => void;
   onClose: () => void;
 }
 
@@ -36,18 +40,14 @@ interface Props {
  * Who provides the model, which model, and the key that unlocks it. Held as a draft and written on
  * Save, so half-finished edits never reach the file.
  */
-export function ModelPanel({ content, savedSecrets, passkeySecrets, onApply, onSaveKey, onClose }: Props) {
+export function ModelPanel({ content, savedSecrets, passkeySecrets, issue, onApply, onSaveKey, onBack, onClose }: Props) {
   const fileProvider = getModelField(content, "provider");
 
   const [provider, setProvider] = useState(findProvider(fileProvider) !== undefined ? fileProvider : "");
 
-  const support = usePasskeySupport();
-  const withPasskey = support?.usable === true;
-
   const [model, setModel] = useState(getModelField(content, "name"));
   const [key, setKey] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [sealFailed, setSealFailed] = useState(false);
+  const [keep, setKeep] = useState(false);
 
   const known = findProvider(provider);
   // The name the file already points at wins while the provider is unchanged; looking up the
@@ -57,27 +57,12 @@ export function ModelPanel({ content, savedSecrets, passkeySecrets, onApply, onS
     provider === fileProvider && fileSecretName !== "" ? fileSecretName : (known?.secretName ?? "");
   const saved = savedSecrets.includes(secretName);
   const sealed = passkeySecrets.includes(secretName);
+  const rejected = saved && issue?.kind === "rejected";
 
   function pickProvider(option: ProviderOption) {
     setProvider(option.id);
     const first = option.models[0]?.id;
     if (first !== undefined) setModel(first);
-  }
-
-  // The key belongs to the browser, not the file, so it is stored the moment it is given and
-  // survives Cancel, which discards only the model edits.
-  async function saveKey() {
-    const value = key.trim();
-    if (value === "" || saving) return;
-    setSaving(true);
-    setSealFailed(false);
-    try {
-      const sealed = await onSaveKey(secretName, value, withPasskey);
-      setSealFailed(withPasskey && !sealed);
-      setKey("");
-    } finally {
-      setSaving(false);
-    }
   }
 
   const canSave = known !== undefined && model.trim() !== "";
@@ -87,9 +72,7 @@ export function ModelPanel({ content, savedSecrets, passkeySecrets, onApply, onS
     let next = setModelField(content, "provider", provider);
     next = setModelField(next, "name", model.trim());
     next = setModelApiKey(next, `\${env:${secretName}}`);
-    // Kept for the tab, never sealed: saving on the device is what "Save key" is for, and an
-    // unrequested fingerprint prompt is a surprise.
-    if (key.trim() !== "") void onSaveKey(secretName, key.trim(), false);
+    if (key.trim() !== "") void onSaveKey(secretName, key.trim(), keep);
     onApply(next);
     onClose();
   }
@@ -98,6 +81,11 @@ export function ModelPanel({ content, savedSecrets, passkeySecrets, onApply, onS
   return (
     <>
       <div className="u-panel-body">
+        {onBack !== undefined && (
+          <button className="u-detail-back is-near" onClick={onBack}>
+            ← Back to Setup
+          </button>
+        )}
         <div className="u-group">
           <span className="u-label">Provider</span>
           <div className="u-pills">
@@ -144,44 +132,20 @@ export function ModelPanel({ content, savedSecrets, passkeySecrets, onApply, onS
             <div className="u-group">
               <div className="u-label-row">
                 <span className="u-label">API key</span>
-                <span className={`u-chip ${saved ? "ok" : "warn"}`}>
+                <span className={`u-chip ${rejected ? "bad" : saved ? "ok" : "warn"}`}>
                   <span className="u-dot" aria-hidden="true" />
-                  {sealed ? "saved with a passkey" : saved ? "entered this session" : "not entered yet"}
+                  {rejected ? "not accepted" : sealed ? "saved on this device" : saved ? "entered this session" : "not entered yet"}
                 </span>
               </div>
-              <div className="u-input-row">
-                <input
-                  className="u-input"
-                  type="password"
-                  value={key}
-                  placeholder={saved ? "•••••••••••••••••••••" : `paste your ${known.label} key`}
-                  onChange={(event) => setKey(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      void saveKey();
-                    }
-                  }}
-                />
-                <button
-                  className="u-btn ghost"
-                  disabled={saving || (key.trim() === "" && !saved)}
-                  onClick={() => void saveKey()}
-                >
-                  {saving ? "Waiting…" : key.trim() !== "" && saved ? "Replace" : saved ? "Saved" : "Save key"}
-                </button>
-              </div>
-              {sealFailed && (
-                <p className="u-hint u-warn-note">
-                  The passkey step did not finish, so this key is kept for this tab only. Enter it
-                  again and retry to save it on this device.
-                </p>
-              )}
-              <p className="u-hint">
-                {withPasskey
-                  ? "Saving asks for your fingerprint, Face or PIN, and keeps the key on this device behind it. Never shared."
-                  : `Kept in memory for this tab only. Never saved or shared.${support === null ? "" : ` ${support.reason}`}`}
-              </p>
+              <input
+                className="u-input"
+                type="password"
+                value={key}
+                placeholder={saved ? "•••••••••••••••••••••" : `paste your ${known.label} key`}
+                onChange={(event) => setKey(event.target.value)}
+              />
+              {(!saved || key.trim() !== "") && <KeepOnDevice keep={keep} onChange={setKeep} />}
+              {issue !== null && !rejected && <p className="u-hint u-warn-note">{issue.text}</p>}
             </div>
           </>
         )}

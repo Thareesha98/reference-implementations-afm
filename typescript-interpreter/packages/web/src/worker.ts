@@ -15,25 +15,26 @@
 // under the License.
 
 import { AgentSession } from "./session";
-import { createPromptBridge, createPermissionBridge } from "./bridges";
-import { modelFromMetadata } from "./model-factory";
-import { toolsFromMetadata, defaultMcpProxyConfig, proxyAwareFetch } from "./tool-factory";
+import { createPermissionBridge } from "./bridges";
+import { modelFromMetadata, checkModelFromMetadata } from "./model-factory";
+import { mcpServerPort, toolsFromMetadata, defaultMcpProxyConfig, proxyAwareFetch } from "./tool-factory";
 import { createOAuthManager } from "./oauth-manager";
 import type { OAuthProviderRef } from "@afm/adapter-auth";
 import { authorizationCodeRefreshKey } from "@afm/adapter-auth";
 import { createWorkerSecretStore } from "./worker-secret-store";
 import type { ClientMessage, ServerMessage } from "./protocol";
 import { permissionKey } from "./protocol";
-import { chainSecretPort, promptSecretPort } from "@afm/adapter-secret";
 import { FILE_TOOL_NAMES, filesToolPort, listFilesText } from "@afm/adapter-tool";
 import type { FileInfo } from "@afm/adapter-tool";
 import type { AgentMetadata, PermissionBroker, ModelPort, SecretPort, ToolPort } from "@afm/engine";
-import { scanSecretUsage, secretUseKey, describeError } from "@afm/engine";
-import { destinationGatedVault, distinctHosts } from "./secret-gate";
+import { scanSecretUsage, describeError } from "@afm/engine";
+import { destinationGatedVault } from "./secret-gate";
+import type { SecretUse } from "./secret-gate";
 import { resolveProbeAuth, probeToolUses } from "./probe-auth";
+import { failureOf, failureFromStatus, MissingCredentialError } from "./failure";
 import { stripCodeFence, buildAfmSource } from "./draft-format";
 
-/** How long the Add-a-server panel waits for a server to answer. */
+/** How long a check waits for a server to answer. */
 const PROBE_TIMEOUT_MS = 12_000;
 
 const scope = globalThis as unknown as {
@@ -41,100 +42,84 @@ const scope = globalThis as unknown as {
   addEventListener(type: "message", listener: (event: MessageEvent<ClientMessage>) => void): void;
 };
 
-const promptBridge = createPromptBridge((name) => scope.postMessage({ type: "secret-request", name }));
-
-// Secret custody (in-memory plaintext, passkey unlock, sealing, auto-lock) lives in
+// Secret custody (in-memory plaintext, passkey sealing, the hosts a value was entered for) lives in
 // worker-secret-store.
 const store = createWorkerSecretStore((message) => scope.postMessage(message));
 
-// Lists a server's tools before the agent runs, through the same factory as a real run, so the
-// Add-a-server panel can show what it would allow.
+// The tool-scoped secret uses declared by the agent being loaded.
+let toolSecretUses: SecretUse[] = [];
+
+// A value in memory is reused wherever the agent declares it, but only for the destinations it was
+// entered for: an untrusted file could point the model key at a server of its own.
+function gatedVault(toolUses: () => SecretUse[] = () => toolSecretUses): SecretPort {
+  return destinationGatedVault(store.memoryPort, { toolUses, approvedFor: store.approvedFor });
+}
+
+const secrets = gatedVault();
+
+function signOutOAuth(provider: OAuthProviderRef): void {
+  oauth.signOut(provider);
+  store.forgetSealed(authorizationCodeRefreshKey(provider));
+}
+
+const oauthDeps = {
+  getInteractiveToken: (provider: OAuthProviderRef) => oauth.getAccessToken(provider),
+  onInteractiveAuthRejected: signOutOAuth,
+};
+
+// Lists a server's tools through the same factory as a real run, so the Add-a-server panel can show
+// what it would allow and Setup can tell a server that answers from one that does not. Never opens
+// a sign-in: a missing one is a result.
 async function probeServer(probeId: string, server: AgentMetadata["tools"]): Promise<void> {
-  let port: ToolPort | undefined;
+  let port: ToolPort | null = null;
   try {
-    // Never prompts for an unsaved value: it stays unresolved. Scoped to this server's own uses,
-    // not whichever agent last loaded, so an edited address asks about its own destination.
-    const probeSecrets = gatedVault(askDestination, () => probeToolUses(server));
-    port = toolsFromMetadata(
-      { tools: await resolveProbeAuth(server, probeSecrets) },
-      defaultMcpProxyConfig,
-      { getInteractiveToken: makeGetInteractiveToken(probeId), onInteractiveAuthRejected },
-      { setupTimeoutMs: PROBE_TIMEOUT_MS },
-    );
-    const tools = await port.list();
+    await store.opened();
+    const resolved = await resolveProbeAuth(server, gatedVault(() => probeToolUses(server)));
+    const entry = resolved?.mcp?.[0];
+    port = entry === undefined ? null : mcpServerPort(entry, defaultMcpProxyConfig, oauthDeps, { setupTimeoutMs: PROBE_TIMEOUT_MS });
+    const tools = (await port?.list()) ?? [];
     scope.postMessage({
       type: "probe-result",
       id: probeId,
       tools: tools.map((tool) => ({ name: tool.name, description: tool.description })),
     });
   } catch (error) {
-    scope.postMessage({ type: "probe-result", id: probeId, error: describeError(error) });
+    scope.postMessage({ type: "probe-result", id: probeId, failure: failureOf(error) });
   } finally {
     void port?.dispose?.();
   }
 }
 
-// Destinations the user approved for a saved secret, and the tool-scoped uses declared by the agent
-// being loaded.
-let approvedSecretUses = new Set<string>();
-let toolSecretUses: { name: string; host?: string }[] = [];
-
-const approvalBridge = createPromptBridge((name) =>
-  scope.postMessage({
-    type: "secret-approval-request",
-    name,
-    hosts: pendingApprovalHosts.get(name) ?? [],
-  }),
-);
-// Carries the hosts with the question; the bridge only knows names.
-const pendingApprovalHosts = new Map<string, string[]>();
-
-// A key already in memory is reused wherever the agent declares it, but only for destinations the
-// user expected: an untrusted file could point the model key at a server of its own. So every value
-// in memory passes the destination gate first. A value not yet typed is not gated (nothing to
-// leak), which is why promptSecretPort stays outside it.
-function gatedVault(
-  askApproval: (name: string, hosts: (string | undefined)[]) => Promise<boolean>,
-  toolUses: () => { name: string; host?: string }[] = () => toolSecretUses,
-): SecretPort {
-  return destinationGatedVault(chainSecretPort(store.memoryPort, store.passkeyPort), {
-    toolUses,
-    approved: () => approvedSecretUses,
-    approve: (uses) => {
-      for (const use of uses) approvedSecretUses.add(secretUseKey(use.name, use.host));
-    },
-    // A sealed copy counts as saved, so the gate asks about the destination before the unlock.
-    isSaved: (name) => store.isSaved(name),
-    askApproval,
-  });
-}
-
-async function askDestination(name: string, hosts: (string | undefined)[]): Promise<boolean> {
-  pendingApprovalHosts.set(name, distinctHosts(hosts));
+// Asks the provider whether it accepts the model's key, with a request that costs nothing.
+async function probeModel(probeId: string, model: AgentMetadata["model"]): Promise<void> {
   try {
-    return (await approvalBridge.ask({ prefix: "", name, raw: "" })) !== null;
-  } finally {
-    pendingApprovalHosts.delete(name);
+    const check = await checkModelFromMetadata(await withResolvedKey(model));
+    scope.postMessage(
+      check.ok
+        ? { type: "probe-result", id: probeId }
+        : { type: "probe-result", id: probeId, failure: { kind: failureFromStatus(check.status), message: `The provider answered ${check.status}.` } },
+    );
+  } catch (error) {
+    scope.postMessage({ type: "probe-result", id: probeId, failure: failureOf(error) });
   }
 }
 
-const secrets = chainSecretPort(gatedVault(askDestination), promptSecretPort(promptBridge.ask));
-
-async function resolveAuthoringModel(model: AgentMetadata["model"]): Promise<ModelPort> {
+async function withResolvedKey(model: AgentMetadata["model"]): Promise<AgentMetadata["model"]> {
+  await store.opened();
   const rawKey = model?.authentication?.api_key;
   const placeholder = typeof rawKey === "string" ? /^\$\{(?:env:)?([^}]+)\}$/.exec(rawKey) : null;
-  if (placeholder === null) {
-    return modelFromMetadata(model);
-  }
+  if (placeholder === null) return model;
   const name = placeholder[1]!;
-  const resolution = await secrets.resolve({ prefix: "env", name, raw: rawKey! });
-  if (resolution.status !== "resolved") {
-    throw new Error(`Missing an API key for ${name}.`);
-  }
-  return modelFromMetadata({
+  const resolution = await store.memoryPort.resolve({ prefix: "env", name, raw: rawKey! });
+  if (resolution.status !== "resolved") throw new MissingCredentialError(name);
+  return {
     ...model,
     authentication: { ...model?.authentication, type: model?.authentication?.type ?? "api-key", api_key: resolution.value },
-  });
+  };
+}
+
+async function resolveAuthoringModel(model: AgentMetadata["model"]): Promise<ModelPort> {
+  return modelFromMetadata(await withResolvedKey(model));
 }
 
 type DraftResult = { kind: "draft"; source: string } | { kind: "clarify"; questions: string[] };
@@ -223,34 +208,17 @@ const oauth = createOAuthManager({
   fetchFn: (input, init) => proxyAwareFetch()(input, init),
   redirectUri: OAUTH_REDIRECT_URI,
   refreshStore: store.refreshStore,
-  loadSealedRefresh: (refreshKey) => store.loadSealedRefresh(refreshKey),
   emitAuthorizeUrl: (id, url) => scope.postMessage({ type: "oauth-authorize-url", id, url }),
   emitSignInResult: (id, ok, error) => scope.postMessage({ type: "oauth-signin-done", id, ok, error }),
 });
 
-function makeGetInteractiveToken(loadId: string): (provider: OAuthProviderRef) => Promise<string> {
-  return (provider) => oauth.getAccessToken(provider, () => scope.postMessage({ type: "oauth-signin-needed", provider, loadId }));
-}
-
-function onInteractiveAuthRejected(provider: OAuthProviderRef): void {
-  oauth.signOut(provider);
-}
-
 const session = new AgentSession({
   createModel: modelFromMetadata,
-  createTools: (metadata, loadId) =>
-    toolsFromMetadata(
-      metadata,
-      defaultMcpProxyConfig,
-      {
-        getInteractiveToken: makeGetInteractiveToken(loadId),
-        onInteractiveAuthRejected,
-      },
-      {
-        onServerProgress: (name, state, note) =>
-          scope.postMessage({ type: "load-step", key: `mcp:${name}`, label: `Connecting to ${name}`, state, note }),
-      },
-    ),
+  createTools: (metadata) =>
+    toolsFromMetadata(metadata, defaultMcpProxyConfig, oauthDeps, {
+      onServerProgress: (name, state, note) =>
+        scope.postMessage({ type: "load-step", key: `mcp:${name}`, label: `Connecting to ${name}`, state, note }),
+    }),
   filesTools: filesPort,
   describeAttachedFiles: () => listFilesText(attachedFiles),
   secrets,
@@ -260,19 +228,17 @@ const session = new AgentSession({
 
 scope.addEventListener("message", (event) => {
   const message = event.data;
-  store.touch();
   switch (message.type) {
     case "load":
       // Set before session.load, which resolves variables.
       toolSecretUses = scanSecretUsage(message.content)
         .filter((usage) => usage.scope === "tool")
         .map((usage) => ({ name: usage.name, host: usage.host }));
-      approvedSecretUses = new Set();
       alwaysAllow.clear();
       for (const name of message.permissionSeed ?? []) alwaysAllow.add(name);
       for (const name of FILE_TOOL_NAMES) alwaysAllow.add(permissionKey(undefined, name));
       attachedFiles.clear();
-      void session.load(message.content, message.seedHistory, message.loadId);
+      void store.opened().then(() => session.load(message.content, message.seedHistory));
       break;
     case "attach-files":
       for (const file of message.files) {
@@ -294,29 +260,18 @@ scope.addEventListener("message", (event) => {
     case "cancel":
       session.cancel();
       break;
-    case "secret-response":
-      // A null value is a declined prompt, not a secret.
-      if (message.value !== null) store.set(message.name, message.value);
-      promptBridge.resolve(message.name, message.value);
-      break;
     // The main thread ran the ceremony; this is only the decryption it cannot do.
     case "unlock-secret":
       store.acceptUnlock(message.name, message.key);
       break;
     case "set-secret":
-      store.set(message.name, message.value);
-      break;
-    case "secret-approval-response":
-      approvalBridge.resolve(message.name, message.approved ? "approved" : null);
+      store.set(message.name, message.value, message.host);
       break;
     case "passkey-remember":
       store.seal(message.name, message.key, message.credentialId, message.salt);
       break;
     case "passkey-reseal":
       store.reseal(message.name, message.from, message.to, message.credentialId, message.salt);
-      break;
-    case "passkey-unlock-response":
-      store.resolveUnlock(message.id, message.key);
       break;
     case "passkey-forget":
       store.forgetSealed(message.name);
@@ -343,13 +298,14 @@ scope.addEventListener("message", (event) => {
       void oauth.completeSignIn(message.id, message.code, message.state, message.iss);
       break;
     case "oauth-sign-out":
-      oauth.signOut(message.provider);
-      store.forgetSealed(authorizationCodeRefreshKey(message.provider));
+      signOutOAuth(message.provider);
       break;
-    case "probe-server": {
+    case "probe-server":
       void probeServer(message.id, message.server);
       break;
-    }
+    case "probe-model":
+      void probeModel(message.id, message.model);
+      break;
     case "generate-draft":
       void generateDraft(message.prompt, message.model, message.final ?? false)
         .then((result) => {

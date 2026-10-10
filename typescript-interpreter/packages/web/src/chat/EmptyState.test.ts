@@ -15,7 +15,9 @@
 // under the License.
 
 import { describe, it, expect } from "vitest";
-import { rejectedKey } from "./EmptyState";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { NotReadyReason, rejectedKey } from "./EmptyState";
 
 describe("rejectedKey", () => {
   it.each([
@@ -38,5 +40,30 @@ describe("rejectedKey", () => {
 
   it("has nothing to say when there is no failure", () => {
     expect(rejectedKey(null)).toBe(false);
+  });
+});
+
+describe("NotReadyReason", () => {
+  const html = (notReady: string | null, onReplaceKey?: () => void) =>
+    renderToStaticMarkup(createElement(NotReadyReason, { notReady, onRetry: () => {}, onReplaceKey }));
+
+  it("says why the agent did not start, and offers to try again", () => {
+    const out = html("Could not resolve variable '${env:OPENAI_API_KEY}'");
+    expect(out).toContain("not-ready-reason");
+    expect(out).toContain("OPENAI_API_KEY");
+    expect(out).toContain("Try again");
+  });
+
+  it("falls back to a plain sentence when no reason came with the failure", () => {
+    expect(html(null)).toContain("Something went wrong while starting the agent.");
+  });
+
+  it("offers to replace a key the provider refused, when it can", () => {
+    expect(html("Incorrect API key provided", () => {})).toContain("Replace key");
+    expect(html("Incorrect API key provided")).not.toContain("Replace key");
+  });
+
+  it("does not offer a new key for a failure that is not about one", () => {
+    expect(html("Unsupported model provider for the browser: 'gemini'.", () => {})).not.toContain("Replace key");
   });
 });

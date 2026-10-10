@@ -15,7 +15,6 @@
 // under the License.
 
 import type { PlanIssue } from "@afm/engine";
-import type { OAuthProviderRef } from "@afm/adapter-auth";
 import type { ServerMessage, ToolInfo, ImageAttachment, LoadStep, TurnEndReason } from "./protocol";
 import { attachedFilesOf, attachedFileKey } from "./chat/attachment";
 
@@ -60,17 +59,6 @@ export interface PendingPermission {
   serverId?: string;
 }
 
-export interface PendingPasskeyUnlock {
-  id: string;
-  name: string;
-  credentialId: Uint8Array<ArrayBuffer>;
-  salt: Uint8Array<ArrayBuffer>;
-}
-
-export interface PendingOAuthSignIn {
-  provider: OAuthProviderRef;
-}
-
 export type AgentStatus =
   | "no-agent"
   | "connecting"
@@ -93,11 +81,7 @@ export interface ChatState {
   savedSecrets: string[];
   passkeySecrets: string[];
   secretsLoaded: boolean;
-  pendingSecret: string | null;
-  pendingSecretApproval: { name: string; hosts: string[] } | null;
-  pendingPasskeyUnlock: PendingPasskeyUnlock | null;
   pendingPermission: PendingPermission | null;
-  pendingOAuthSignIn: PendingOAuthSignIn | null;
   error: string | null;
   nextId: number;
   budget: BudgetSnapshot | null;
@@ -120,11 +104,7 @@ export const initialChatState: ChatState = {
   savedSecrets: [],
   passkeySecrets: [],
   secretsLoaded: false,
-  pendingSecret: null,
-  pendingSecretApproval: null,
-  pendingPasskeyUnlock: null,
   pendingPermission: null,
-  pendingOAuthSignIn: null,
   error: null,
   nextId: 1,
   budget: null,
@@ -141,6 +121,11 @@ export function usableSecrets(state: ChatState): string[] {
   return [...new Set([...state.savedSecrets, ...state.passkeySecrets])];
 }
 
+/** Sealed on disk and not yet opened in this tab: a passkey tap away, and unreadable until then. */
+export function lockedSecrets(state: Pick<ChatState, "savedSecrets" | "passkeySecrets">): string[] {
+  return state.passkeySecrets.filter((name) => !state.savedSecrets.includes(name));
+}
+
 export type ChatAction =
   | { type: "user-message"; text: string; images?: ImageAttachment[] }
   | { type: "agent-loading"; content: string; keepMessages: boolean }
@@ -151,10 +136,7 @@ export type ChatAction =
   | { type: "edit-last" }
   | { type: "rewind"; id: number }
   | { type: "server"; message: ServerMessage }
-  | { type: "secret-dismissed" }
-  | { type: "passkey-unlock-dismissed" }
   | { type: "permission-dismissed" }
-  | { type: "oauth-signin-dismissed" }
   | { type: "files-attached"; files: AttachedFile[] }
   | { type: "file-detached"; id: number; key: string }
   | { type: "viewing-different-agent" };
@@ -186,14 +168,8 @@ export function turnEndNotice(reason: TurnEndReason, maxIterations?: number): st
   }
 }
 
-// Every question the user is being asked; a new start-up or a different agent makes each moot.
-const NO_PENDING = {
-  pendingSecret: null,
-  pendingSecretApproval: null,
-  pendingPasskeyUnlock: null,
-  pendingPermission: null,
-  pendingOAuthSignIn: null,
-} as const;
+// The question the user is being asked; a new start-up or a different agent makes it moot.
+const NO_PENDING = { pendingPermission: null } as const;
 
 type WithoutId<T> = T extends unknown ? Omit<T, "id"> : never;
 
@@ -273,14 +249,8 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       if (index === -1) return state;
       return { ...state, messages: state.messages.slice(0, index) };
     }
-    case "secret-dismissed":
-      return { ...state, pendingSecret: null, pendingSecretApproval: null };
-    case "passkey-unlock-dismissed":
-      return { ...state, pendingPasskeyUnlock: null };
     case "permission-dismissed":
       return { ...state, pendingPermission: null };
-    case "oauth-signin-dismissed":
-      return { ...state, pendingOAuthSignIn: null };
     case "files-attached":
       return withMessage(state, { kind: "attachment", files: action.files });
     case "file-detached": {
@@ -373,20 +343,6 @@ function applyServerMessage(state: ChatState, message: ServerMessage): ChatState
       const text = turnEndNotice(message.reason, state.budget?.maxIterations);
       return text === null ? ready : withMessage(ready, { kind: "notice", text });
     }
-    case "secret-request":
-      return { ...state, pendingSecret: message.name };
-    case "secret-approval-request":
-      return { ...state, pendingSecretApproval: { name: message.name, hosts: message.hosts } };
-    case "passkey-unlock-request":
-      return {
-        ...state,
-        pendingPasskeyUnlock: {
-          id: message.id,
-          name: message.name,
-          credentialId: message.credentialId,
-          salt: message.salt,
-        },
-      };
     case "permission-request":
       return {
         ...state,
@@ -397,8 +353,6 @@ function applyServerMessage(state: ChatState, message: ServerMessage): ChatState
           serverId: message.serverId,
         },
       };
-    case "oauth-signin-needed":
-      return { ...state, pendingOAuthSignIn: { provider: message.provider } };
     case "oauth-authorize-url":
     case "oauth-signin-done":
       return state;

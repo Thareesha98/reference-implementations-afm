@@ -14,25 +14,26 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { AgentStatus } from "../../chat-state";
 import { MessageList } from "../../chat/MessageList";
 import { Composer } from "../../chat/Composer";
 import { PermissionRequestModal } from "../../overlay/PermissionRequestModal";
-import { SetupFrame, KeyStep, UnlockStep, ApprovalStep, SignInStep } from "./SetupSteps";
-import { ToolStep } from "./ToolStep";
-import { setupPlan } from "./readiness";
 import type { useStandaloneSession } from "../../worker-client/useStandaloneSession";
-import { hostOf } from "../../load-paths";
-import { envSecretName, getModelApiKey } from "./agent-source-edit";
+
+// Composer's own fallback ("Load an agent first...") reads as a failed click once an agent exists, so
+// each disabled status short of "ready" says what is happening instead.
+const WAITING_PLACEHOLDER: Partial<Record<AgentStatus, string>> = {
+  "no-agent": "Press Run to start the agent…",
+  connecting: "Loading the agent…",
+  testing: "Checking its tools…",
+  "not-ready": "The agent didn't start…",
+};
 
 interface Props {
   session: ReturnType<typeof useStandaloneSession>;
-  content: string;
-  /** True once the agent is up and its servers have not been narrowed down. */
-  needsToolChoice: boolean;
-  /** Every step the agent still needs, known before the first one. */
-  setupSteps: ReturnType<typeof setupPlan>;
   serverNameByUrl: Map<string, string>;
-  onChooseTools: (allowedByServer: Map<string, string[]>) => void;
+  onReplaceKey: () => void;
+  onRetry: () => void;
   /** What the agent says about itself, for the opening state. */
   description?: string;
   role?: string;
@@ -41,82 +42,19 @@ interface Props {
 
 export function ChatPane({
   session,
-  content,
-  needsToolChoice,
-  setupSteps,
   serverNameByUrl,
-  onChooseTools,
+  onReplaceKey,
+  onRetry,
   description = "",
   role = "",
   iconUrl = "",
 }: Props) {
-  const {
-    state,
-    loadContent,
-    send,
-    stop,
-    attachFiles,
-    detachFile,
-    saveSecret,
-    regenerate,
-    editMessage,
-    unlockPasskey,
-    skipPasskeyUnlock,
-    decideSecretApproval,
-    signInForOAuth,
-    dismissOAuthSignIn,
-    submitPermission,
-    removeSecret,
-    forgetPasskey,
-  } = session;
-  const { pendingSecret, pendingPermission, pendingSecretApproval, pendingPasskeyUnlock, pendingOAuthSignIn } =
-    state;
-
-  // Setup happens in the conversation, in front of the composer. The plan comes from the file, so
-  // the line reads "Key - Sign in - Tools" from the first question rather than growing.
-  const currentStep =
-    pendingSecret !== null || pendingSecretApproval !== null || pendingPasskeyUnlock !== null
-      ? "key"
-      : pendingOAuthSignIn !== null
-        ? "signin"
-        : "tools";
-  const setup =
-    pendingPasskeyUnlock !== null ? (
-      <UnlockStep
-        name={pendingPasskeyUnlock.name}
-        onUnlock={() => void unlockPasskey(pendingPasskeyUnlock)}
-        onSkip={() => skipPasskeyUnlock(pendingPasskeyUnlock.id)}
-      />
-    ) : pendingSecret !== null ? (
-      <KeyStep
-        name={pendingSecret}
-        onSubmit={(value, withPasskey) => void saveSecret(pendingSecret, value, withPasskey)}
-      />
-    ) : pendingSecretApproval !== null ? (
-      <ApprovalStep
-        name={pendingSecretApproval.name}
-        hosts={pendingSecretApproval.hosts}
-        onDecide={(approved) => decideSecretApproval(pendingSecretApproval.name, approved)}
-      />
-    ) : pendingOAuthSignIn !== null ? (
-      <SignInStep
-        host={hostOf(pendingOAuthSignIn.provider.authorizeUrl)}
-        onSignIn={signInForOAuth}
-        onCancel={dismissOAuthSignIn}
-      />
-    ) : null;
+  const { state, send, stop, attachFiles, detachFile, regenerate, editMessage, submitPermission } = session;
+  const { pendingPermission } = state;
 
   return (
     <div className="xc">
-      {setup !== null ? (
-        <SetupFrame steps={setupSteps} currentId={currentStep}>
-          {setup}
-        </SetupFrame>
-      ) : needsToolChoice ? (
-        <SetupFrame steps={setupSteps} currentId="tools">
-          <ToolStep tools={state.tools} nameByUrl={serverNameByUrl} onConfirm={onChooseTools} />
-        </SetupFrame>
-      ) : state.status === "no-agent" ? (
+      {state.status === "no-agent" ? (
         // The ways to start an agent live in the drawer; repeating them here showed the same
         // buttons twice.
         <div className="u-empty">
@@ -143,17 +81,8 @@ export function ChatPane({
           description={description}
           role={role}
           onAsk={state.status === "ready" ? (question) => send(question) : undefined}
-          onReplaceKey={() => {
-            // Only the agent's own model key goes, its sealed copy too, or the next load unlocks
-            // the old one. Other keys and sign-ins are not this button's to remove.
-            const name = envSecretName(getModelApiKey(content));
-            if (name !== "") {
-              forgetPasskey(name);
-              removeSecret(name);
-            }
-            loadContent(content);
-          }}
-          onRetry={() => loadContent(content)}
+          onReplaceKey={onReplaceKey}
+          onRetry={onRetry}
           onRegenerate={regenerate}
           onEdit={editMessage}
           onDetachFile={detachFile}
@@ -167,18 +96,7 @@ export function ChatPane({
         onAttach={attachFiles}
         streaming={state.status === "streaming"}
         disabled={state.status !== "ready" && state.status !== "streaming"}
-        // Composer's fallback ("Load an agent first...") is for status "no-agent". Mid-run the same
-        // words would read as a failed click, so each disabled status short of "ready" gets its own
-        // line.
-        placeholder={
-          state.status === "no-agent"
-            ? "Press Run to start the agent…"
-            : state.status === "connecting"
-              ? "Loading the agent…"
-              : state.status === "testing"
-                ? "Checking its tools…"
-                : undefined
-        }
+        placeholder={WAITING_PLACEHOLDER[state.status]}
       />
 
       {pendingPermission !== null && (

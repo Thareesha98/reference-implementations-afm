@@ -1,0 +1,107 @@
+// Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied. See the License for the
+// specific language governing permissions and limitations
+// under the License.
+import { useState } from "react";
+import { authorizationCodeRefreshKey, oauthProviderFrom } from "@afm/adapter-auth";
+import type { AgentMetadata } from "@afm/engine";
+import { lockedSecrets, usableSecrets } from "../../chat-state";
+import type { useStandaloneSession } from "../../worker-client/useStandaloneSession";
+import { findProvider } from "./model-catalog";
+import {
+  MODEL_ROW,
+  answeredBy,
+  changedResult,
+  checkingResult,
+  credentialOf,
+  displayName,
+  everyRowReady,
+  issueSentence,
+  plannedRows,
+  resultOf,
+  serverRowId,
+  type Issue,
+  type KeysState,
+  type RowResult,
+  type SetupRow,
+} from "./setup-check";
+
+type Session = ReturnType<typeof useStandaloneSession>;
+
+export function useSetup(session: Session, metadata: AgentMetadata | null) {
+  const [results, setResults] = useState<Record<string, RowResult>>({});
+  const [keys, setKeys] = useState<KeysState>("none");
+
+  const rows: SetupRow[] = (metadata === null ? [] : plannedRows(metadata)).map((row) => ({ ...row, ...results[row.id] }));
+
+  function settle(id: string, result: RowResult): void {
+    setResults((current) => ({ ...current, [id]: result }));
+  }
+
+  async function check(row: SetupRow, current: AgentMetadata, usable: string[]): Promise<void> {
+    const server = (current.tools?.mcp ?? []).find((candidate) => serverRowId(candidate.name) === row.id);
+    const http = server?.transport.type === "http" ? server.transport : undefined;
+    const credential = server === undefined ? "key" : credentialOf(server);
+    settle(row.id, checkingResult(credential));
+    const probe = server === undefined ? await session.probeModel(current.model) : await session.probeServer({ mcp: [server] });
+    const hadSignIn =
+      http?.authentication !== undefined && usable.includes(authorizationCodeRefreshKey(oauthProviderFrom(http.authentication, http.url)));
+    const answered = server === undefined ? (findProvider(current.model?.provider ?? "")?.label ?? "") : answeredBy(server, probe.tools?.length ?? 0);
+    settle(row.id, resultOf(probe, { credential, hadSignIn, answered }));
+  }
+
+  function run(targets: SetupRow[]): void {
+    if (metadata === null) return;
+    const usable = usableSecrets(session.state);
+    for (const row of targets) {
+      if (row.id === MODEL_ROW && (metadata.model?.name ?? "") === "") continue;
+      void check(row, metadata, usable);
+    }
+  }
+
+  function openKeys(): void {
+    setKeys("opening");
+    void session.openKeys().then((opened) => {
+      setKeys(opened ? "opened" : "declined");
+      if (opened) run(rows);
+    });
+  }
+
+  function start(): void {
+    setResults({});
+    if (lockedSecrets(session.state).length > 0) {
+      openKeys();
+      return;
+    }
+    setKeys("none");
+    run(rows);
+  }
+
+  return {
+    rows,
+    keys,
+    ready: everyRowReady(rows) && (keys === "none" || keys === "opened"),
+    start,
+    retryKeys: openKeys,
+    recheck: () => run(rows.filter((row) => row.state !== "ready")),
+    changed: (id: string) => settle(id, changedResult),
+    issueOf: (id: string): Issue | null => {
+      const row = rows.find((candidate) => candidate.id === id);
+      if (row?.failure === undefined || (row.state !== "needs" && row.state !== "failed")) return null;
+      const server = (metadata?.tools?.mcp ?? []).find((candidate) => serverRowId(candidate.name) === id);
+      const who = server === undefined ? (findProvider(metadata?.model?.provider ?? "")?.label ?? row.name) : displayName(server.name);
+      return { kind: row.failure, text: issueSentence(row.failure, who, server === undefined ? "key" : credentialOf(server), row.note) };
+    },
+  };
+}

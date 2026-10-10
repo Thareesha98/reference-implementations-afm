@@ -17,6 +17,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { createOAuthManager, type OAuthManagerDeps } from "./oauth-manager";
 import { authorizationCodeRefreshKey, type KeyValueStore, type OAuthProviderRef } from "@afm/adapter-auth";
+import { SignInRequiredError } from "./failure";
 import type { StoredSecret } from "./passkey/store";
 
 const sealedDisk = new Map<string, StoredSecret>();
@@ -52,7 +53,6 @@ function makeManager(overrides: Partial<OAuthManagerDeps> = {}) {
     fetchFn: tokenFetch({ access_token: "at", refresh_token: "rt", expires_in: 3600 }),
     redirectUri: "https://app.example.com/",
     refreshStore,
-    loadSealedRefresh: async () => {},
     emitAuthorizeUrl: (id, url) => (emitted.url = { id, url }),
     emitSignInResult: (id, ok, error) => (emitted.result = { id, ok, error }),
     ...overrides,
@@ -67,20 +67,16 @@ async function signIn(manager: ReturnType<typeof makeManager>["manager"], emitte
 }
 
 describe("createOAuthManager", () => {
-  it("asks for sign-in and throws when there is no session", async () => {
+  it("throws a sign-in error when there is no session", async () => {
     const { manager } = makeManager();
-    let asked = false;
-    await expect(manager.getAccessToken(provider, () => (asked = true))).rejects.toThrow(/sign-in/i);
-    expect(asked).toBe(true);
+    await expect(manager.getAccessToken(provider)).rejects.toBeInstanceOf(SignInRequiredError);
   });
 
-  it("signs in, then serves the access token without asking again", async () => {
+  it("signs in, then serves the access token", async () => {
     const { manager, emitted } = makeManager();
     await signIn(manager, emitted, "id-1");
     expect(emitted.result).toEqual({ id: "id-1", ok: true, error: undefined });
-    let asked = false;
-    expect(await manager.getAccessToken(provider, () => (asked = true))).toBe("at");
-    expect(asked).toBe(false);
+    expect(await manager.getAccessToken(provider)).toBe("at");
   });
 
   it("stores the refresh token in refreshStore after sign-in", async () => {
@@ -91,13 +87,9 @@ describe("createOAuthManager", () => {
 
   it("restores from a remembered refresh token, no sign-in needed", async () => {
     const refreshStore = memoryStore();
-    const { manager } = makeManager({
-      refreshStore,
-      loadSealedRefresh: async (key) => refreshStore.set(key, "saved-refresh"),
-    });
-    let asked = false;
-    expect(await manager.getAccessToken(provider, () => (asked = true))).toBe("at");
-    expect(asked).toBe(false);
+    refreshStore.set(authorizationCodeRefreshKey(provider), "saved-refresh");
+    const { manager } = makeManager({ refreshStore });
+    expect(await manager.getAccessToken(provider)).toBe("at");
   });
 
   it("reports a state mismatch as a failed sign-in rather than throwing", async () => {
@@ -145,11 +137,11 @@ describe("createOAuthManager", () => {
     expect(emitted.result?.ok).toBe(false);
   });
 
-  it("signOut drops the session so the next call asks to sign in again", async () => {
+  it("signOut drops the session so the next call needs a sign-in again", async () => {
     const { manager, emitted } = makeManager();
     await signIn(manager, emitted, "id-4");
     manager.signOut(provider);
-    await expect(manager.getAccessToken(provider, () => {})).rejects.toThrow(/sign-in/i);
+    await expect(manager.getAccessToken(provider)).rejects.toBeInstanceOf(SignInRequiredError);
   });
 });
 
@@ -177,16 +169,13 @@ describe("a remembered sign-in kept fresh through the real worker secret store",
     }) as typeof fetch;
   }
 
-  function tab(fetchFn: typeof fetch, key: CryptoKey) {
-    const store = createWorkerSecretStore((message) => {
-      if (message.type === "passkey-unlock-request") queueMicrotask(() => store.resolveUnlock(message.id, key));
-    });
+  function tab(fetchFn: typeof fetch) {
+    const store = createWorkerSecretStore(() => {});
     let authorizeUrl = "";
     const manager = createOAuthManager({
       fetchFn,
       redirectUri: "https://afm.example/",
       refreshStore: store.refreshStore,
-      loadSealedRefresh: (refreshKey) => store.loadSealedRefresh(refreshKey),
       emitAuthorizeUrl: (_id, url) => (authorizeUrl = url),
       emitSignInResult: () => {},
     });
@@ -196,41 +185,37 @@ describe("a remembered sign-in kept fresh through the real worker secret store",
   it("restores a rotated refresh token after a reload, with no sign-in needed", async () => {
     const fetchFn = rotatingServer();
     const key = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
-    const first = tab(fetchFn, key);
+    const first = tab(fetchFn);
     await first.manager.startSignIn("s1", provider);
     await first.manager.completeSignIn("s1", "code", first.state());
     first.store.seal(authorizationCodeRefreshKey(provider), key, new Uint8Array([1]), new Uint8Array([2]));
     await vi.waitFor(() => expect(sealedDisk.has(authorizationCodeRefreshKey(provider))).toBe(true));
 
-    await first.manager.getAccessToken(provider, () => {});
-    await first.manager.getAccessToken(provider, () => {});
+    await first.manager.getAccessToken(provider);
+    await first.manager.getAccessToken(provider);
 
-    const second = tab(fetchFn, key);
-    let needed = false;
-    await second.manager.getAccessToken(provider, () => (needed = true)).catch(() => {});
-    expect(needed).toBe(false);
+    const second = tab(fetchFn);
+    second.store.acceptUnlock(authorizationCodeRefreshKey(provider), key);
+    await second.store.opened();
+    await expect(second.manager.getAccessToken(provider)).resolves.toBe("at");
   });
 
-  it("keeps the blob after the shared 401 path, but the explicit Sign out clears it", async () => {
+  it("needs a sign-in again once the session and its sealed copy are forgotten", async () => {
     const fetchFn = rotatingServer();
     const key = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
-    const first = tab(fetchFn, key);
+    const first = tab(fetchFn);
     await first.manager.startSignIn("s1", provider);
     await first.manager.completeSignIn("s1", "code", first.state());
     first.store.seal(authorizationCodeRefreshKey(provider), key, new Uint8Array([1]), new Uint8Array([2]));
     await vi.waitFor(() => expect(sealedDisk.has(authorizationCodeRefreshKey(provider))).toBe(true));
 
     first.manager.signOut(provider);
-    expect(await first.store.isSaved(authorizationCodeRefreshKey(provider))).toBe(true);
-
-    // What worker.ts's "oauth-sign-out" case does in addition to the shared signOut.
     first.store.forgetSealed(authorizationCodeRefreshKey(provider));
-    await vi.waitFor(async () => expect(await first.store.isSaved(authorizationCodeRefreshKey(provider))).toBe(false));
+    await vi.waitFor(() => expect(sealedDisk.has(authorizationCodeRefreshKey(provider))).toBe(false));
 
-    const second = tab(fetchFn, key);
-    let needed = false;
-    await second.manager.getAccessToken(provider, () => (needed = true)).catch(() => {});
-    expect(needed).toBe(true);
+    const second = tab(fetchFn);
+    second.store.acceptUnlock(authorizationCodeRefreshKey(provider), key);
+    await second.store.opened();
+    await expect(second.manager.getAccessToken(provider)).rejects.toBeInstanceOf(SignInRequiredError);
   });
 });
-

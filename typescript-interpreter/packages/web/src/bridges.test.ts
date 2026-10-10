@@ -15,33 +15,8 @@
 // under the License.
 
 import { describe, it, expect, vi } from "vitest";
-import { createPromptBridge, createPermissionBridge } from "./bridges";
-import type { SecretRef, ToolCall } from "@afm/engine";
-
-const ref = (name: string): SecretRef => ({ prefix: "env", name, raw: `\${env:${name}}` });
-
-describe("createPromptBridge", () => {
-  it("fires a request and resolves when the UI answers", async () => {
-    const requested: string[] = [];
-    const bridge = createPromptBridge((name) => requested.push(name));
-    const answer = bridge.ask(ref("API_KEY"));
-    expect(requested).toEqual(["API_KEY"]);
-    bridge.resolve("API_KEY", "sk-123");
-    expect(await answer).toBe("sk-123");
-  });
-
-  it("resolves with null when the user cancels", async () => {
-    const bridge = createPromptBridge(() => {});
-    const answer = bridge.ask(ref("X"));
-    bridge.resolve("X", null);
-    expect(await answer).toBeNull();
-  });
-
-  it("ignores a response for an unknown name", () => {
-    const bridge = createPromptBridge(() => {});
-    expect(() => bridge.resolve("nope", "x")).not.toThrow();
-  });
-});
+import { createPermissionBridge } from "./bridges";
+import type { ToolCall } from "@afm/engine";
 
 describe("createPermissionBridge", () => {
   const call: ToolCall = { id: "c1", name: "lookup", args: {} };

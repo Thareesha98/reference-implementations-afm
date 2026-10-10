@@ -18,7 +18,7 @@
  * What the side window shows, or null when the builder has the whole room. One slot, one thing at a
  * time. The stage is not one of these: it never hides.
  */
-export type SidePanel = "chat" | "model" | "tools" | "share" | "settings" | "agents" | "start" | "info";
+export type SidePanel = "chat" | "model" | "tools" | "share" | "settings" | "agents" | "start" | "info" | "setup";
 
 export const SIDE_TITLE: Record<SidePanel, string> = {
   chat: "Chat",
@@ -29,4 +29,5 @@ export const SIDE_TITLE: Record<SidePanel, string> = {
   agents: "Agents",
   start: "Start an agent",
   info: "About",
+  setup: "Setup",
 };

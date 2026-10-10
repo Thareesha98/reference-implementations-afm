@@ -16,22 +16,21 @@
 
 import type { ToolInfo } from "../../protocol";
 import { isSecretAuthField } from "./mcp-secret-fields";
-import { envSecretName } from "./agent-source-edit";
 
 interface AuthFieldsProps {
   fields: readonly { key: string; name: string; hint: string; placeholder: string }[];
   values: Record<string, string>;
   secretEdits: Record<string, string>;
-  locked: (key: string) => boolean;
   saved: (key: string) => boolean;
+  rejected: boolean;
   onValue: (key: string, value: string) => void;
   onSecretEdit: (key: string, value: string) => void;
-  onUnlock: (name: string) => void;
+  onSecretBlur: () => void;
 }
 
-// The per-method input rows. A secret field is masked and shows saved or locked chips; a plain
-// field (a username, a URL) shows its value.
-export function AuthFields({ fields, values, secretEdits, locked, saved, onValue, onSecretEdit, onUnlock }: AuthFieldsProps) {
+// The per-method input rows. A secret field is masked and shows a saved or not accepted chip; a
+// plain field (a username, a URL) shows its value.
+export function AuthFields({ fields, values, secretEdits, saved, rejected, onValue, onSecretEdit, onSecretBlur }: AuthFieldsProps) {
   return (
     <>
       {fields.map((field) =>
@@ -39,37 +38,27 @@ export function AuthFields({ fields, values, secretEdits, locked, saved, onValue
           <label className="u-group" key={field.key}>
             <span className="u-label-row">
               <span className="u-label">{field.name}</span>
-              {locked(field.key) ? (
-                <span className="u-chip warn">
+              {saved(field.key) ? (
+                <span className={`u-chip ${rejected ? "bad" : "ok"}`}>
                   <span className="u-dot" aria-hidden="true" />
-                  locked
-                </span>
-              ) : saved(field.key) ? (
-                <span className="u-chip ok">
-                  <span className="u-dot" aria-hidden="true" />
-                  saved
+                  {rejected ? "not accepted" : "saved"}
                 </span>
               ) : (
                 <span className="u-row-meta">{field.hint}</span>
               )}
-              {locked(field.key) ? (
-                <button className="u-linkish" onClick={() => onUnlock(envSecretName(values[field.key] ?? ""))}>
-                  Unlock
+              {saved(field.key) && (
+                <button className="u-linkish" onClick={() => onSecretEdit(field.key, "")}>
+                  Clear
                 </button>
-              ) : (
-                saved(field.key) && (
-                  <button className="u-linkish" onClick={() => onSecretEdit(field.key, "")}>
-                    Clear
-                  </button>
-                )
               )}
             </span>
             <input
               className="u-input mono"
               type="password"
               value={secretEdits[field.key] ?? ""}
-              placeholder={locked(field.key) || saved(field.key) ? "•••••••••••••••••••••" : `paste the ${field.name}`}
+              placeholder={saved(field.key) ? "•••••••••••••••••••••" : `paste the ${field.name}`}
               onChange={(event) => onSecretEdit(field.key, event.target.value)}
+              onBlur={onSecretBlur}
             />
           </label>
         ) : (
@@ -101,13 +90,14 @@ interface ServerToolsProps {
   onToggle: (tool: string) => void;
   onToggleAll: () => void;
   onCheckAgain: () => void;
+  checkable: boolean;
   showTip: (tool: ToolInfo, row: HTMLElement) => void;
   hideTip: () => void;
 }
 
-// The tool list a probe found, with a skeleton while probing and a hint before there is anything.
-// Each tool is a checkbox the agent may use.
-export function ServerTools({ url, probing, found, error, allowed, waiting, onToggle, onToggleAll, onCheckAgain, showTip, hideTip }: ServerToolsProps) {
+// The tools a server has, with a skeleton while looking and a hint before there is anything. Each
+// tool is a checkbox the agent may use.
+export function ServerTools({ url, probing, found, error, allowed, waiting, onToggle, onToggleAll, onCheckAgain, checkable, showTip, hideTip }: ServerToolsProps) {
   return (
     <div className="u-group grow">
       <div className="u-label-row">
@@ -120,7 +110,7 @@ export function ServerTools({ url, probing, found, error, allowed, waiting, onTo
             {allowed.length === found.length ? "Clear" : "Select all"}
           </button>
         )}
-        {url.trim() !== "" && !probing && (
+        {checkable && url.trim() !== "" && !probing && (
           <button className="u-linkish" onClick={onCheckAgain}>
             Check again
           </button>

@@ -14,22 +14,25 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { referencedSecretNames } from "@afm/engine";
 import type { AgentMetadata } from "@afm/engine";
 import type { ProbeResult } from "../../worker-client/useStandaloneSession";
 import { addMcpServer, removeMcpServer, setServerToolFilter } from "./agent-source-edit";
-import { captureAuthSecrets, credentialNeed, isSecretAuthField, secretFieldState } from "./mcp-secret-fields";
+import { captureAuthSecrets, isSecretAuthField, lacksRequiredField, secretFieldState } from "./mcp-secret-fields";
 import type { NewMcpServer } from "./agent-source-edit";
 import type { ToolInfo } from "../../protocol";
-import { discoverMcpServerAuth } from "../../mcp-servers";
+import { discoverMcpServerAuth, resolveDirectoryClient } from "../../mcp-servers";
+import type { DiscoveredMcpAuth } from "../../mcp-servers";
 import { ToolTip, tipFor } from "./ToolTip";
 import type { TipTarget } from "./ToolTip";
-import { ApprovalStep } from "./SetupSteps";
+import { KeepOnDevice } from "./KeepOnDevice";
+import { credentialOf, displayName, issueSentence, type Issue } from "./setup-check";
+import { hostOf } from "../../load-paths";
 import { AuthFields, ServerTools } from "./server-panel-sections";
 import { ServerDirectory } from "./ServerDirectory";
 import { ServerDetail } from "./ServerDetail";
-import type { DirectoryEntry } from "../../mcp-servers";
+import type { DirectoryEntry, OAuthSignIn } from "../../mcp-directory";
 import { authorizationCodeRefreshKey, type OAuthProviderRef } from "@afm/adapter-auth";
 
 interface Props {
@@ -49,34 +52,24 @@ interface Props {
    * Starts an interactive sign-in on this same click, never through a probe that hopes something
    * else will pick it up.
    */
-  onSignIn: (provider: OAuthProviderRef, remember: boolean) => Promise<boolean> | void;
+  onSignIn: (provider: OAuthProviderRef, keep: boolean) => Promise<boolean> | void;
   /**
    * Drops the session this server's Sign in obtained (access and refresh tokens). Never touches the
    * agent file.
    */
   onSignOut: (provider: OAuthProviderRef) => void;
-  toolCache: Record<string, ToolInfo[]>;
-  onToolsFound: (serverUrl: string, tools: ToolInfo[] | null) => void;
-  onClose: () => void;
   /**
    * Files a credential where the model key goes, so the agent file only holds a `${env:NAME}`
-   * reference. Resolves true when it was also sealed on the device.
+   * reference. It is approved for this server's host alone. Resolves true when it was also sealed
+   * on the device.
    */
-  onStoreSecret: (name: string, value: string, saveOnDevice: boolean) => Promise<boolean>;
+  onStoreSecret: (name: string, value: string, keep: boolean, host: string) => Promise<boolean>;
   knownSecrets: string[];
-  /**
-   * Sealed on disk but not open in this tab: after a reload only the user's authenticator can bring
-   * the key back.
-   */
-  lockedSecrets: string[];
-  onUnlockSecret: (name: string) => Promise<boolean> | void;
-  /**
-   * A saved secret is only released to a destination the user agreed to. Checking this server can
-   * raise that question, so it is answered here.
-   */
-  pendingApproval: { name: string; hosts: string[] } | null;
-  onDecideApproval: (name: string, approved: boolean) => void;
-  passkeyUsable: boolean;
+  /** What Setup found wrong with this server, said in the window it sends the user to. */
+  issue: Issue | null;
+  /** Present when the window was opened from Setup, which it returns to. */
+  onBack?: () => void;
+  onClose: () => void;
 }
 
 interface Method {
@@ -135,19 +128,33 @@ export function nameFromUrl(url: string, taken: string[]): string {
   }
 }
 
+function signInValues(auth: OAuthSignIn, clientId = ""): Record<string, string> {
+  return discoveredValues({ authorizeUrl: auth.authorizeUrl, tokenUrl: auth.tokenUrl, scopes: auth.scopes, clientId });
+}
+
+function discoveredValues(discovered: DiscoveredMcpAuth): Record<string, string> {
+  return {
+    authorize_url: discovered.authorizeUrl,
+    token_url: discovered.tokenUrl,
+    client_id: discovered.clientId,
+    ...(discovered.scopes !== undefined && discovered.scopes.length > 0 ? { scopes: discovered.scopes.join(" ") } : {}),
+  };
+}
+
 // Said only when true, so a panel that gave up or never asked does not look busy forever.
 function waitingNote(
   url: string,
   probing: boolean,
   error: string | null,
-  need: "none" | "locked" | "missing" | "signin",
+  need: "none" | "missing" | "signin",
+  unlisted: boolean,
 ): string {
   if (probing) return "Checking the address…";
   if (url.trim() === "") return "Enter the address and its tools are listed here.";
-  if (need === "locked") return "Unlock the saved credential above to list this server's tools.";
   if (need === "missing") return "This server needs its credential. Enter it above to list its tools.";
   if (need === "signin") return "Sign in above to list this server's tools.";
   if (error !== null) return "No tools listed. Fix the address or check again.";
+  if (unlisted) return "This file does not list this server's tools, so every tool is allowed. Press Check again to choose which.";
   return "Press Check again to list this server's tools.";
 }
 
@@ -161,16 +168,11 @@ export function ServerPanel({
   onProbe,
   onSignIn,
   onSignOut,
-  toolCache,
-  onToolsFound,
   onClose,
   onStoreSecret,
   knownSecrets,
-  lockedSecrets,
-  onUnlockSecret,
-  pendingApproval,
-  onDecideApproval,
-  passkeyUsable,
+  issue,
+  onBack,
 }: Props) {
   const existing = (metadata.tools?.mcp ?? []).find((server) => server.name === editing);
   const existingUrl = existing?.transport.type === "http" ? existing.transport.url : "";
@@ -190,20 +192,21 @@ export function ServerPanel({
     return seed;
   });
   const [probing, setProbing] = useState(false);
-  const [found, setFound] = useState<ToolInfo[] | null>(toolCache[existingUrl] ?? null);
-  const [probedUrl, setProbedUrl] = useState(toolCache[existingUrl] === undefined ? "" : existingUrl);
-  const [error, setError] = useState<string | null>(null);
+  const [found, setFound] = useState<ToolInfo[] | null>(null);
+  const [probedUrl, setProbedUrl] = useState("");
+  const [error, setError] = useState<string | null>(issue?.text ?? null);
+  const [rejected, setRejected] = useState(issue?.kind === "rejected");
   const [allowed, setAllowed] = useState<string[]>(existing?.tool_filter?.allow ?? []);
   const [tip, setTip] = useState<TipTarget | null>(null);
   const [tab, setTab] = useState<"directory" | "url">("directory");
   const [pendingDirectoryProbe, setPendingDirectoryProbe] = useState(false);
+  const latestDirectoryPick = useRef(0);
   const [directoryQuery, setDirectoryQuery] = useState("");
   const [detail, setDetail] = useState<DirectoryEntry | null>(null);
   const [oauthFormOpen, setOauthFormOpen] = useState(false);
-  const [rememberOAuth, setRememberOAuth] = useState(false);
   // Per field: absent = keep the file's value, "" = cleared, else a new value.
   const [secretEdits, setSecretEdits] = useState<Record<string, string>>({});
-  const [saveOnDevice, setSaveOnDevice] = useState(false);
+  const [keep, setKeep] = useState(false);
 
   const showTip = (tool: ToolInfo, row: HTMLElement) => {
     const body = (tool.description ?? "").trim();
@@ -217,28 +220,18 @@ export function ServerPanel({
   // lose what it says.
   const writesMethod = METHODS.some((option) => option.id === method);
 
-  const fieldState = (fieldKey: string) =>
-    secretFieldState(values[fieldKey] ?? "", secretEdits[fieldKey], knownSecrets, lockedSecrets);
+  const fieldState = (fieldKey: string) => secretFieldState(values[fieldKey] ?? "", secretEdits[fieldKey], knownSecrets);
   const secretStored = (fieldKey: string) => fieldState(fieldKey) === "saved";
-  const secretLocked = (fieldKey: string) => fieldState(fieldKey) === "locked";
-
-  // The first probe waits until the credential is reachable, so it never fails as "Unauthorized".
-  const need = credentialNeed(chosen.fields.map((field) => fieldState(field.key)));
   const scopeList = (values.scopes ?? "").split(/[\s,]+/).filter((scope) => scope !== "");
-  const oauthRefreshKey = authorizationCodeRefreshKey(oauthProvider());
-  const signInNeeded = method === "oauth2" && !knownSecrets.includes(oauthRefreshKey);
-  const oauthLocked = method === "oauth2" && lockedSecrets.includes(oauthRefreshKey);
-  const storedNeed = credentialNeed(
-    chosen.fields.map((field) =>
-      secretFieldState(values[field.key] ?? "", undefined, knownSecrets, lockedSecrets),
-    ),
-  );
-  const credentialReady = method === "oauth2" ? !signInNeeded && !oauthLocked : storedNeed === "none";
+  const signedIn = method === "oauth2" && (knownSecrets.includes(authorizationCodeRefreshKey(oauthProvider())) || (found !== null && error === null));
+  const need = chosen.fields.some((field) => fieldState(field.key) === "missing") ? "missing" : method === "oauth2" && !signedIn ? "signin" : "none";
 
-  useEffect(() => {
-    if (credentialReady && existingUrl !== "" && toolCache[existingUrl] === undefined) void probe();
-    // probe is redefined every render; the credentials becoming ready decides when to run.
-  }, [credentialReady]);
+  // A server already in the file lists its tools there: the ones allowed, and the ones turned off.
+  // Only a server being added, one whose file lists none, or one moved to a new address is asked.
+  const listed = existing?.tool_filter?.allow !== undefined;
+  const denied = existing?.tool_filter?.deny ?? [];
+  const live = editing === null || !listed || url.trim() !== existingUrl;
+  const tools: ToolInfo[] | null = live ? found : [...(existing?.tool_filter?.allow ?? []), ...denied].map((tool) => ({ name: tool }));
 
   const taken = (metadata.tools?.mcp ?? []).map((s) => s.name).filter((n) => n !== editing);
   const name = editing ?? nameFromUrl(url, taken);
@@ -252,23 +245,34 @@ export function ServerPanel({
     // probe is redefined every render; the flag decides when to run.
   }, [pendingDirectoryProbe]);
 
+  async function prepareSignIn(auth: OAuthSignIn, pick: number) {
+    setProbing(true);
+    const { clientId } = await resolveDirectoryClient(auth);
+    if (pick !== latestDirectoryPick.current) return;
+    setValues(signInValues(auth, clientId));
+    setProbing(false);
+  }
+
   function connectFromDirectory(entry: DirectoryEntry) {
+    const pick = ++latestDirectoryPick.current;
     setUrl(entry.url);
     setTab("url");
-    // Clear the last pick's state, or discovery (which only runs from "none") never fires. A server
-    // that needs a key lands on that field.
-    setMethod(entry.needsKey ? "bearer" : "none");
-    setValues({});
+    setMethod(entry.auth.type);
+    setValues(entry.auth.type === "oauth2" ? signInValues(entry.auth) : {});
     setFound(null);
     setError(null);
     setProbedUrl("");
     setAllowed([]);
-    if (!entry.needsKey) setPendingDirectoryProbe(true);
+    setProbing(false);
+    if (entry.auth.type === "none") setPendingDirectoryProbe(true);
+    if (entry.auth.type === "oauth2") void prepareSignIn(entry.auth, pick);
   }
 
   const hasTypedSecret = chosen.fields.some(
     (field) => isSecretAuthField(field.key) && (secretEdits[field.key] ?? "").trim() !== "",
   );
+
+  const incomplete = lacksRequiredField(chosen.fields, authBlock());
 
   function authBlock(): NewMcpServer["auth"] {
     if (method === "none") return undefined;
@@ -300,7 +304,7 @@ export function ServerPanel({
 
   async function probe(force = false) {
     if (!writesMethod || url.trim() === "" || name === "") return;
-    if (!force && url.trim() === probedUrl) return;
+    if (!force && (!live || url.trim() === probedUrl)) return;
     setProbing(true);
     setError(null);
 
@@ -311,12 +315,7 @@ export function ServerPanel({
       const discovered = await discoverMcpServerAuth(url.trim()).catch(() => null);
       if (discovered !== null) {
         setMethod("oauth2");
-        setValues({
-          authorize_url: discovered.authorizeUrl,
-          token_url: discovered.tokenUrl,
-          client_id: discovered.clientId,
-          ...(discovered.scopes !== undefined && discovered.scopes.length > 0 ? { scopes: discovered.scopes.join(" ") } : {}),
-        });
+        setValues(discoveredValues(discovered));
         // Don't probe a just-discovered oauth2 config: nobody has signed in, so it would only time
         // out.
         setProbing(false);
@@ -324,38 +323,29 @@ export function ServerPanel({
       }
     }
 
-    const result = await onProbe({
-      mcp: [
-        {
-          name,
-          transport: {
-            type: "http",
-            url: url.trim(),
-            // Sent exactly as it will be written to the file, so the list is what the agent can
-            // reach.
-            ...(auth === undefined
-              ? {}
-              : { authentication: { type: auth.type, ...auth.fields, ...(auth.scopes ? { scopes: auth.scopes } : {}) } }),
-          },
-        },
-      ],
-    });
+    const server = {
+      name,
+      transport: {
+        type: "http" as const,
+        url: url.trim(),
+        // Sent exactly as it will be written to the file, so the list is what the agent can reach.
+        ...(auth === undefined
+          ? {}
+          : { authentication: { type: auth.type, ...auth.fields, ...(auth.scopes ? { scopes: auth.scopes } : {}) } }),
+      },
+    };
+    const result = await onProbe({ mcp: [server] });
     setProbing(false);
-    if (result.error !== undefined) {
-      setError(result.error);
-      onToolsFound(url.trim(), null);
+    setRejected(result.failure?.kind === "rejected");
+    if (result.failure !== undefined) {
+      setError(issueSentence(result.failure.kind, displayName(name), credentialOf(server), result.failure.message));
       return;
     }
-    const tools: ToolInfo[] = (result.tools ?? []).map((tool) => ({
-      name: tool.name,
-      description: tool.description,
-    }));
-    setFound(tools);
+    const reported = (result.tools ?? []).map((tool) => ({ name: tool.name, description: tool.description }));
+    setFound(reported);
     setProbedUrl(url.trim());
-    onToolsFound(url.trim(), tools);
-    // Only preselect everything for a server being added; reopening one must not undo a tool the
-    // user turned off.
-    if (editing === null) setAllowed(tools.map((tool) => tool.name));
+    // Everything the server has, less what the file turned off, so reopening never undoes a choice.
+    if (live) setAllowed(reported.map((tool) => tool.name).filter((tool) => !denied.includes(tool)));
   }
 
   function toggle(tool: string) {
@@ -367,7 +357,7 @@ export function ServerPanel({
     let next = editing === null ? content : removeMcpServer(content, editing);
     // Read after the old block is gone, so re-saving a server can reuse its own name. Names
     // already held on the device count too, so two agents never end up sharing one captured name.
-    const taken = [...referencedSecretNames(next), ...knownSecrets, ...lockedSecrets];
+    const taken = [...referencedSecretNames(next), ...knownSecrets];
     const auth = authBlock();
     const captured =
       auth === undefined ? undefined : captureAuthSecrets(name, auth.fields, taken);
@@ -376,27 +366,31 @@ export function ServerPanel({
       url: url.trim(),
       auth: auth === undefined || captured === undefined ? undefined : { ...auth, fields: captured.fields },
     });
-    if (found !== null) next = setServerToolFilter(next, name, allowed);
+    if (tools !== null) {
+      const names = tools.map((tool) => tool.name);
+      next = setServerToolFilter(next, name, names.filter((tool) => allowed.includes(tool)), names.filter((tool) => !allowed.includes(tool)));
+    }
     for (const secret of captured?.secrets ?? []) {
-      void onStoreSecret(secret.name, secret.value, saveOnDevice && passkeyUsable);
+      void onStoreSecret(secret.name, secret.value, keep, hostOf(url.trim()));
     }
     onApply(next);
     if (existingUrl !== "" && existingUrl !== url.trim()) onServerDropped(existingUrl);
-    // Without a probe the file's filter was not rewritten, so an empty list means "not looked at",
+    // Without a list the file's filter was not rewritten, so an empty list means "not looked at",
     // not "none", and must not take any permission back.
-    if (found !== null || allowed.length > 0) onSetAllowedTools(next, url.trim(), allowed);
+    if (tools !== null || allowed.length > 0) onSetAllowedTools(next, url.trim(), allowed);
     onClose();
   }
 
   const showDirectory = editing === null && tab === "directory";
   const showDetail = showDirectory && detail !== null;
-  // A probe that found tools, with oauth2 still chosen and nothing wrong, is a working sign-in,
-  // shown collapsed unless "Edit" asks for the fields.
-  const signedIn = method === "oauth2" && found !== null && error === null;
-
   return (
     <>
       <div className="u-panel-body">
+        {onBack !== undefined && (
+          <button className="u-detail-back is-near" onClick={onBack}>
+            ← Back to Setup
+          </button>
+        )}
         {editing === null && !showDetail && (
           <div className="u-connect-head">
             <span className="u-seg fill">
@@ -492,19 +486,6 @@ export function ServerPanel({
                     Sign out
                   </button>
                 </div>
-              ) : oauthLocked && !oauthFormOpen ? (
-                <div className="u-signedin-row">
-                  <span className="u-chip warn">
-                    <span className="u-dot" aria-hidden="true" />
-                    locked
-                  </span>
-                  <button className="u-linkish" onClick={() => onUnlockSecret(oauthRefreshKey)}>
-                    Unlock
-                  </button>
-                  <button className="u-linkish" onClick={() => setOauthFormOpen(true)}>
-                    Sign in again
-                  </button>
-                </div>
               ) : (
                 method !== "none" && (
                   <div className="u-auth-fields">
@@ -512,44 +493,27 @@ export function ServerPanel({
                       fields={chosen.fields}
                       values={values}
                       secretEdits={secretEdits}
-                      locked={secretLocked}
                       saved={secretStored}
+                      rejected={rejected}
                       onValue={(key, value) => setValues((current) => ({ ...current, [key]: value }))}
                       onSecretEdit={(key, value) => setSecretEdits((current) => ({ ...current, [key]: value }))}
-                      onUnlock={onUnlockSecret}
+                      onSecretBlur={() => hasTypedSecret && void probe(true)}
                     />
-                    {hasTypedSecret && (
-                      <label className="u-checkline">
-                        <input
-                          type="checkbox"
-                          checked={saveOnDevice && passkeyUsable}
-                          disabled={!passkeyUsable}
-                          onChange={(event) => setSaveOnDevice(event.target.checked)}
-                        />
-                        {passkeyUsable
-                          ? "Save on this device, behind your fingerprint, Face or PIN"
-                          : "This device cannot save it - kept for this tab only"}
-                      </label>
-                    )}
+                    {(hasTypedSecret || method === "oauth2") && <KeepOnDevice keep={keep} onChange={setKeep} />}
                     {method === "oauth2" && (
                       <div className="u-signin-row">
                         <button
                           className="u-btn primary"
+                          disabled={incomplete}
                           onClick={() => {
-                            void Promise.resolve(onSignIn(oauthProvider(), rememberOAuth && passkeyUsable)).then((ok) => {
+                            void Promise.resolve(onSignIn(oauthProvider(), keep)).then((ok) => {
                               if (ok === true) void probe(true);
                             });
                           }}
                         >
-                          {signedIn ? "Sign in again" : "Sign in"}
+                          Sign in
                         </button>
                         <span className="u-row-meta">Opens the provider in a pop-up</span>
-                        {passkeyUsable && (
-                          <label className="u-checkline">
-                            <input type="checkbox" checked={rememberOAuth} onChange={(event) => setRememberOAuth(event.target.checked)} />
-                            <span>Remember me on this device</span>
-                          </label>
-                        )}
                       </div>
                     )}
                   </div>
@@ -557,26 +521,19 @@ export function ServerPanel({
               )}
             </div>
 
-            {pendingApproval !== null && (
-              <ApprovalStep
-                name={pendingApproval.name}
-                hosts={pendingApproval.hosts}
-                onDecide={(approved) => onDecideApproval(pendingApproval.name, approved)}
-              />
-            )}
-
             <ServerTools
               url={url}
               probing={probing}
-              found={found}
+              found={tools}
               error={error}
               allowed={allowed}
-              waiting={waitingNote(url, probing, error, signInNeeded ? "signin" : need)}
+              waiting={waitingNote(url, probing, error, need, editing !== null && !listed)}
               onToggle={toggle}
               onToggleAll={() => {
-                if (found) setAllowed(allowed.length === found.length ? [] : found.map((tool) => tool.name));
+                if (tools) setAllowed(allowed.length === tools.length ? [] : tools.map((tool) => tool.name));
               }}
               onCheckAgain={() => void probe(true)}
+              checkable={live}
               showTip={showTip}
               hideTip={hideTip}
             />
@@ -602,8 +559,8 @@ export function ServerPanel({
           )}
           <div className="u-spacer" />
           <button className="u-btn ghost" onClick={onClose}>Cancel</button>
-          <button className="u-btn primary" disabled={url.trim() === "" || name === "" || probing || isStdio || !writesMethod} onClick={save}>
-            {probing ? "Checking…" : "Save"}
+          <button className="u-btn primary" disabled={url.trim() === "" || name === "" || isStdio || !writesMethod || incomplete} onClick={save}>
+            Save
           </button>
         </div>
       )}

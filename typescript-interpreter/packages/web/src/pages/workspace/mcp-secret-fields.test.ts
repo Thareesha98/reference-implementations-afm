@@ -15,7 +15,7 @@
 // under the License.
 
 import { describe, it, expect } from "vitest";
-import { captureAuthSecrets, credentialNeed, isSecretAuthField, mcpSecretEnvName, secretFieldState } from "./mcp-secret-fields";
+import { captureAuthSecrets, isSecretAuthField, lacksRequiredField, mcpSecretEnvName, secretFieldState } from "./mcp-secret-fields";
 import { addMcpServer, removeMcpServer } from "./agent-source-edit";
 import { referencedSecretNames } from "@afm/engine";
 
@@ -109,59 +109,27 @@ describe("captureAuthSecrets", () => {
   });
 });
 
-// After a reload the value is still sealed on disk, but the key that opens it is gone. The panel
-// has to say so and offer the way back, rather than probing and reporting "Unauthorized".
 describe("secretFieldState", () => {
   const ref = "${env:HUGGINGFACE_TOKEN}";
 
-  it("is saved once the worker can answer for the name", () => {
-    expect(secretFieldState(ref, undefined, ["HUGGINGFACE_TOKEN"], [])).toBe("saved");
+  it("is saved once the worker can answer for the name, sealed or not", () => {
+    expect(secretFieldState(ref, undefined, ["HUGGINGFACE_TOKEN"])).toBe("saved");
   });
 
-  it("is locked when the only copy is sealed and this tab has not opened it", () => {
-    expect(secretFieldState(ref, undefined, ["HUGGINGFACE_TOKEN"], ["HUGGINGFACE_TOKEN"])).toBe("locked");
-  });
-
-  it("prefers locked over saved, because a sealed name is listed as known too", () => {
-    const state = secretFieldState(ref, undefined, ["HUGGINGFACE_TOKEN"], ["HUGGINGFACE_TOKEN"]);
-    expect(state).not.toBe("saved");
-  });
-
-  // The case that sent the panel probing into an Unauthorized: the file names a credential and
-  // nothing anywhere has it, which is not the same as the field being blank.
+  // The file names a credential and nothing anywhere has it, which is not the same as the field
+  // being blank.
   it("is missing when the file references a name nobody has", () => {
-    expect(secretFieldState(ref, undefined, [], [])).toBe("missing");
+    expect(secretFieldState(ref, undefined, [])).toBe("missing");
   });
 
   it("is empty when the file holds no reference at all", () => {
-    expect(secretFieldState("", undefined, ["HUGGINGFACE_TOKEN"], [])).toBe("empty");
-    expect(secretFieldState("a-raw-legacy-value", undefined, [], [])).toBe("empty");
+    expect(secretFieldState("", undefined, ["HUGGINGFACE_TOKEN"])).toBe("empty");
+    expect(secretFieldState("a-raw-legacy-value", undefined, [])).toBe("empty");
   });
 
   it("is editing the moment the user touches the box, whatever is stored", () => {
-    expect(secretFieldState(ref, "new", ["HUGGINGFACE_TOKEN"], ["HUGGINGFACE_TOKEN"])).toBe("editing");
-    expect(secretFieldState(ref, "", ["HUGGINGFACE_TOKEN"], [])).toBe("editing");
-  });
-});
-
-// Probing with a credential the runtime cannot produce only ever answers 401, so the panel has
-// to know the difference between "ask the server" and "ask the user first".
-describe("credentialNeed", () => {
-  it("is none when every field can be produced", () => {
-    expect(credentialNeed(["saved", "empty", "editing"])).toBe("none");
-    expect(credentialNeed([])).toBe("none");
-  });
-
-  it("reports a locked field, which needs the authenticator", () => {
-    expect(credentialNeed(["saved", "locked"])).toBe("locked");
-  });
-
-  it("reports a missing field, which needs typing", () => {
-    expect(credentialNeed(["missing", "saved"])).toBe("missing");
-  });
-
-  it("puts locked first, because that one has a one-click way out", () => {
-    expect(credentialNeed(["missing", "locked"])).toBe("locked");
+    expect(secretFieldState(ref, "new", ["HUGGINGFACE_TOKEN"])).toBe("editing");
+    expect(secretFieldState(ref, "", ["HUGGINGFACE_TOKEN"])).toBe("editing");
   });
 });
 
@@ -302,5 +270,34 @@ describe("a file that still holds a raw credential", () => {
     );
     expect(content).not.toContain("raw_left_in_the_file");
     expect(stored).toEqual([{ name: "LEGACY_TOKEN", value: "raw_left_in_the_file" }]);
+  });
+});
+
+describe("lacksRequiredField", () => {
+  const token = [{ key: "token", hint: "required" }];
+  const basic = [
+    { key: "username", hint: "required" },
+    { key: "password", hint: "required" },
+  ];
+
+  it("is true while a required field is not in what would be written", () => {
+    expect(lacksRequiredField(token, { type: "bearer", fields: {} })).toBe(true);
+  });
+
+  it("is false once the required field is given", () => {
+    expect(lacksRequiredField(token, { type: "bearer", fields: { token: "${env:HF_TOKEN}" } })).toBe(false);
+  });
+
+  it("wants every required field of a method, not just one", () => {
+    expect(lacksRequiredField(basic, { type: "basic", fields: { username: "ada" } })).toBe(true);
+    expect(lacksRequiredField(basic, { type: "basic", fields: { username: "ada", password: "${env:P}" } })).toBe(false);
+  });
+
+  it("does not ask for an optional field", () => {
+    expect(lacksRequiredField([{ key: "header_name", hint: "optional" }], { type: "api-key", fields: {} })).toBe(false);
+  });
+
+  it("asks for nothing when the server signs in with no method", () => {
+    expect(lacksRequiredField([], undefined)).toBe(false);
   });
 });

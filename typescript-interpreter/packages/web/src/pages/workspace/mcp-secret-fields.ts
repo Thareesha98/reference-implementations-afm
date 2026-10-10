@@ -15,6 +15,7 @@
 // under the License.
 
 import { envSecretName } from "./agent-source-edit";
+import type { NewMcpServer } from "./agent-source-edit";
 
 // The auth fields that hold a credential, and what each is called once captured. Other fields, such
 // as a username or header name, are configuration and stay in the file.
@@ -83,27 +84,18 @@ export function captureAuthSecrets(
 }
 
 /**
- * "locked" and "missing" mean the file names a credential the runtime cannot produce, so the server
- * would only answer 401. A locked one needs the authenticator, a missing one needs typing.
+ * "missing" means the file names a credential nobody here holds, so the server would only answer
+ * 401 and the user has to type it.
  */
-export type SecretFieldState = "editing" | "locked" | "missing" | "saved" | "empty";
+export type SecretFieldState = "editing" | "missing" | "saved" | "empty";
 
-export function secretFieldState(
-  fileValue: string,
-  typed: string | undefined,
-  knownSecrets: string[],
-  lockedSecrets: string[],
-): SecretFieldState {
+export function secretFieldState(fileValue: string, typed: string | undefined, knownSecrets: string[]): SecretFieldState {
   if (typed !== undefined) return "editing";
   const name = envSecretName(fileValue);
   if (name === "") return "empty";
-  if (lockedSecrets.includes(name)) return "locked";
   return knownSecrets.includes(name) ? "saved" : "missing";
 }
 
-/** What stands between this server and a connection, if anything. */
-export function credentialNeed(states: SecretFieldState[]): "none" | "locked" | "missing" {
-  if (states.includes("locked")) return "locked";
-  if (states.includes("missing")) return "missing";
-  return "none";
+export function lacksRequiredField(fields: readonly { key: string; hint: string }[], auth: NewMcpServer["auth"]): boolean {
+  return fields.some((field) => field.hint === "required" && auth?.fields[field.key] === undefined);
 }

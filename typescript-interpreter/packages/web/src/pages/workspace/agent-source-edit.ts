@@ -327,10 +327,10 @@ function mcpServerRange(lines: string[], serverName: string): (Span & { indent: 
 }
 
 /**
- * Replaces the server's `tool_filter` with an explicit allow-list, or removes it when `allow` is
- * null. Only that block changes.
+ * Replaces the server's `tool_filter` with an explicit allow-list and the tools turned off, or
+ * removes it when `allow` is null. Only that block changes.
  */
-export function setServerToolFilter(content: string, serverName: string, allow: string[] | null): string {
+export function setServerToolFilter(content: string, serverName: string, allow: string[] | null, deny: string[] = []): string {
   return editFrontmatter(content, (lines) => {
     const range = mcpServerRange(lines, serverName);
     if (range === null) return null;
@@ -342,14 +342,10 @@ export function setServerToolFilter(content: string, serverName: string, allow: 
       if (filterPattern.test(lines[i] ?? "")) filterAt = i;
     }
 
-    // An empty allow-list is written inline: `allow:` with no items is YAML null, which fails
-    // validation.
-    const block =
-      allow === null
-        ? []
-        : allow.length === 0
-          ? [`${prop}tool_filter:`, `${prop}  allow: []`]
-          : [`${prop}tool_filter:`, `${prop}  allow:`, ...allow.map((name) => `${prop}    - ${name}`)];
+    // An empty list is written inline: `allow:` with no items is YAML null, which fails validation.
+    const list = (key: string, names: string[]) =>
+      names.length === 0 ? [`${prop}  ${key}: []`] : [`${prop}  ${key}:`, ...names.map((name) => `${prop}    - ${name}`)];
+    const block = allow === null ? [] : [`${prop}tool_filter:`, ...list("allow", allow), ...(deny.length === 0 ? [] : list("deny", deny))];
 
     return filterAt !== -1
       ? [...lines.slice(0, filterAt), ...block, ...lines.slice(blockEnd(lines, filterAt + 1, prop.length, range.end))]

@@ -16,6 +16,7 @@
 
 import type { OAuthProviderRef } from "@afm/adapter-auth";
 import type { Plan, LoopEvent, AgentMetadata, ChatMessage } from "@afm/engine";
+import type { Failure } from "./failure";
 
 export type AgentModelRef = AgentMetadata["model"];
 
@@ -34,7 +35,6 @@ export type ClientMessage =
       content: string;
       seedHistory?: ChatMessage[];
       permissionSeed?: string[];
-      loadId: string;
     }
   | { type: "send"; text: string; images?: ImageAttachment[]; keep?: number }
   | { type: "attach-files"; files: { name: string; path: string; text: string; pages?: number }[] }
@@ -42,12 +42,10 @@ export type ClientMessage =
   | { type: "cancel" }
   | { type: "regenerate" }
   | { type: "reset-chat" }
-  | { type: "secret-response"; name: string; value: string | null }
-  | { type: "set-secret"; name: string; value: string }
-  // A sealed secret opened on purpose from a panel. The main thread runs the ceremony and sends the
-  // derived key.
+  // `host` is the server the value was entered for; the worker only hands it to that destination.
+  | { type: "set-secret"; name: string; value: string; host?: string }
+  // A sealed secret opened by the main thread, which runs the ceremony and sends the derived key.
   | { type: "unlock-secret"; name: string; key: CryptoKey }
-  | { type: "secret-approval-response"; name: string; approved: boolean }
   // The derived key crosses as a non-extractable CryptoKey; the plaintext secret never travels this
   // way.
   | {
@@ -67,7 +65,6 @@ export type ClientMessage =
       credentialId: Uint8Array<ArrayBuffer>;
       salt: Uint8Array<ArrayBuffer>;
     }
-  | { type: "passkey-unlock-response"; id: string; key: CryptoKey | null }
   | { type: "passkey-forget"; name: string }
   | { type: "list-secrets" }
   | { type: "list-passkeys" }
@@ -81,7 +78,8 @@ export type ClientMessage =
   | { type: "oauth-signin-code"; id: string; code: string; state: string; iss?: string }
   | { type: "oauth-sign-out"; provider: OAuthProviderRef }
   | { type: "generate-draft"; prompt: string; model: AgentModelRef; final?: boolean }
-  | { type: "probe-server"; id: string; server: AgentMetadata["tools"] };
+  | { type: "probe-server"; id: string; server: AgentMetadata["tools"] }
+  | { type: "probe-model"; id: string; model: AgentModelRef };
 
 export interface ToolInfo {
   name: string;
@@ -113,22 +111,7 @@ export type ServerMessage =
   | { type: "tool-result"; id: string; name: string; ok: boolean; content: string }
   | { type: "turn-finished"; reason: TurnEndReason }
   | { type: "notice"; text: string }
-  | { type: "secret-request"; name: string }
-
-  | { type: "secret-approval-request"; name: string; hosts: string[] }
-  // The worker holds a sealed secret it cannot open alone; only the main thread can ask the
-  // authenticator.
-  | {
-      type: "passkey-unlock-request";
-      id: string;
-      name: string;
-      credentialId: Uint8Array<ArrayBuffer>;
-      salt: Uint8Array<ArrayBuffer>;
-    }
   | { type: "permission-request"; id: string; name: string; args: unknown; serverId?: string }
-  // The worker has no token for this provider and cannot open a popup itself. loadId ties it to the
-  // current run.
-  | { type: "oauth-signin-needed"; provider: OAuthProviderRef; loadId: string }
   | { type: "oauth-authorize-url"; id: string; url: string }
   | { type: "oauth-signin-done"; id: string; ok: boolean; error?: string }
   | {
@@ -145,7 +128,7 @@ export type ServerMessage =
   | { type: "draft-generated"; source: string }
   | { type: "draft-clarify"; questions: string[] }
   | { type: "draft-generation-error"; message: string }
-  | { type: "probe-result"; id: string; tools?: ToolInfo[]; error?: string }
+  | { type: "probe-result"; id: string; tools?: ToolInfo[]; failure?: Failure }
   | { type: "error"; message: string };
 
 export function serverMessageFromLoopEvent(event: LoopEvent): ServerMessage | null {

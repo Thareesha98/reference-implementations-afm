@@ -14,16 +14,23 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { usePasskeySupport } from "../../passkey/usePasskeySupport";
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { EXAMPLES } from "../../examples";
 import { MODEL_PROVIDERS, findProvider } from "./model-catalog";
 import type { AgentModelRef } from "../../protocol";
-import type { ChatState, PendingPasskeyUnlock } from "../../chat-state";
+import type { ChatState } from "../../chat-state";
 import { resolveContent, normalizeAgentFileUrl } from "../../load-paths";
 import { usableSecrets } from "../../chat-state";
-import { SetupColumn, UnlockStep, KeyStep } from "./SetupSteps";
+import { KeepOnDevice } from "./KeepOnDevice";
+
+function SetupColumn({ children }: { children: ReactNode }) {
+  return (
+    <div className="u-setup">
+      <div className="u-setup-col">{children}</div>
+    </div>
+  );
+}
 
 const ICON_PATHS = {
   blank: "M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8zM14 2v6h6",
@@ -66,10 +73,9 @@ interface Props {
   onGenerate: (prompt: string, model: AgentModelRef, final?: boolean) => void;
   onDismissDraft: () => void;
   /** Saves a key typed here, so writing a file does not detour through a key prompt. */
-  onSaveKey: (name: string, value: string, withPasskey: boolean) => Promise<boolean>;
-  /** Answers the worker's unlock request while a file is being written. */
-  onUnlockPasskey: (request: PendingPasskeyUnlock) => void;
-  onSkipPasskeyUnlock: (id: string) => void;
+  onSaveKey: (name: string, value: string, keep: boolean) => Promise<boolean>;
+  /** Opens the keys saved on this device. Must run inside the click. */
+  onOpenKeys: () => Promise<boolean>;
   /** True in the side drawer, where "press Run" would point off-screen. */
   compact?: boolean;
   onBlank?: () => void;
@@ -82,18 +88,16 @@ export function StartHere({
   onGenerate,
   onSaveKey,
   onDismissDraft,
-  onUnlockPasskey,
-  onSkipPasskeyUnlock,
+  onOpenKeys,
   compact = false,
   onBlank = () => {},
 }: Props) {
   const [view, setView] = useState<View>("menu");
-  const support = usePasskeySupport();
-  const withPasskey = support?.usable === true;
   const [prompt, setPrompt] = useState("");
   const [providerId, setProviderId] = useState(MODEL_PROVIDERS[0]!.id);
   const [modelId, setModelId] = useState(MODEL_PROVIDERS[0]!.models[0]!.id);
   const [key, setKey] = useState("");
+  const [keep, setKeep] = useState(false);
   const [answers, setAnswers] = useState("");
   const [link, setLink] = useState("");
   const [dropping, setDropping] = useState(false);
@@ -105,6 +109,7 @@ export function StartHere({
 
   const provider = findProvider(providerId) ?? MODEL_PROVIDERS[0]!;
   const keySaved = usableSecrets(state).includes(provider.secretName);
+  const keyClosed = keySaved && !state.savedSecrets.includes(provider.secretName);
 
   // The worker answered (file, questions or error), so the write is over. Only an arriving answer
   // counts: a new request clears the last one first, which must not read as an answer.
@@ -120,10 +125,11 @@ export function StartHere({
     authentication: { type: "api-key", api_key: `\${env:${provider.secretName}}` },
   } as AgentModelRef;
 
-  function writeFile(final = false, request = prompt.trim()) {
+  async function writeFile(final = false, request = prompt.trim()) {
     if (request === "") return;
-    if (!keySaved && key.trim() !== "") void onSaveKey(provider.secretName, key.trim(), withPasskey);
     setWriting(true);
+    if (keyClosed) await onOpenKeys();
+    else if (!keySaved && key.trim() !== "") void onSaveKey(provider.secretName, key.trim(), keep);
     onGenerate(request, authoringModel, final);
   }
 
@@ -238,34 +244,13 @@ export function StartHere({
   // Checked before the draft and questions below: while a request is out they hold their last
   // value, so the screen would otherwise fall through to the describe-it form.
   if (writing) {
-    // A key sealed behind the passkey needs unlocking on the first write after a reload.
-    const unlock = state.pendingPasskeyUnlock;
-    const waiting =
-      unlock !== null ? (
-        <UnlockStep
-          name={unlock.name}
-          onUnlock={() => onUnlockPasskey(unlock)}
-          onSkip={() => onSkipPasskeyUnlock(unlock.id)}
-        />
-      ) : state.pendingSecret !== null ? (
-        // Reached when the unlock is declined: falls through to the ordinary key prompt.
-        <KeyStep
-          name={state.pendingSecret}
-          onSubmit={(value, withPasskey) => void onSaveKey(state.pendingSecret!, value, withPasskey)}
-        />
-      ) : null;
-
     return (
       <SetupColumn>
-        {waiting ?? (
-          <>
-            <h3 className="u-setup-title">Writing the file</h3>
-            <p className="u-generating">
-              <span className="u-spinner" aria-hidden="true" />
-              Generating…
-            </p>
-          </>
-        )}
+        <h3 className="u-setup-title">Writing the file</h3>
+        <p className="u-generating">
+          <span className="u-spinner" aria-hidden="true" />
+          Generating…
+        </p>
       </SetupColumn>
     );
   }
@@ -314,7 +299,7 @@ export function StartHere({
           onSubmit={(event) => {
             event.preventDefault();
             if (answers.trim() === "") return;
-            writeFile(true, `${prompt.trim()}\n\nAnswers to your questions:\n${answers.trim()}`);
+            void writeFile(true, `${prompt.trim()}\n\nAnswers to your questions:\n${answers.trim()}`);
             setAnswers("");
           }}
         >
@@ -332,7 +317,7 @@ export function StartHere({
               type="button"
               disabled={writing}
               onClick={() => {
-                writeFile(true, prompt.trim());
+                void writeFile(true, prompt.trim());
                 setAnswers("");
               }}
             >
@@ -360,7 +345,7 @@ export function StartHere({
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            writeFile();
+            void writeFile();
           }}
           className="u-group"
         >
@@ -419,11 +404,7 @@ export function StartHere({
                   autoComplete="off"
                 />
               </label>
-              <p className="u-hint">
-                {withPasskey
-                  ? "Saving asks for your fingerprint, Face or PIN and keeps the key on this device behind it."
-                  : "Kept in memory for this tab only."}
-              </p>
+              <KeepOnDevice keep={keep} onChange={setKeep} />
             </>
           )}
 

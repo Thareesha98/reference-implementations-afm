@@ -15,7 +15,7 @@
 // under the License.
 
 import type { ClientMessage } from "../protocol";
-import { deriveAesKeyFromPrf, randomSalt } from "./crypto";
+import { deriveAesKey, importPrf, randomSalt } from "./crypto";
 import { loadBlob, listNames, type StoredSecret } from "./store";
 import { enrollPasskey } from "./enroll";
 import { unlockWithPasskey } from "./unlock";
@@ -23,17 +23,10 @@ import { knownCredentialId, rememberCredentialId, forgetCredentialId } from "./c
 
 // Everything about protecting saved secrets behind one passkey. Sealing, unlocking and
 // consolidating only derive keys and hand them to the worker, which alone holds the plaintext.
-// Ceremonies must run straight from a click.
+// Ceremonies must run straight from a click, and the passkey's result is kept for the tab so
+// nothing asks twice.
 
 type Post = (message: ClientMessage) => void;
-
-// A pending unlock the worker is waiting on.
-export interface UnlockRequest {
-  id: string;
-  name: string;
-  credentialId: Uint8Array<ArrayBuffer>;
-  salt: Uint8Array<ArrayBuffer>;
-}
 
 interface SealedEntry {
   name: string;
@@ -42,8 +35,10 @@ interface SealedEntry {
 
 interface Opened {
   credentialId: Uint8Array<ArrayBuffer>;
-  prfOutput: BufferSource;
+  prf: CryptoKey;
 }
+
+let opened: Opened | null = null;
 
 function sameBytes(a: Uint8Array<ArrayBuffer>, b: Uint8Array<ArrayBuffer>): boolean {
   if (a.length !== b.length) return false;
@@ -73,38 +68,51 @@ async function hasSecretsUnder(credentialId: Uint8Array<ArrayBuffer>): Promise<b
   return (await sealedEntries()).some((entry) => sameBytes(entry.blob.credentialId, credentialId));
 }
 
+async function ceremony(credentialId: Uint8Array<ArrayBuffer>): Promise<Opened> {
+  if (opened !== null && sameBytes(opened.credentialId, credentialId)) return opened;
+  return { credentialId, prf: await importPrf(await unlockWithPasskey(credentialId)) };
+}
+
 // The credential this browser saves everything behind. A new one is enrolled only when none is
 // known, or the remembered one is gone and nothing is sealed under it; otherwise sealed keys would
 // be orphaned.
 async function credentialMaterial(): Promise<Opened> {
+  if (opened !== null) return opened;
   const existing = knownCredentialId();
   if (existing !== null) {
     try {
-      return { credentialId: existing, prfOutput: await unlockWithPasskey(existing) };
+      return (opened = await ceremony(existing));
     } catch (error) {
       if (await hasSecretsUnder(existing)) throw error;
       forgetCredentialId();
     }
   }
-  return enrollPasskey();
+  const enrolled = await enrollPasskey();
+  return (opened = { credentialId: enrolled.credentialId, prf: await importPrf(enrolled.prfOutput) });
+}
+
+function primaryOf(all: Opened[]): Opened | undefined {
+  const known = knownCredentialId();
+  return all.find((credential) => known !== null && sameBytes(credential.credentialId, known)) ?? all[0];
 }
 
 // When keys ended up under several passkeys, the worker re-seals them under one so the next reload
 // asks once.
-async function consolidate(post: Post, entries: SealedEntry[], opened: Opened[]): Promise<void> {
-  if (opened.length <= 1) return;
-  const known = knownCredentialId();
-  const primary = opened.find((c) => known !== null && sameBytes(c.credentialId, known)) ?? opened[0]!;
+async function consolidate(post: Post, entries: SealedEntry[], all: Opened[]): Promise<void> {
+  const primary = primaryOf(all);
+  if (primary === undefined) return;
+  opened = primary;
+  if (all.length <= 1) return;
   for (const { name, blob } of entries) {
-    const source = opened.find((c) => sameBytes(c.credentialId, blob.credentialId));
+    const source = all.find((credential) => sameBytes(credential.credentialId, blob.credentialId));
     if (source === undefined || sameBytes(blob.credentialId, primary.credentialId)) continue;
     try {
       const salt = randomSalt();
       post({
         type: "passkey-reseal",
         name,
-        from: await deriveAesKeyFromPrf(source.prfOutput, blob.salt),
-        to: await deriveAesKeyFromPrf(primary.prfOutput, salt),
+        from: await deriveAesKey(source.prf, blob.salt),
+        to: await deriveAesKey(primary.prf, salt),
         credentialId: primary.credentialId,
         salt,
       });
@@ -121,45 +129,32 @@ async function consolidate(post: Post, entries: SealedEntry[], opened: Opened[])
  */
 export async function seal(post: Post, name: string): Promise<boolean> {
   try {
-    const { credentialId, prfOutput } = await credentialMaterial();
+    const { credentialId, prf } = await credentialMaterial();
     rememberCredentialId(credentialId);
     const salt = randomSalt();
-    const key = await deriveAesKeyFromPrf(prfOutput, salt);
-    post({ type: "passkey-remember", name, key, credentialId, salt });
+    post({ type: "passkey-remember", name, key: await deriveAesKey(prf, salt), credentialId, salt });
     return true;
   } catch {
     return false;
   }
 }
 
-/**
- * Opens every sealed secret with one ceremony per distinct passkey. `answering` is the worker's own
- * unlock request, answered last so the run it unblocks finds every other key already sent.
- */
-export async function unlockAll(post: Post, answering?: UnlockRequest): Promise<boolean> {
+/** Opens every sealed secret, with one ceremony per distinct passkey. */
+export async function unlockAll(post: Post): Promise<boolean> {
   const entries = await sealedEntries();
-  const credentials = distinctCredentials(entries);
-  if (answering !== undefined) {
-    credentials.sort((a, b) => Number(sameBytes(b, answering.credentialId)) - Number(sameBytes(a, answering.credentialId)));
-  }
-  const opened: Opened[] = [];
-  let answer: CryptoKey | null = null;
-  for (const credentialId of credentials) {
-    let prfOutput: BufferSource;
+  const all: Opened[] = [];
+  for (const credentialId of distinctCredentials(entries)) {
+    let credential: Opened;
     try {
-      prfOutput = await unlockWithPasskey(credentialId);
+      credential = await ceremony(credentialId);
     } catch {
       continue;
     }
-    opened.push({ credentialId, prfOutput });
+    all.push(credential);
     for (const { name, blob } of entries) {
-      if (!sameBytes(blob.credentialId, credentialId)) continue;
-      const key = await deriveAesKeyFromPrf(prfOutput, blob.salt);
-      if (answering?.name === name) answer = key;
-      else post({ type: "unlock-secret", name, key });
+      if (sameBytes(blob.credentialId, credentialId)) post({ type: "unlock-secret", name, key: await deriveAesKey(credential.prf, blob.salt) });
     }
   }
-  if (answering !== undefined) post({ type: "passkey-unlock-response", id: answering.id, key: answer });
-  await consolidate(post, entries, opened);
-  return opened.length > 0;
+  await consolidate(post, entries, all);
+  return all.length > 0;
 }

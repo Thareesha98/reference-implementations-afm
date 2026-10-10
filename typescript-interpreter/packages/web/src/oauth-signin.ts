@@ -106,7 +106,6 @@ interface Flow {
 export interface OAuthSignInDeps {
   post: (message: ClientMessage) => void;
   onPopupBlocked: () => void;
-  onSettled: () => void;
   // Says why a flow failed. Closing the popup is the user's own choice and is not reported.
   onFailure: (reason: string) => void;
 }
@@ -140,7 +139,6 @@ export function createOAuthSignIns(deps: OAuthSignInDeps): OAuthSignIns {
         const abandon = (reason?: string): void => {
           flows.delete(id);
           if (!popup.closed) popup.close();
-          deps.onSettled();
           if (reason !== undefined) deps.onFailure(reason);
           resolve(false);
         };
@@ -165,7 +163,6 @@ export function createOAuthSignIns(deps: OAuthSignInDeps): OAuthSignIns {
       flows.delete(id);
       if (flow === undefined) return;
       if (!flow.popup.closed) flow.popup.close();
-      deps.onSettled();
       if (!ok && error !== undefined) deps.onFailure(`Sign-in failed: ${error}`);
       if (ok && flow.remember) void seal(deps.post, authorizationCodeRefreshKey(flow.provider));
       flow.resolve(ok);

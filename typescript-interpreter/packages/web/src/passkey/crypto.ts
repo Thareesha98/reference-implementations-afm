@@ -30,11 +30,14 @@ export function randomSalt(): Uint8Array<ArrayBuffer> {
   return crypto.getRandomValues(new Uint8Array(32));
 }
 
-export async function deriveAesKeyFromPrf(prfOutput: BufferSource, salt: BufferSource): Promise<CryptoKey> {
-  const hkdfKey = await crypto.subtle.importKey("raw", prfOutput, "HKDF", false, ["deriveKey"]);
+export function importPrf(prfOutput: BufferSource): Promise<CryptoKey> {
+  return crypto.subtle.importKey("raw", prfOutput, "HKDF", false, ["deriveKey"]);
+}
+
+export function deriveAesKey(prf: CryptoKey, salt: BufferSource): Promise<CryptoKey> {
   return crypto.subtle.deriveKey(
     { name: "HKDF", hash: "SHA-256", salt, info: HKDF_INFO },
-    hkdfKey,
+    prf,
     { name: "AES-GCM", length: 256 },
     // Non-extractable: the key bytes cannot be read back out.
     false,

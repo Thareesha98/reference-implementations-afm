@@ -26,13 +26,15 @@ import { InfoPanel } from "./InfoPanel";
 import { AgentPicker } from "./AgentPicker";
 import { ModelPanel } from "./ModelPanel";
 import { ServerPanel } from "./ServerPanel";
-import { usePasskeySupport } from "../../passkey/usePasskeySupport";
 import { SidePane } from "./SideWindow";
 import { ChatHead, StatusPill, headerStatus } from "./ChatHead";
-import type { ToolInfo } from "../../protocol";
 import { useStandaloneSession } from "../../worker-client/useStandaloneSession";
 import { previewAgent, buildableAgent, collectAfmIssues } from "../../agent-validation";
-import { connectedServerUrls, readiness, serverNameByUrl, serversAwaitingToolChoice, setupPlan } from "./readiness";
+import { readiness, serverNameByUrl } from "./readiness";
+import { SetupPane } from "./SetupPane";
+import { useSetup } from "./use-setup";
+import { MODEL_ROW, reachOf, serverRowId } from "./setup-check";
+import type { SetupRow } from "./setup-check";
 import { StageFoot } from "./StageFoot";
 import { useAgentActivity } from "./agent-activity";
 import { StartHere } from "./StartHere";
@@ -46,13 +48,13 @@ import { useHistory } from "../../history/HistoryContext";
 import { permissionScopeFor, classifyToolRisk, grantsToRevoke } from "../../permissions-store";
 import { permissionKey } from "../../protocol";
 import { usePermissionsLedger } from "../../permissions/PermissionsLedgerContext";
-import { setServerToolFilter, agentBrief, getSection } from "./agent-source-edit";
+import { agentBrief, getSection } from "./agent-source-edit";
 import { useSettled } from "./use-settled";
+import { canStartQuietly } from "./quiet-start";
 import { useThemeContext } from "../../app/ThemeContext";
 import { TurnNotificationWatcher } from "../../app/NotificationsContext";
 
 export function WorkspacePage() {
-  const passkeySupport = usePasskeySupport();
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
   const draftSource = (location.state as { draftSource?: string } | null)?.draftSource;
@@ -73,12 +75,9 @@ export function WorkspacePage() {
   // A run-only link is someone else's agent about to use your key, so it gets a trust screen first.
   const [trusted, setTrusted] = useState(() => searchParams.get("view") !== "chat");
   const [serverEditing, setServerEditing] = useState<string | null>(null);
+  const [back, setBack] = useState<SidePanel | null>(null);
   // Bumped to ask the stage for the raw file, when the problem is in the file.
   const [rawRequest, setRawRequest] = useState(0);
-  // Kept here so it survives the panel closing and reopening. Green means an address answered.
-  const [toolCache, setToolCache] = useState<Record<string, ToolInfo[]>>({});
-  // Addresses asked that did not answer, so the diagram can tell "broken" from "not tried yet".
-  const [unreachable, setUnreachable] = useState<string[]>([]);
   const permissions = usePermissionsLedger();
   const theme = useThemeContext();
   // Mirrors of state the session's callbacks read after this render, so they never go stale.
@@ -115,6 +114,8 @@ export function WorkspacePage() {
   const agentLabel = (readable.ok ? readable.metadata.name : undefined) ?? "Untitled agent";
   const agentIcon = readable.ok ? (readable.metadata.icon_url ?? "") : "";
   const settledContentForRead = useSettled(content);
+  const setup = useSetup(testSession, readable.ok ? readable.metadata : null);
+  const reached = reachOf(setup.rows);
 
   useEffect(() => {
     const nextIdentity = identityFor(searchParams, location.hash, draftSource);
@@ -126,8 +127,12 @@ export function WorkspacePage() {
     setSavedContent(next);
     setAgentId(nextId);
     if (nextId !== null) {
-      const previous = history.entries.find((entry) => entry.agentId === nextId);
-      testSession.loadContent(next, previous?.messages);
+      if (canStartQuietly(next, testSession.state)) {
+        const previous = history.entries.find((entry) => entry.agentId === nextId);
+        testSession.loadContent(next, previous?.messages);
+      } else {
+        testSession.clearAgent();
+      }
     }
   }, [searchParams, location.hash, draftSource]);
 
@@ -222,12 +227,14 @@ export function WorkspacePage() {
     return { id: result.saved.id, persisted: result.persisted };
   }
 
-  // Run is available when the loaded agent differs from the editor: before the first run and after
-  // any edit.
-  const running = testSession.state.status !== "no-agent";
-  const canRun = preview.ok && preview.plan.runnable && (!running || testSession.state.agentSource !== content);
+  // Run is available when the loaded agent differs from the editor: before the first run, after any
+  // edit, and after a start that failed.
+  const running = chatStatus !== "no-agent" && chatStatus !== "not-ready";
+  const startedHere = chatStatus !== "no-agent" && testSession.state.agentSource === content;
+  const failed = startedHere && chatStatus === "not-ready";
+  const current = running && startedHere;
+  const canRun = preview.ok && preview.plan.runnable && !current;
 
-  // Asked once per agent: the tool_filter written to the file settles it for reloads and shares.
   const servers = readable.ok ? (readable.metadata.tools?.mcp ?? []) : [];
   const nameByUrl = serverNameByUrl(servers);
   const chatState = headerStatus(
@@ -235,19 +242,6 @@ export function WorkspacePage() {
     activity.phase,
     activity.serverId === undefined ? undefined : nameByUrl.get(activity.serverId),
   );
-  // Servers this browser holds a grant for, so a tool_filter alone does not count as settled.
-  const grantedServers = new Set(
-    permissions
-      .forAgent(permissionScopeFor(agentId, content))
-      .filter((entry) => entry.rule === "auto-allow" && entry.serverId !== undefined)
-      .map((entry) => entry.serverId as string),
-  );
-  const awaitingChoice = serversAwaitingToolChoice(
-    servers,
-    testSession.state.tools.map((tool) => tool.serverId),
-    (url) => grantedServers.has(url),
-  );
-  const needsToolChoice = testSession.state.status === "ready" && awaitingChoice.length > 0;
 
   const settledPreview = previewAgent(settledContentForRead);
   const readinessMetadata = settledPreview.ok ? settledPreview.metadata : readable.ok ? readable.metadata : null;
@@ -256,11 +250,11 @@ export function WorkspacePage() {
     instructions: getSection(settledContentForRead, "Instructions"),
     metadata: readinessMetadata,
     issues: collectAfmIssues(settledContentForRead),
-    steps: setupPlan(settledContentForRead, readable.ok ? readable.metadata : null, usableSecrets(testSession.state)),
     status: testSession.state.status,
+    current,
+    failed,
     brokenServerIds: activity.brokenServerIds,
     serverNameByUrl: nameByUrl,
-    connectedUrls: connectedServerUrls(readinessMetadata, Object.keys(toolCache), usableSecrets(testSession.state)),
   });
 
   /**
@@ -285,21 +279,6 @@ export function WorkspacePage() {
     }
   }
 
-  function chooseTools(allowedByServer: Map<string, string[]>) {
-    let next = content;
-    for (const [url, allowed] of allowedByServer) {
-      const name = nameByUrl.get(url);
-      if (name === undefined) continue;
-      next = setServerToolFilter(next, name, allowed);
-    }
-    for (const [url, allowed] of allowedByServer) setAllowedTools(next, url, allowed);
-    setContent(next);
-    // Saved rather than left dirty: the answer belongs to the agent, and being asked again after a
-    // reload is the problem this step avoids.
-    persistToLibrary(next);
-    testSession.loadContent(next);
-  }
-
   function runAgent() {
     const { id } = persistToLibrary();
     // An agent keeps one conversation. Running it again resumes the thread; the agent is re-checked
@@ -310,6 +289,22 @@ export function WorkspacePage() {
     const rewritten = running && agentBrief(testSession.state.agentSource) !== agentBrief(content);
     testSession.loadContent(content, previous?.messages, { carryConversation: !rewritten });
     openSide("chat");
+  }
+
+  function openSetup() {
+    setup.start();
+    openSide("setup");
+  }
+
+  function configure(row: SetupRow) {
+    if (row.kind === "server") setServerEditing(row.name);
+    openSide(row.kind === "model" ? "model" : "tools");
+    setBack("setup");
+  }
+
+  function leavePanel() {
+    if (back === null) closeSide();
+    else openSide(back);
   }
 
   // Written once typing stops rather than on a button press. Nothing here is destructive (the
@@ -326,6 +321,7 @@ export function WorkspacePage() {
 
   function openSide(next: SidePanel) {
     setSide(next);
+    setBack(null);
     if (next !== "chat") setChatFull(false);
   }
 
@@ -340,6 +336,7 @@ export function WorkspacePage() {
 
   function closeSide() {
     setSide(null);
+    setBack(null);
     setChatFull(false);
   }
 
@@ -393,7 +390,7 @@ export function WorkspacePage() {
         canAct={preview.ok}
         canRun={canRun}
         running={running}
-        onRun={runAgent}
+        onRun={openSetup}
         open={side}
         onToggle={toggleSide}
         onToggleTheme={theme.toggle}
@@ -420,7 +417,7 @@ export function WorkspacePage() {
             savedSecrets={usableSecrets(testSession.state)}
             onRun={() => {
               setTrusted(true);
-              runAgent();
+              openSetup();
             }}
             onOpenBuilder={() => {
               setTrusted(true);
@@ -434,7 +431,7 @@ export function WorkspacePage() {
             content={content}
             onChange={setContent}
             activity={activity}
-            reach={{ ok: [...new Set([...Object.keys(toolCache), ...reachedServerIds])], failed: unreachable }}
+            reach={{ ok: [...new Set([...reached.ok, ...reachedServerIds])], failed: reached.failed }}
             onOpenModel={() => openSide("model")}
             onOpenServer={(name) => {
               setServerEditing(name);
@@ -476,11 +473,9 @@ export function WorkspacePage() {
           >
             <ChatPane
               session={testSession}
-              content={content}
-              needsToolChoice={needsToolChoice}
-              setupSteps={setupPlan(content, preview.ok ? preview.metadata : null, usableSecrets(testSession.state))}
               serverNameByUrl={nameByUrl}
-              onChooseTools={chooseTools}
+              onReplaceKey={() => openSide("model")}
+              onRetry={openSetup}
               description={readable.ok ? (readable.metadata.description ?? "") : ""}
               role={getSection(content, "Role")}
               iconUrl={agentIcon}
@@ -494,7 +489,7 @@ export function WorkspacePage() {
                 overPanel === "tools" && serverEditing !== null ? serverEditing : SIDE_TITLE[overPanel]
               }
               onClose={closeSide}
-              flush={overPanel === "model" || overPanel === "tools" || overPanel === "info" || overPanel === "share"}
+              flush={overPanel === "model" || overPanel === "tools" || overPanel === "info" || overPanel === "share" || overPanel === "setup"}
             >
               {overPanel === "agents" && (
                 <AgentPicker
@@ -532,10 +527,9 @@ export function WorkspacePage() {
                   }}
                   onBlank={closeSide}
                   onGenerate={(prompt, model, final) => testSession.generateDraft(prompt, model, final)}
-                  onSaveKey={(name, value, withPasskey) => testSession.saveSecret(name, value, withPasskey)}
+                  onSaveKey={testSession.storeSecret}
+                  onOpenKeys={testSession.openKeys}
                   onDismissDraft={testSession.dismissDraft}
-                  onUnlockPasskey={(request) => void testSession.unlockPasskey(request)}
-                  onSkipPasskeyUnlock={testSession.skipPasskeyUnlock}
                 />
               )}
               {overPanel === "share" && <SharePanel agentSource={content} />}
@@ -552,14 +546,31 @@ export function WorkspacePage() {
                   onClose={closeSide}
                 />
               )}
+              {overPanel === "setup" && (
+                <SetupPane
+                  rows={setup.rows}
+                  keys={setup.keys}
+                  provider={readable.ok ? (readable.metadata.model?.provider ?? "") : ""}
+                  ready={setup.ready}
+                  onConfigure={configure}
+                  onCheckAgain={setup.recheck}
+                  onRetryKeys={setup.retryKeys}
+                  onRun={runAgent}
+                />
+              )}
               {overPanel === "model" && (
                 <ModelPanel
                   content={content}
                   savedSecrets={usableSecrets(testSession.state)}
                   passkeySecrets={testSession.state.passkeySecrets}
-                  onApply={setContent}
-                  onSaveKey={(name, value, withPasskey) => testSession.saveSecret(name, value, withPasskey)}
-                  onClose={closeSide}
+                  issue={setup.issueOf(MODEL_ROW)}
+                  onApply={(next) => {
+                    setContent(next);
+                    setup.changed(MODEL_ROW);
+                  }}
+                  onSaveKey={testSession.storeSecret}
+                  onBack={back === null ? undefined : leavePanel}
+                  onClose={leavePanel}
                 />
               )}
               {overPanel === "tools" && readable.ok && (
@@ -570,45 +581,22 @@ export function WorkspacePage() {
                   content={content}
                   editing={serverEditing}
                   metadata={readable.metadata}
-                  onApply={setContent}
+                  onApply={(next) => {
+                    setContent(next);
+                    if (serverEditing !== null) setup.changed(serverRowId(serverEditing));
+                  }}
                   onSetAllowedTools={setAllowedTools}
                   onServerDropped={(serverUrl) =>
                     revokeGrants(permissionScopeFor(agentIdRef.current, contentRef.current), serverUrl, [])
                   }
-                  onStoreSecret={testSession.storeMcpSecret}
+                  onStoreSecret={testSession.storeSecret}
                   knownSecrets={usableSecrets(testSession.state)}
-                  lockedSecrets={testSession.state.passkeySecrets.filter(
-                    (name) => !testSession.state.savedSecrets.includes(name),
-                  )}
-                  onUnlockSecret={testSession.unlockSecret}
-                  pendingApproval={testSession.state.pendingSecretApproval}
-                  onDecideApproval={testSession.decideSecretApproval}
-                  passkeyUsable={passkeySupport?.usable === true}
+                  issue={serverEditing === null ? null : setup.issueOf(serverRowId(serverEditing))}
                   onProbe={testSession.probeServer}
-                  onSignIn={(provider, remember) => testSession.startOAuthSignIn(provider, remember)}
-                  onSignOut={(provider) => {
-                    testSession.signOutOAuth(provider);
-                    if (provider.resource !== undefined) {
-                      setToolCache((current) => {
-                        if (!(provider.resource! in current)) return current;
-                        const next = { ...current };
-                        delete next[provider.resource!];
-                        return next;
-                      });
-                    }
-                  }}
-                  toolCache={toolCache}
-                  onToolsFound={(serverUrl, tools) => {
-                    if (tools === null) {
-                      setUnreachable((current) =>
-                        current.includes(serverUrl) ? current : [...current, serverUrl],
-                      );
-                      return;
-                    }
-                    setToolCache((current) => ({ ...current, [serverUrl]: tools }));
-                    setUnreachable((current) => current.filter((url) => url !== serverUrl));
-                  }}
-                  onClose={closeSide}
+                  onSignIn={testSession.startOAuthSignIn}
+                  onSignOut={testSession.signOutOAuth}
+                  onBack={back === null ? undefined : leavePanel}
+                  onClose={leavePanel}
                 />
               )}
             </SidePane>

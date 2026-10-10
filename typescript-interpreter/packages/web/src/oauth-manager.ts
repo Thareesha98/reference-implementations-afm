@@ -16,12 +16,12 @@
 
 import {
   authorizationCodeProviderKey,
-  authorizationCodeRefreshKey,
   createAuthorizationCodeSession,
   type AuthorizationCodeSession,
   type KeyValueStore,
   type OAuthProviderRef,
 } from "@afm/adapter-auth";
+import { SignInRequiredError } from "./failure";
 
 export interface OAuthManagerDeps {
   fetchFn: typeof fetch;
@@ -29,14 +29,12 @@ export interface OAuthManagerDeps {
   redirectUri: string;
   // Backs the refresh token, so a sealed copy and a fresh sign-in reach the session the same way.
   refreshStore: KeyValueStore;
-  // Puts a remembered refresh token back into refreshStore, unlocking it if sealed.
-  loadSealedRefresh: (refreshKey: string) => Promise<void>;
   emitAuthorizeUrl: (id: string, url: string) => void;
   emitSignInResult: (id: string, ok: boolean, error?: string) => void;
 }
 
 export interface OAuthManager {
-  getAccessToken(provider: OAuthProviderRef, onSignInNeeded: () => void): Promise<string>;
+  getAccessToken(provider: OAuthProviderRef): Promise<string>;
   startSignIn(id: string, provider: OAuthProviderRef): Promise<void>;
   completeSignIn(id: string, code: string, state: string, iss?: string): Promise<void>;
   signOut(provider: OAuthProviderRef): void;
@@ -60,16 +58,12 @@ export function createOAuthManager(deps: OAuthManagerDeps): OAuthManager {
   }
 
   return {
-    async getAccessToken(provider, onSignInNeeded) {
+    async getAccessToken(provider) {
       const session = sessionFor(provider);
-      if (!session.hasSession()) {
-        await deps.loadSealedRefresh(authorizationCodeRefreshKey(provider));
-        await session.restore(deps.fetchFn).catch(() => false);
-      }
+      if (!session.hasSession()) await session.restore(deps.fetchFn).catch(() => false);
       const token = await session.getAccessToken(deps.fetchFn);
       if (token !== null) return token;
-      onSignInNeeded();
-      throw new Error("Interactive sign-in is required for this server.");
+      throw new SignInRequiredError();
     },
 
     async startSignIn(id, provider) {

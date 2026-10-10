@@ -17,6 +17,7 @@
 import { describe, it, expect } from "vitest";
 import { resolveProbeAuth, probeToolUses } from "./probe-auth";
 import type { AgentMetadata, SecretPort } from "@afm/engine";
+import { MissingCredentialError } from "./failure";
 
 function vault(values: Record<string, string>): { port: SecretPort; asked: string[] } {
   const asked: string[] = [];
@@ -59,10 +60,11 @@ describe("resolveProbeAuth", () => {
     expect(asked).toEqual([]);
   });
 
-  it("leaves the reference in place when nothing can answer for it", async () => {
+  it("refuses to connect when nothing can answer for a reference", async () => {
     const { port } = vault({});
-    const out = await resolveProbeAuth(server({ type: "bearer", token: "${env:HF_TOKEN}" }), port);
-    expect(authOf(out)).toEqual({ type: "bearer", token: "${env:HF_TOKEN}" });
+    await expect(resolveProbeAuth(server({ type: "bearer", token: "${env:HF_TOKEN}" }), port)).rejects.toBeInstanceOf(
+      MissingCredentialError,
+    );
   });
 
   it("resolves every referenced field, not just the first", async () => {

@@ -73,6 +73,33 @@ export function rejectedKey(reason: string | null): boolean {
   return reason !== null && /\b(api[ _-]?key|invalid[ _-]?key)\b/i.test(reason);
 }
 
+export function NotReadyReason({
+  notReady,
+  onRetry,
+  onReplaceKey,
+}: {
+  notReady: string | null;
+  onRetry: () => void;
+  onReplaceKey?: () => void;
+}) {
+  return (
+    <>
+      <p className="not-ready-reason">{notReady ?? "Something went wrong while starting the agent."}</p>
+      <div className="not-ready-actions">
+        {/* A refused key is replaced, not retried. */}
+        {rejectedKey(notReady) && onReplaceKey !== undefined && (
+          <button className="u-btn primary" onClick={onReplaceKey}>
+            Replace key
+          </button>
+        )}
+        <button className={`btn ${rejectedKey(notReady) ? "subtle" : "primary"}`} onClick={onRetry}>
+          Try again
+        </button>
+      </div>
+    </>
+  );
+}
+
 export function EmptyState({ status, agentName, iconUrl = "", loadSteps, notReady, onRetry, description = "", role = "", onAsk, onReplaceKey }: Props) {
   if (status === "connecting" || status === "testing") {
     const label = status === "connecting" ? "Starting the agent" : "Testing the agent";
@@ -102,18 +129,7 @@ export function EmptyState({ status, agentName, iconUrl = "", loadSteps, notRead
           <h2>Agent isn&apos;t ready</h2>
           {/* The checklist stays after a failure so the ticks show which stage broke. */}
           <LoadChecklist steps={loadSteps} />
-          <p className="not-ready-reason">{notReady ?? "Something went wrong while starting the agent."}</p>
-          <div className="not-ready-actions">
-            {/* A refused key is replaced, not retried. */}
-            {rejectedKey(notReady) && onReplaceKey !== undefined && (
-              <button className="u-btn primary" onClick={onReplaceKey}>
-                Replace key
-              </button>
-            )}
-            <button className={`btn ${rejectedKey(notReady) ? "subtle" : "primary"}`} onClick={onRetry}>
-              Try again
-            </button>
-          </div>
+          <NotReadyReason notReady={notReady} onRetry={onRetry} onReplaceKey={onReplaceKey} />
         </div>
       </div>
     );

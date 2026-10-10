@@ -36,18 +36,16 @@ vi.mock("./unlock", () => ({
 }));
 
 vi.mock("./enroll", () => ({
-  enrollPasskey: async () => ({ credentialId: new Uint8Array([9]), prfOutput: new Uint8Array([9]) }),
+  enrollPasskey: async () => {
+    h.ceremonies.push(new Uint8Array([9]));
+    return { credentialId: new Uint8Array([9]), prfOutput: new Uint8Array([9]) };
+  },
 }));
 
 vi.mock("./crypto", () => ({
-  deriveAesKeyFromPrf: async (prf: unknown, salt: unknown) => ({ prf, salt }),
+  importPrf: async (prf: unknown) => ({ prf }),
+  deriveAesKey: async (prf: unknown, salt: unknown) => ({ prf, salt }),
   randomSalt: () => new Uint8Array([7]),
-  encryptString: async () => {
-    throw new Error("the main thread must never encrypt a secret");
-  },
-  decryptString: async () => {
-    throw new Error("the main thread must never decrypt a secret");
-  },
 }));
 
 vi.mock("./credential", () => ({
@@ -56,7 +54,8 @@ vi.mock("./credential", () => ({
   forgetCredentialId: () => void (h.known.current = null),
 }));
 
-const { seal, unlockAll } = await import("./vault");
+type Vault = typeof import("./vault");
+let vault: Vault;
 
 const A = new Uint8Array([1]) as Uint8Array<ArrayBuffer>;
 const B = new Uint8Array([2]) as Uint8Array<ArrayBuffer>;
@@ -65,10 +64,12 @@ function put(name: string, credentialId: Uint8Array, value: string): void {
   h.store.set(name, { data: new TextEncoder().encode(value), iv: new Uint8Array([0]), credentialId, salt: new Uint8Array([1]) });
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   h.store.clear();
   h.known.current = null;
   h.ceremonies.length = 0;
+  vi.resetModules();
+  vault = await import("./vault");
 });
 
 describe("passkey vault", () => {
@@ -76,7 +77,7 @@ describe("passkey vault", () => {
     put("K1", A, "v1");
     put("K2", A, "v2");
     const posted: { type: string; name?: string }[] = [];
-    const opened = await unlockAll((message) => posted.push(message));
+    const opened = await vault.unlockAll((message) => posted.push(message));
     expect(opened).toBe(true);
     expect(h.ceremonies).toHaveLength(1);
     expect(posted.filter((m) => m.type === "unlock-secret").map((m) => m.name)).toEqual(["K1", "K2"]);
@@ -87,7 +88,7 @@ describe("passkey vault", () => {
     put("K1", A, "v1");
     put("K2", B, "v2");
     const posted: { type: string; name?: string; credentialId?: Uint8Array }[] = [];
-    await unlockAll((message) => posted.push(message));
+    await vault.unlockAll((message) => posted.push(message));
     expect(h.ceremonies).toHaveLength(2);
 
     const reseals = posted.filter((m) => m.type === "passkey-reseal");
@@ -97,27 +98,17 @@ describe("passkey vault", () => {
     expect([...h.known.current!]).toEqual([...A]);
   });
 
-  it("answers the worker's pending request instead of a plain unlock", async () => {
-    put("K", A, "v");
-    const posted: { type: string; id?: string; name?: string }[] = [];
-    await unlockAll((message) => posted.push(message), { id: "r1", name: "K", credentialId: A, salt: new Uint8Array([1]) });
-    expect(posted.find((m) => m.type === "passkey-unlock-response" && m.id === "r1")).toBeTruthy();
-    expect(posted.find((m) => m.type === "unlock-secret" && m.name === "K")).toBeUndefined();
-  });
-
-  it("answers the worker's request last, once every other key has been sent", async () => {
-    put("K1", A, "v1");
-    put("K2", A, "v2");
-    const posted: { type: string; name?: string }[] = [];
-    await unlockAll((message) => posted.push(message), { id: "r1", name: "K1", credentialId: A, salt: new Uint8Array([1]) });
-    expect(posted.map((m) => m.type)).toEqual(["unlock-secret", "passkey-unlock-response"]);
-    expect(posted[0]!.name).toBe("K2");
+  it("opens nothing, and asks nothing, when no key is sealed", async () => {
+    const posted: { type: string }[] = [];
+    expect(await vault.unlockAll((message) => posted.push(message))).toBe(false);
+    expect(h.ceremonies).toHaveLength(0);
+    expect(posted).toEqual([]);
   });
 
   it("seal reuses the known credential", async () => {
     h.known.current = A;
     const posted: { type: string; name?: string; credentialId?: Uint8Array }[] = [];
-    expect(await seal((message) => posted.push(message), "NEW")).toBe(true);
+    expect(await vault.seal((message) => posted.push(message), "NEW")).toBe(true);
     expect(h.ceremonies).toHaveLength(1);
     const remember = posted.find((m) => m.type === "passkey-remember")!;
     expect(remember.name).toBe("NEW");
@@ -126,9 +117,28 @@ describe("passkey vault", () => {
 
   it("seal enrols a credential the first time", async () => {
     const posted: { type: string; credentialId?: Uint8Array }[] = [];
-    await seal((message) => posted.push(message), "FIRST");
+    await vault.seal((message) => posted.push(message), "FIRST");
     const remember = posted.find((m) => m.type === "passkey-remember")!;
     expect([...remember.credentialId!]).toEqual([9]);
     expect([...h.known.current!]).toEqual([9]);
+  });
+
+  it("asks the device once for a whole tab: a second seal and an unlock reuse the first answer", async () => {
+    h.known.current = A;
+    put("OLD", A, "v");
+    const post = () => {};
+    await vault.seal(post, "ONE");
+    await vault.seal(post, "TWO");
+    await vault.unlockAll(post);
+    expect(h.ceremonies).toHaveLength(1);
+  });
+
+  it("asks again after a refresh, because the answer is only kept for the tab", async () => {
+    h.known.current = A;
+    await vault.seal(() => {}, "ONE");
+    vi.resetModules();
+    const reloaded = await import("./vault");
+    await reloaded.seal(() => {}, "TWO");
+    expect(h.ceremonies).toHaveLength(2);
   });
 });

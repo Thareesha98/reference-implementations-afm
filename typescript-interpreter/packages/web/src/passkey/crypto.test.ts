@@ -15,16 +15,18 @@
 // under the License.
 
 import { describe, it, expect } from "vitest";
-import { deriveAesKeyFromPrf, encryptString, decryptString, randomSalt } from "./crypto";
+import { importPrf, deriveAesKey, encryptString, decryptString, randomSalt } from "./crypto";
+
+const derive = async (prf: BufferSource, salt: BufferSource) => deriveAesKey(await importPrf(prf), salt);
 
 // A real authenticator returns the SAME bytes every time for a given passkey; that is what lets
 // a value sealed on one visit be opened on the next. These stand in for those bytes.
 const prfOutput = () => crypto.getRandomValues(new Uint8Array(32));
 const SECRET = "sk-proj-abc123-not-a-real-key";
 
-describe("deriveAesKeyFromPrf", () => {
+describe("deriveAesKey", () => {
   it("produces a key that cannot be exported", async () => {
-    const key = await deriveAesKeyFromPrf(prfOutput(), randomSalt());
+    const key = await derive(prfOutput(), randomSalt());
     expect(key.extractable).toBe(false);
     await expect(crypto.subtle.exportKey("raw", key)).rejects.toThrow();
   });
@@ -32,35 +34,35 @@ describe("deriveAesKeyFromPrf", () => {
   it("rebuilds the identical key from the same passkey and salt", async () => {
     const prf = prfOutput();
     const salt = randomSalt();
-    const sealed = await encryptString(await deriveAesKeyFromPrf(prf, salt), SECRET);
+    const sealed = await encryptString(await derive(prf, salt), SECRET);
     // The next visit: same fingerprint, same stored salt.
-    const reopened = await deriveAesKeyFromPrf(prf, salt);
+    const reopened = await derive(prf, salt);
     expect(await decryptString(reopened, sealed)).toBe(SECRET);
   });
 
   it("gives a different key for a different passkey", async () => {
     const salt = randomSalt();
-    const sealed = await encryptString(await deriveAesKeyFromPrf(prfOutput(), salt), SECRET);
-    const otherDevice = await deriveAesKeyFromPrf(prfOutput(), salt);
+    const sealed = await encryptString(await derive(prfOutput(), salt), SECRET);
+    const otherDevice = await derive(prfOutput(), salt);
     await expect(decryptString(otherDevice, sealed)).rejects.toThrow();
   });
 
   it("gives a different key for a different salt, so two stored values never share one", async () => {
     const prf = prfOutput();
-    const sealed = await encryptString(await deriveAesKeyFromPrf(prf, randomSalt()), SECRET);
-    const wrongSalt = await deriveAesKeyFromPrf(prf, randomSalt());
+    const sealed = await encryptString(await derive(prf, randomSalt()), SECRET);
+    const wrongSalt = await derive(prf, randomSalt());
     await expect(decryptString(wrongSalt, sealed)).rejects.toThrow();
   });
 });
 
 describe("encryptString / decryptString", () => {
   it("round-trips a value", async () => {
-    const key = await deriveAesKeyFromPrf(prfOutput(), randomSalt());
+    const key = await derive(prfOutput(), randomSalt());
     expect(await decryptString(key, await encryptString(key, SECRET))).toBe(SECRET);
   });
 
   it("uses a fresh 12-byte iv every time, so one key can seal many values", async () => {
-    const key = await deriveAesKeyFromPrf(prfOutput(), randomSalt());
+    const key = await derive(prfOutput(), randomSalt());
     const first = await encryptString(key, SECRET);
     const second = await encryptString(key, SECRET);
     expect(first.iv).toHaveLength(12);
@@ -69,7 +71,7 @@ describe("encryptString / decryptString", () => {
   });
 
   it("does not leave the value readable in the ciphertext", async () => {
-    const key = await deriveAesKeyFromPrf(prfOutput(), randomSalt());
+    const key = await derive(prfOutput(), randomSalt());
     const sealed = await encryptString(key, SECRET);
     expect(new TextDecoder().decode(sealed.data)).not.toContain("sk-proj");
   });
@@ -77,7 +79,7 @@ describe("encryptString / decryptString", () => {
   // AES-GCM authenticates as well as encrypts: a tampered blob must fail loudly rather than
   // decrypt into something the caller would then send somewhere.
   it("refuses a blob whose ciphertext was altered", async () => {
-    const key = await deriveAesKeyFromPrf(prfOutput(), randomSalt());
+    const key = await derive(prfOutput(), randomSalt());
     const sealed = await encryptString(key, SECRET);
     const tampered = { iv: sealed.iv, data: new Uint8Array(sealed.data) };
     tampered.data[0] = (tampered.data[0] ?? 0) ^ 1;
@@ -85,7 +87,7 @@ describe("encryptString / decryptString", () => {
   });
 
   it("refuses a blob whose iv was altered", async () => {
-    const key = await deriveAesKeyFromPrf(prfOutput(), randomSalt());
+    const key = await derive(prfOutput(), randomSalt());
     const sealed = await encryptString(key, SECRET);
     const tampered = { iv: new Uint8Array(sealed.iv), data: sealed.data };
     tampered.iv[0] = (tampered.iv[0] ?? 0) ^ 1;

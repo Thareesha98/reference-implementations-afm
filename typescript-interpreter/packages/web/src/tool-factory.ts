@@ -84,46 +84,50 @@ export interface ToolSetupOptions {
   setupTimeoutMs?: number;
 }
 
+type McpServer = NonNullable<NonNullable<AgentMetadata["tools"]>["mcp"]>[number];
+
+export function mcpServerPort(
+  server: McpServer,
+  proxy: McpProxyConfig | null,
+  authDeps: McpDynamicAuthDeps = {},
+  { onServerProgress, setupTimeoutMs }: ToolSetupOptions = {},
+): ToolPort | null {
+  const { transport } = server;
+  if (transport.type !== "http") return null;
+  if (proxy === null) throw new McpProxyRequiredError();
+
+  const effectiveAuthDeps: McpDynamicAuthDeps = {
+    ...authDeps,
+    fetchFn: authDeps.fetchFn ?? createProxiedFetch(proxy),
+  };
+  const auth = transport.authentication;
+  const dynamic = auth !== undefined && isDynamicAuthType(auth);
+  let port: ToolPort = mcpToolPort({
+    serverUrl: transport.url,
+    headers: auth !== undefined && !dynamic ? mcpAuthHeaders(auth) : undefined,
+    authHeaderProvider: dynamic ? createDynamicMcpAuthHeaderProvider(auth, effectiveAuthDeps, transport.url) : undefined,
+    onAuthRejected:
+      dynamic && isInteractiveOAuth(auth)
+        ? () => effectiveAuthDeps.onInteractiveAuthRejected?.(oauthProviderFrom(auth, transport.url))
+        : undefined,
+    proxyUrl: proxy.url,
+    setupTimeoutMs,
+  });
+  if (server.tool_filter !== undefined) {
+    port = filteredToolPort(port, server.tool_filter);
+  }
+  if (onServerProgress !== undefined) {
+    port = reportingToolPort(port, server.name, onServerProgress);
+  }
+  return port;
+}
+
 export function toolsFromMetadata(
   metadata: AgentMetadata,
   proxy: McpProxyConfig | null,
   authDeps: McpDynamicAuthDeps = {},
-  { onServerProgress, setupTimeoutMs }: ToolSetupOptions = {},
+  options: ToolSetupOptions = {},
 ): ToolPort {
   const servers = metadata.tools?.mcp ?? [];
-
-  if (servers.some((server) => server.transport.type === "http") && proxy === null) {
-    throw new McpProxyRequiredError();
-  }
-
-  const effectiveAuthDeps: McpDynamicAuthDeps = {
-    ...authDeps,
-    fetchFn: authDeps.fetchFn ?? (proxy !== null ? createProxiedFetch(proxy) : undefined),
-  };
-
-  const ports = servers.flatMap((server): ToolPort[] => {
-    const { transport } = server;
-    if (transport.type !== "http") return [];
-    const auth = transport.authentication;
-    const dynamic = auth !== undefined && isDynamicAuthType(auth);
-    let port: ToolPort = mcpToolPort({
-      serverUrl: transport.url,
-      headers: auth !== undefined && !dynamic ? mcpAuthHeaders(auth) : undefined,
-      authHeaderProvider: dynamic ? createDynamicMcpAuthHeaderProvider(auth, effectiveAuthDeps, transport.url) : undefined,
-      onAuthRejected:
-        dynamic && isInteractiveOAuth(auth)
-          ? () => effectiveAuthDeps.onInteractiveAuthRejected?.(oauthProviderFrom(auth, transport.url))
-          : undefined,
-      proxyUrl: proxy?.url,
-      setupTimeoutMs,
-    });
-    if (server.tool_filter !== undefined) {
-      port = filteredToolPort(port, server.tool_filter);
-    }
-    if (onServerProgress !== undefined) {
-      port = reportingToolPort(port, server.name, onServerProgress);
-    }
-    return [port];
-  });
-  return compositeToolPort(ports);
+  return compositeToolPort(servers.flatMap((server) => mcpServerPort(server, proxy, authDeps, options) ?? []));
 }

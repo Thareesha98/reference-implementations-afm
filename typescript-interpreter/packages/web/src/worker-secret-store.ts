@@ -22,18 +22,17 @@ import { saveBlob, removeBlob, loadBlob, listNames as listSealedNames, type Stor
 import type { ServerMessage } from "./protocol";
 
 // Holds secret plaintext in memory for the life of the tab. With a passkey, a sealed copy also
-// lives on disk (passkey/store), useless without the authenticator, and is decrypted back here on
-// demand. Only the main thread can run a passkey ceremony, so opening a sealed value is a round
-// trip: ask (passkey-unlock-request), receive the derived key (resolveUnlock), decrypt.
+// lives on disk (passkey/store), useless without the authenticator. Only the main thread can run a
+// passkey ceremony, so it opens every sealed value up front and hands over one derived key per
+// name (acceptUnlock); the worker only decrypts. A value is approved for the hosts it was entered
+// for, and that list travels with the sealed copy.
 export interface WorkerSecretStore {
   memoryPort: SecretPort;
-  passkeyPort: SecretPort;
   // Backs an OAuth refresh token, so a fresh sign-in and a remembered one use the same path.
   refreshStore: KeyValueStore;
-  loadSealedRefresh(refreshKey: string): Promise<void>;
-  isSaved(name: string): Promise<boolean>;
-  touch(): void;
-  set(name: string, value: string): void;
+  approvedFor(name: string, host: string | undefined): boolean;
+  opened(): Promise<void>;
+  set(name: string, value: string, host?: string): void;
   remove(name: string): void;
   acceptUnlock(name: string, key: CryptoKey): void;
   seal(name: string, key: CryptoKey, credentialId: Uint8Array<ArrayBuffer>, salt: Uint8Array<ArrayBuffer>): void;
@@ -45,31 +44,21 @@ export interface WorkerSecretStore {
     salt: Uint8Array<ArrayBuffer>,
   ): void;
   forgetSealed(name: string): void;
-  resolveUnlock(id: string, key: CryptoKey | null): void;
   postNames(): void;
   postSealedNames(): void;
 }
 
-const AUTO_LOCK_MS = 5 * 60 * 1000;
-
 export function createWorkerSecretStore(emit: (message: ServerMessage) => void): WorkerSecretStore {
   // No prototype, so names like "constructor" or "toString" are never found by accident.
   const values: Record<string, string> = Object.create(null);
-  // Only names decrypted from a sealed copy auto-lock; a typed value has nothing to unlock from.
-  const unlockedNames = new Set<string>();
-  let autoLockTimer: ReturnType<typeof setTimeout> | null = null;
+  const approvals = new Map<string, Set<string>>();
 
   // The key a sealed name was last opened or saved with, so a later rotation can re-seal without a
-  // passkey prompt. Auto-lock drops this too, except for a name refreshStore.set has written: an
-  // OAuth session keeps rotating tokens after the lock, and this key never decrypts anything, only
-  // encrypts the next value.
+  // passkey prompt.
   const sealingKeys = new Map<string, { key: CryptoKey; credentialId: Uint8Array<ArrayBuffer>; salt: Uint8Array<ArrayBuffer> }>();
-  const refreshNames = new Set<string>();
 
-  const pendingUnlocks = new Map<string, (key: CryptoKey | null) => void>();
-  let unlockCounter = 0;
-  // Keys the main thread sent ahead of an answer are still being opened. The answer waits for them,
-  // so the run it unblocks does not find a name empty that the same unlock is about to fill.
+  // Keys the main thread sent are still being opened. Whatever reads a secret waits for them, so a
+  // run does not find a name empty that the same unlock is about to fill.
   let unlocking: Promise<unknown> = Promise.resolve();
 
   function postNames(): void {
@@ -82,31 +71,8 @@ export function createWorkerSecretStore(emit: (message: ServerMessage) => void):
       .catch(() => emit({ type: "passkey-list", names: [] }));
   }
 
-  function lock(): void {
-    if (unlockedNames.size === 0) return;
-    for (const name of unlockedNames) {
-      delete values[name];
-      if (!refreshNames.has(name)) sealingKeys.delete(name);
-    }
-    unlockedNames.clear();
-    postNames();
-  }
-
-  function touch(): void {
-    if (autoLockTimer !== null) clearTimeout(autoLockTimer);
-    autoLockTimer = unlockedNames.size === 0 ? null : setTimeout(lock, AUTO_LOCK_MS);
-  }
-
   // A store error reads as nothing saved, never a throw.
   const sealedBlob = (name: string) => loadBlob(name).catch(() => null);
-
-  function requestUnlock(name: string, blob: StoredSecret): Promise<CryptoKey | null> {
-    const id = `passkey-${++unlockCounter}`;
-    return new Promise((resolve) => {
-      pendingUnlocks.set(id, resolve);
-      emit({ type: "passkey-unlock-request", id, name, credentialId: blob.credentialId, salt: blob.salt });
-    });
-  }
 
   // The last step of every unlock: sealed bytes become a usable value, or null if the key does not
   // fit.
@@ -114,9 +80,8 @@ export function createWorkerSecretStore(emit: (message: ServerMessage) => void):
     try {
       const value = await decryptString(key, blob);
       values[name] = value;
-      unlockedNames.add(name);
+      approvals.set(name, new Set(blob.hosts));
       sealingKeys.set(name, { key, credentialId: blob.credentialId, salt: blob.salt });
-      touch();
       postNames();
       return value;
     } catch {
@@ -124,26 +89,12 @@ export function createWorkerSecretStore(emit: (message: ServerMessage) => void):
     }
   }
 
-  const passkeyPort: SecretPort = {
-    async resolve(ref) {
-      const blob = await sealedBlob(ref.name);
-      if (blob === null) return { status: "unresolved", reason: `'${ref.name}' has no saved copy` };
-      const key = await requestUnlock(ref.name, blob);
-      if (key === null) return { status: "unresolved", reason: `'${ref.name}' was not unlocked` };
-      const value = await decryptInto(ref.name, key, blob);
-      return value === null
-        ? { status: "unresolved", reason: `'${ref.name}' could not be unlocked on this device` }
-        : { status: "resolved", value };
-    },
-  };
-
   const refreshStore: KeyValueStore = {
     get: (key) => values[key] ?? null,
     // Awaited by persist() so a caller that reads the sealed copy right after a rotation (a
     // reload, moments later) sees the new value rather than a stale one still on disk.
     set: (key, value) => {
       values[key] = value;
-      refreshNames.add(key);
       postNames();
       const sealing = sealingKeys.get(key);
       if (sealing === undefined) return;
@@ -160,35 +111,24 @@ export function createWorkerSecretStore(emit: (message: ServerMessage) => void):
 
   return {
     memoryPort: configSecretPort(values),
-    passkeyPort,
     refreshStore,
-    touch,
     postNames,
     postSealedNames,
 
-    async loadSealedRefresh(refreshKey) {
-      if ((values[refreshKey] ?? "") !== "") return;
-      const blob = await sealedBlob(refreshKey);
-      if (blob === null) return;
-      const key = await requestUnlock(refreshKey, blob);
-      // A sealed copy that will not open sends the caller to a fresh sign-in.
-      if (key !== null) await decryptInto(refreshKey, key, blob);
-    },
+    approvedFor: (name, host) => host !== undefined && approvals.get(name)?.has(host) === true,
 
-    async isSaved(name) {
-      return (values[name] ?? "") !== "" || (await sealedBlob(name)) !== null;
-    },
+    opened: () => unlocking.then(() => undefined),
 
-    set(name, value) {
+    set(name, value, host) {
       if (value === "") return;
       values[name] = value;
-      unlockedNames.delete(name);
+      approvals.set(name, new Set(host === undefined ? [] : [host]));
       postNames();
     },
 
     remove(name) {
       delete values[name];
-      unlockedNames.delete(name);
+      approvals.delete(name);
       postNames();
     },
 
@@ -201,8 +141,9 @@ export function createWorkerSecretStore(emit: (message: ServerMessage) => void):
     seal(name, key, credentialId, salt) {
       const value = values[name] ?? "";
       if (value === "") return;
+      const hosts = [...(approvals.get(name) ?? [])];
       void encryptString(key, value)
-        .then((sealed) => saveBlob(name, { ...sealed, credentialId, salt }))
+        .then((sealed) => saveBlob(name, { ...sealed, credentialId, salt, hosts }))
         .then(() => {
           sealingKeys.set(name, { key, credentialId, salt });
           postSealedNames();
@@ -217,7 +158,7 @@ export function createWorkerSecretStore(emit: (message: ServerMessage) => void):
         .then(async (blob) => {
           if (blob === null) return;
           const sealed = await encryptString(to, await decryptString(from, blob));
-          await saveBlob(name, { ...sealed, credentialId, salt });
+          await saveBlob(name, { ...sealed, credentialId, salt, hosts: blob.hosts });
           sealingKeys.set(name, { key: to, credentialId, salt });
         })
         .catch(() => {});
@@ -226,14 +167,6 @@ export function createWorkerSecretStore(emit: (message: ServerMessage) => void):
     forgetSealed(name) {
       sealingKeys.delete(name);
       void removeBlob(name).then(postSealedNames).catch(() => {});
-    },
-
-    resolveUnlock(id, key) {
-      const settle = pendingUnlocks.get(id);
-      if (settle !== undefined) {
-        pendingUnlocks.delete(id);
-        void unlocking.then(() => settle(key));
-      }
     },
   };
 }

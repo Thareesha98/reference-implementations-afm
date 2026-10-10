@@ -90,16 +90,15 @@ export function WorkspaceBar({
       </span>
 
       <span className="u-bar-right">
-        <button
-          className="u-btn primary"
-          onClick={onRun}
-          disabled={!canRun}
-          title={canRun ? "Start the agent with this file" : "Nothing has changed since the last run"}
-        >
-          <span className="u-play" aria-hidden="true" />
-          {running ? "Re-run" : "Run"}
-        </button>
-        <span className="u-sep" aria-hidden="true" />
+        {(!running || canRun) && (
+          <>
+            <button className="u-btn primary" onClick={onRun} disabled={!canRun} title="Start the agent with this file">
+              <span className="u-play" aria-hidden="true" />
+              {running ? "Re-run" : "Run"}
+            </button>
+            <span className="u-sep" aria-hidden="true" />
+          </>
+        )}
         <Ico label="Conversation" on={open === "chat"} onClick={() => onToggle("chat")}>
           <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
         </Ico>

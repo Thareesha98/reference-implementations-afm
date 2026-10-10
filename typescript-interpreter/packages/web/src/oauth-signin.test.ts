@@ -161,7 +161,7 @@ describe("createOAuthSignIns", () => {
     win.open.mockReturnValue(popup);
     vi.stubGlobal("window", win);
     const posted: ClientMessage[] = [];
-    const deps = { post: (message: ClientMessage) => void posted.push(message), onPopupBlocked: vi.fn(), onSettled: vi.fn(), onFailure: vi.fn() };
+    const deps = { post: (message: ClientMessage) => void posted.push(message), onPopupBlocked: vi.fn(), onFailure: vi.fn() };
     const signIns = createOAuthSignIns(deps);
     const result = signIns.start(provider, false);
     const startId = (posted[0] as { id: string }).id;
@@ -202,7 +202,6 @@ describe("createOAuthSignIns", () => {
     win.message({ origin: ORIGIN, source: popup, data: { type: "afm-oauth-callback", error: "access_denied" } });
     expect(await result).toBe(false);
     expect(popup.close).toHaveBeenCalled();
-    expect(deps.onSettled).toHaveBeenCalled();
     expect(deps.onFailure).toHaveBeenCalledWith(expect.stringContaining("access_denied"));
     expect(posted.some((message) => message.type === "oauth-signin-code")).toBe(false);
   });
@@ -219,7 +218,6 @@ describe("createOAuthSignIns", () => {
     popup.closed = true;
     for (const tick of win.intervals) tick();
     expect(await result).toBe(false);
-    expect(deps.onSettled).toHaveBeenCalled();
     expect(deps.onFailure).not.toHaveBeenCalled();
   });
 

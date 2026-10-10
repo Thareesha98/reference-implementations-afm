@@ -17,6 +17,10 @@
 .hero-ico.bad {
   color: var(--danger);
 }
+.xc-notready {
+  padding-bottom: 18px;
+  text-align: center;
+}
 .not-ready-reason {
   color: var(--danger);
   background: color-mix(in srgb, var(--danger) 10%, transparent);

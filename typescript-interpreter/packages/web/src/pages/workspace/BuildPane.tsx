@@ -23,7 +23,7 @@ import { RichText } from "./RichText";
 import { shortModelLabel, findProvider } from "./model-catalog";
 import { ProviderMark } from "./ProviderMark";
 import type { ActivityPhase, AgentActivity } from "./agent-activity";
-import { markColour } from "./mark-colour";
+import { markColour, providerColour } from "./mark-colour";
 
 type McpServer = NonNullable<NonNullable<AgentMetadata["tools"]>["mcp"]>[number];
 
@@ -35,14 +35,14 @@ interface Props {
   onOpenServer: (name: string | null) => void;
   /** What the agent is doing now, so the diagram can show it. */
   activity: AgentActivity;
-  /** Servers heard from, and ones tried and not reached. */
+  /** Servers heard from, and ones tried and not reached, each with why. */
   reach: ServerReach;
 }
 
 /** Evidence, not assumption: green means the server answered. */
 export interface ServerReach {
   ok: string[];
-  failed: string[];
+  failed: Record<string, string>;
 }
 
 // What the file says about a server; nothing here needs the agent to have run. Whether the address
@@ -113,7 +113,7 @@ export function BuildPane({
   const heard = (server: McpServer): "ok" | "failed" | "unknown" => {
     const url = urlOf(server);
     if (url === undefined) return "unknown";
-    if (reach.failed.includes(url)) return "failed";
+    if (url in reach.failed) return "failed";
     if (reach.ok.includes(url)) return "ok";
     return "unknown";
   };
@@ -248,7 +248,7 @@ export function BuildPane({
                 <span className="u-node-body">
                   <span className="u-node-name">{server.name}</span>
                   <span className={`u-node-sub ${state === "failed" || brokenServer(server) ? "bad" : ""}`}>
-                    {state === "failed" ? "can't reach it" : brokenServer(server) ? "no answer" : summary.tools}
+                    {state === "failed" ? reach.failed[urlOf(server)!] : brokenServer(server) ? "no answer" : summary.tools}
                   </span>
                 </span>
               </button>
@@ -282,12 +282,5 @@ export function BuildPane({
       )}
     </div>
   );
-}
-
-/** Each provider's own colour, so the model is recognised before its name is read. */
-function providerColour(provider: string): string {
-  if (provider === "openai") return "#10A37F";
-  if (provider === "anthropic") return "#C15F3C";
-  return "var(--accent)";
 }
 
