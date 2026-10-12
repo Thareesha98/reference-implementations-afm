@@ -34,11 +34,6 @@ export function previewAgent(content: string): AgentPreview {
 
 export type BuildableAgent = { ok: true; metadata: AgentMetadata } | { ok: false; error: string };
 
-/**
- * Whether the Build view can draw this file. More forgiving than previewAgent: a missing Role or
- * Instructions is drawable (an empty box), so clearing the Role to retype it does not throw the
- * view away. Only bad frontmatter takes the view away.
- */
 export function buildableAgent(content: string): BuildableAgent {
   try {
     const { frontmatter } = splitFrontmatter(content);
@@ -67,7 +62,6 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-// Best-effort: find the source line where a YAML key is declared.
 function findLine(content: string, key: string | null): number | null {
   if (key === null || key === "") return null;
   const re = new RegExp("^\\s*-?\\s*" + escapeRegExp(key) + "\\s*:");
@@ -85,7 +79,6 @@ function lastKeySegment(path: (string | number)[]): string | null {
   return null;
 }
 
-// Plan paths look like "tools.mcp[0].transport" or "interfaces[0]".
 function planPathKey(path: string | undefined): string | null {
   if (path === undefined || path === "") return null;
   const segments = path.match(/[a-zA-Z_]+/g);
@@ -99,8 +92,6 @@ function messageFor(issue: ZodIssueLike, field: string): string {
   return issue.message;
 }
 
-// Collects every validation problem as a structured list: all schema errors plus browser-plan
-// warnings. Never throws.
 export function collectAfmIssues(content: string): AfmIssue[] {
   const issues: AfmIssue[] = [];
 

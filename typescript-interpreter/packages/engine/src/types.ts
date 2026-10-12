@@ -20,8 +20,6 @@ export interface ToolDescriptor {
   name: string;
   description?: string;
   inputSchema: JsonSchema;
-  // Server that provides this tool; undefined for in-page tools. A permission decision only means
-  // something together with the server that receives the call.
   serverId?: string;
 }
 
@@ -32,7 +30,6 @@ export interface ToolCall {
   serverId?: string;
 }
 
-// An image or audio clip a tool returned. Shown in the tool card, not sent to the model.
 export interface ToolResultMedia {
   kind: "image" | "audio";
   data: string;
@@ -45,7 +42,6 @@ export interface ToolResult {
   media?: ToolResultMedia[];
 }
 
-// A user message is a plain string, or a list of parts when it carries an image.
 export type ContentPart =
   | { type: "text"; text: string }
   | { type: "image"; data: string; mediaType: string };

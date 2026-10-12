@@ -21,7 +21,6 @@ import { encryptString } from "./passkey/crypto";
 import type { StoredSecret } from "./passkey/store";
 
 const disk = new Map<string, StoredSecret>();
-// A name here is not readable from disk until its promise settles.
 const slowReads = new Map<string, Promise<void>>();
 
 vi.mock("./passkey/store", () => ({

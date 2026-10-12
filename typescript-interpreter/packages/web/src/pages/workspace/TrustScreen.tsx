@@ -40,11 +40,6 @@ export function toolSummary(metadata: AgentMetadata): string {
     .join(", ");
 }
 
-/**
- * The model, servers and keys the file sets up, before it runs. An agent someone sent you will use
- * your key and reach servers you did not choose. This states what the file says rather than what
- * it might do, because the file is the only thing that can be checked in advance.
- */
 export function TrustScreen({ metadata, source, savedSecrets, onRun, onOpenBuilder }: Props) {
   const keys = referencedSecretNames(source);
 

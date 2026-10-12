@@ -20,7 +20,6 @@ import type { LoadStep } from "../protocol";
 import { ThreadHead } from "./ThreadHead";
 import { OPENERS, selfDescription } from "./starters";
 
-// A running stage gets a growing run of dots so a slow step still looks alive.
 function useDots(): string {
   const [count, setCount] = useState(1);
   useEffect(() => {
@@ -54,21 +53,18 @@ export function LoadChecklist({ steps }: { steps: LoadStep[] }) {
 }
 
 interface Props {
-  status: AgentStatus;
+  status: Exclude<AgentStatus, "no-agent">;
   agentName: string;
   iconUrl?: string;
   loadSteps: LoadStep[];
   notReady: string | null;
   onRetry: () => void;
-  /** What the agent says about itself. */
   description?: string;
   role?: string;
   onAsk?: (question: string) => void;
-  /** Offered when the failure is about a key: forget it and ask again. */
   onReplaceKey?: () => void;
 }
 
-/** Whether the failure is about the model's key. */
 export function rejectedKey(reason: string | null): boolean {
   return reason !== null && /\b(api[ _-]?key|invalid[ _-]?key)\b/i.test(reason);
 }
@@ -86,7 +82,6 @@ export function NotReadyReason({
     <>
       <p className="not-ready-reason">{notReady ?? "Something went wrong while starting the agent."}</p>
       <div className="not-ready-actions">
-        {/* A refused key is replaced, not retried. */}
         {rejectedKey(notReady) && onReplaceKey !== undefined && (
           <button className="u-btn primary" onClick={onReplaceKey}>
             Replace key
@@ -124,23 +119,8 @@ export function EmptyState({ status, agentName, iconUrl = "", loadSteps, notRead
         <div>
           <div className="hero-ico bad">⚠</div>
           <h2>Agent isn&apos;t ready</h2>
-          {/* The checklist stays after a failure so the ticks show which stage broke. */}
           <LoadChecklist steps={loadSteps} />
           <NotReadyReason notReady={notReady} onRetry={onRetry} onReplaceKey={onReplaceKey} />
-        </div>
-      </div>
-    );
-  }
-
-  if (status === "no-agent") {
-    return (
-      <div className="empty">
-        <div>
-          <div className="hero-ico">◆</div>
-          <h2>Not tested yet</h2>
-          <p>
-            Choose <strong>Test this agent</strong> to start it with the file as it is written right now.
-          </p>
         </div>
       </div>
     );

@@ -14,10 +14,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-/**
- * A deterministic colour for a server's mark, so two servers are told apart before their names are
- * read.
- */
 export function markColour(name: string): string {
   const palette = ["#2B2B2B", "#0B6E4F", "#8E6210", "#7A50C8", "#AE3A2E", "#1E7A55"];
   let hash = 0;

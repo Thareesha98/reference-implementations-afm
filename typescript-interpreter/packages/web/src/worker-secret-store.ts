@@ -21,14 +21,8 @@ import { encryptString, decryptString } from "./passkey/crypto";
 import { saveBlob, removeBlob, loadBlob, listNames as listSealedNames, type StoredSecret } from "./passkey/store";
 import type { ServerMessage } from "./protocol";
 
-// Holds secret plaintext in memory for the life of the tab. With a passkey, a sealed copy also
-// lives on disk (passkey/store), useless without the authenticator. Only the main thread can run a
-// passkey ceremony, so it opens every sealed value up front and hands over one derived key per
-// name (acceptUnlock); the worker only decrypts. A value is approved for the hosts it was entered
-// for, and that list travels with the sealed copy.
 export interface WorkerSecretStore {
   memoryPort: SecretPort;
-  // Backs an OAuth refresh token, so a fresh sign-in and a remembered one use the same path.
   refreshStore: KeyValueStore;
   approvedFor(name: string, host: string | undefined): boolean;
   opened(): Promise<void>;
@@ -49,16 +43,11 @@ export interface WorkerSecretStore {
 }
 
 export function createWorkerSecretStore(emit: (message: ServerMessage) => void): WorkerSecretStore {
-  // No prototype, so names like "constructor" or "toString" are never found by accident.
   const values: Record<string, string> = Object.create(null);
   const approvals = new Map<string, Set<string>>();
 
-  // The key a sealed name was last opened or saved with, so a later rotation can re-seal without a
-  // passkey prompt.
   const sealingKeys = new Map<string, { key: CryptoKey; credentialId: Uint8Array<ArrayBuffer>; salt: Uint8Array<ArrayBuffer> }>();
 
-  // Keys the main thread sent are still being opened. Whatever reads a secret waits for them, so a
-  // run does not find a name empty that the same unlock is about to fill.
   let unlocking: Promise<unknown> = Promise.resolve();
 
   function postNames(): void {
@@ -71,11 +60,8 @@ export function createWorkerSecretStore(emit: (message: ServerMessage) => void):
       .catch(() => emit({ type: "passkey-list", names: [] }));
   }
 
-  // A store error reads as nothing saved, never a throw.
   const sealedBlob = (name: string) => loadBlob(name).catch(() => null);
 
-  // The last step of every unlock: sealed bytes become a usable value, or null if the key does not
-  // fit.
   async function decryptInto(name: string, key: CryptoKey, blob: StoredSecret): Promise<string | null> {
     try {
       const value = await decryptString(key, blob);
@@ -91,8 +77,6 @@ export function createWorkerSecretStore(emit: (message: ServerMessage) => void):
 
   const refreshStore: KeyValueStore = {
     get: (key) => values[key] ?? null,
-    // Awaited by persist() so a caller that reads the sealed copy right after a rotation (a
-    // reload, moments later) sees the new value rather than a stale one still on disk.
     set: (key, value) => {
       values[key] = value;
       postNames();
@@ -151,8 +135,6 @@ export function createWorkerSecretStore(emit: (message: ServerMessage) => void):
         .catch(() => emit({ type: "notice", text: `${name} could not be saved for next time. It still works for this tab.` }));
     },
 
-    // The value is only ever decrypted here and never enters memory; a copy that will not open
-    // stays under its own passkey.
     reseal(name, from, to, credentialId, salt) {
       void sealedBlob(name)
         .then(async (blob) => {

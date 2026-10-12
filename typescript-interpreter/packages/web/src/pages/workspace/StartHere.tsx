@@ -68,20 +68,14 @@ type View = "menu" | "templates" | "prompt" | "import";
 
 interface Props {
   state: ChatState;
-  /** Fills the editor; the user then presses Run, so nothing starts behind their back. */
   onUseSource: (source: string) => void;
   onGenerate: (prompt: string, model: AgentModelRef, final?: boolean) => void;
   onDismissDraft: () => void;
-  /** Saves a key typed here, so writing a file does not detour through a key prompt. */
   onSaveKey: (name: string, value: string, keep: boolean) => Promise<boolean>;
-  /** Opens the keys saved on this device. Must run inside the click. */
   onOpenKeys: () => Promise<boolean>;
-  /** True in the side drawer, where "press Run" would point off-screen. */
-  compact?: boolean;
-  onBlank?: () => void;
+  onBlank: () => void;
 }
 
-// The chat pane before an agent has run: says what to press and offers three other ways in.
 export function StartHere({
   state,
   onUseSource,
@@ -89,8 +83,7 @@ export function StartHere({
   onSaveKey,
   onDismissDraft,
   onOpenKeys,
-  compact = false,
-  onBlank = () => {},
+  onBlank,
 }: Props) {
   const [view, setView] = useState<View>("menu");
   const [prompt, setPrompt] = useState("");
@@ -103,7 +96,6 @@ export function StartHere({
   const [dropping, setDropping] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const [fetching, setFetching] = useState(false);
-  // True only while a request is out, not derived from the prompt text.
   const [writing, setWriting] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -111,8 +103,6 @@ export function StartHere({
   const keySaved = usableSecrets(state).includes(provider.secretName);
   const keyClosed = keySaved && !state.savedSecrets.includes(provider.secretName);
 
-  // The worker answered (file, questions or error), so the write is over. Only an arriving answer
-  // counts: a new request clears the last one first, which must not read as an answer.
   const answered =
     state.generatedDraft !== null || state.clarifyQuestions.length > 0 || state.draftError !== null;
   useEffect(() => {
@@ -241,8 +231,6 @@ export function StartHere({
     );
   }
 
-  // Checked before the draft and questions below: while a request is out they hold their last
-  // value, so the screen would otherwise fall through to the describe-it form.
   if (writing) {
     return (
       <SetupColumn>
@@ -255,7 +243,6 @@ export function StartHere({
     );
   }
 
-  // A written file is shown before it is used, not filled into the editor silently.
   if (state.generatedDraft !== null) {
     const draft = state.generatedDraft;
     return (
@@ -284,7 +271,6 @@ export function StartHere({
     );
   }
 
-  // The model wants more before writing. Answering and asking again with `final` set forces a file.
   if (state.clarifyQuestions.length > 0) {
     return (
       <SetupColumn>
@@ -358,7 +344,6 @@ export function StartHere({
             autoFocus
           />
 
-          {/* Writing the file is a model call paid for by the user's own key. */}
           <div className="u-label">Written by your own model</div>
           <div className="u-input-row">
             <label className="u-group u-input-col">
@@ -426,30 +411,15 @@ export function StartHere({
 
   return (
     <SetupColumn>
-      {compact ? (
-        <p className="u-setup-note">
-          The empty agent is already beside you. Fill it in yourself, or start from one of these.
-          <br />
-          Nothing is installed. Everything stays in this tab.
-        </p>
-      ) : (
-        <>
-          <h3 className="u-setup-title">An agent is a file. This one is ready.</h3>
-          <p className="u-setup-note">
-            Edit the fields on the left and press <strong>Run</strong> to start talking to it.
-            <br />
-            Nothing is installed. Everything stays in this tab.
-          </p>
-
-          <div className="u-divider" />
-          <div className="u-label">Or start from something else</div>
-        </>
-      )}
+      <p className="u-setup-note">
+        The empty agent is already beside you. Fill it in yourself, or start from one of these.
+        <br />
+        Nothing is installed. Everything stays in this tab.
+      </p>
 
       <div className="u-start-list">
-        {/* First: it is what the stage already shows. */}
         <StartOption icon={<Glyph path={ICON_PATHS.blank} />} name="Blank" onClick={onBlank} on
-          desc="Write the role and instructions yourself. It is already on the left." />
+          desc="Write the role and instructions yourself. It is already on the right." />
         <StartOption icon={<Glyph path={ICON_PATHS.generate} />} name="Generate with AI" onClick={() => setView("prompt")}
           desc="Describe what you want and get a first version to edit." />
         <StartOption icon={<Glyph path={ICON_PATHS.template} />} name="From a template" onClick={() => setView("templates")}

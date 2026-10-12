@@ -44,8 +44,6 @@ describe("modelFromMetadata", () => {
     await expect(modelFromMetadata({ provider: "openai" })).rejects.toThrow(/key/i);
   });
 
-  // Clearing the field in the Model panel writes `api_key: ""`. Letting that through sent an
-  // empty Authorization header, and the provider's 401 comes back unreadable to the browser.
   it("treats a blank key as no key at all", async () => {
     await expect(
       modelFromMetadata({ provider: "openai", authentication: { type: "api-key", api_key: "" } }),

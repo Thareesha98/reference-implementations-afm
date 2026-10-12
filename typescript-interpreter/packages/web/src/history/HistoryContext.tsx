@@ -19,10 +19,7 @@ import type { ReactNode } from "react";
 import {
   loadHistory,
   upsertHistoryEntry,
-  removeHistoryEntry,
   removeHistoryEntriesForAgent,
-  clearHistory,
-  branchFrom,
   importHistoryEntries,
 } from "../history-store";
 import type { HistoryEntry } from "../history-store";
@@ -30,17 +27,13 @@ import type { HistoryEntry } from "../history-store";
 interface HistoryValue {
   entries: HistoryEntry[];
   upsert: (entry: HistoryEntry) => void;
-  remove: (id: string) => void;
   removeForAgent: (agentId: string) => void;
-  clear: () => void;
-  branch: (entry: HistoryEntry) => Promise<HistoryEntry>;
   restore: (entries: HistoryEntry[]) => void;
 }
 
 const HistoryContext = createContext<HistoryValue | null>(null);
 
 export function HistoryProvider({ children }: { children: ReactNode }) {
-  // Fills in on mount; IndexedDB cannot be read synchronously.
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
 
   useEffect(() => {
@@ -56,14 +49,7 @@ export function HistoryProvider({ children }: { children: ReactNode }) {
   const value: HistoryValue = {
     entries,
     upsert: (entry) => void upsertHistoryEntry(entry).then(setEntries),
-    remove: (id) => void removeHistoryEntry(id).then(setEntries),
     removeForAgent: (agentId) => void removeHistoryEntriesForAgent(agentId).then(setEntries),
-    clear: () => void clearHistory().then(setEntries),
-    branch: async (entry) => {
-      const branched = await branchFrom(entry);
-      setEntries(await loadHistory());
-      return branched;
-    },
     restore: (imported) => void importHistoryEntries(imported).then(setEntries),
   };
 

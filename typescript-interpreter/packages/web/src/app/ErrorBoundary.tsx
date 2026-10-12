@@ -21,7 +21,6 @@ interface State {
   failed: boolean;
 }
 
-/** Offers a way out when rendering throws, instead of a blank window. */
 export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
   state: State = { failed: false };
 

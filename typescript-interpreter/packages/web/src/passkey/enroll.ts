@@ -46,8 +46,6 @@ export async function enrollPasskey(): Promise<PasskeyEnrollment> {
   }
 
   const credentialId = new Uint8Array(created.rawId);
-  // Some platforms return the PRF output from create(); otherwise a second ceremony fetches it,
-  // identical to every later unlock.
   const fromCreate = created.getClientExtensionResults().prf?.results?.first;
   return {
     credentialId,

@@ -29,8 +29,6 @@ describe("buildShareLink", () => {
     expect(decodeInlineAfm(link.split("#afm=")[1]!)).toBe(SOURCE);
   });
 
-  // A fragment is never sent to the server, so sharing an agent never uploads it. Putting the
-  // source in the query string instead would hand it to whoever serves the page.
   it("keeps the inline agent out of the query string", () => {
     expect(buildShareLink(ORIGIN, "inline", SOURCE, null)).not.toContain("?afm=");
   });
@@ -98,8 +96,6 @@ describe("toSeededConversation", () => {
   });
 
   it("reattaches tool calls to the assistant turn that made them, with their results", () => {
-    // Reopening a chat has to restore this, or the agent cannot answer a follow-up about
-    // anything a tool told it earlier.
     expect(
       toSeededConversation([
         { kind: "user", id: 1, text: "weather?" },

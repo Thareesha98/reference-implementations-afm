@@ -16,8 +16,6 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-// Speech recognition is missing from TypeScript's DOM lib and older Safari prefixes the
-// constructor. Both live here so the lookup and transcript joining are testable without a browser.
 
 export interface SpeechRecognitionResult {
   readonly length: number;
@@ -62,9 +60,6 @@ export function pickSpeechRecognitionCtor(win: SpeechWindow): SpeechRecognitionC
   return win.SpeechRecognition ?? win.webkitSpeechRecognition ?? null;
 }
 
-// Every event carries all results for the session: settled phrases plus one interim tail. The
-// transcript is rebuilt each time, and final phrases get a trailing space so they do not run
-// together.
 export function buildLiveTranscript(results: SpeechRecognitionResultList): string {
   let text = "";
   for (let i = 0; i < results.length; i += 1) {
@@ -80,17 +75,8 @@ function speechWindow(): SpeechWindow {
   return window as unknown as SpeechWindow;
 }
 
-// How long to keep listening through a pause before treating the speaker as done.
 const SILENCE_TIMEOUT_MS = 5000;
 
-/**
- * Live dictation: the transcript fills in as the person speaks, including interim words.
- *
- * `continuous` keeps listening through pauses; a timer restarted on every result ends the session
- * after `SILENCE_TIMEOUT_MS`. Recognition is done by the browser's own speech service, which may
- * send audio to a server. Unsupported browsers get `supported: false` and the caller hides the mic
- * button.
- */
 export function useVoiceInput(onUpdate: (text: string) => void) {
   const [listening, setListening] = useState(false);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
@@ -147,10 +133,6 @@ export function useVoiceInput(onUpdate: (text: string) => void) {
   return { supported, listening, start, stop };
 }
 
-/**
- * Reads a message aloud with the browser's own voice. speechSynthesis is one global queue, so
- * starting a new utterance stops the previous one.
- */
 export function useSpeakText() {
   const [speaking, setSpeaking] = useState(false);
   const supported = typeof window !== "undefined" && "speechSynthesis" in window;

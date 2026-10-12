@@ -17,14 +17,9 @@
 import { requestInStore, sharedConnection } from "../idb-request";
 import type { SealedValue } from "./crypto";
 
-// No key is stored: it is re-derived from the authenticator on each unlock.
 const DB_NAME = "afm-passkey-secrets";
 const STORE = "secrets";
 
-/**
- * Everything needed to re-derive and decrypt, and no key. Extends SealedValue so a blob goes
- * straight to decryptString().
- */
 export interface StoredSecret extends SealedValue {
   credentialId: Uint8Array<ArrayBuffer>;
   salt: Uint8Array<ArrayBuffer>;

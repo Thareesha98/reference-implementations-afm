@@ -20,17 +20,12 @@ import { seal } from "./passkey/vault";
 
 export type PopupResult = { code: string; state: string; iss?: string } | { error: string };
 
-// The redirect lands on the app's own root, so this window name is how that load knows to relay
-// instead of render.
 const POPUP_NAME = "afm-oauth-signin";
 
-// Must be called straight from the click, before any await, or the browser blocks the window.
 function openSignInPopup(): Window | null {
   return window.open("about:blank", POPUP_NAME, "width=520,height=680");
 }
 
-// At startup: if this window is the sign-in popup returning with a result, hand it to the opener
-// and close. Returns true when it did, so the app is not mounted here.
 export function relayOAuthCallbackIfPopup(): boolean {
   if (window.name !== POPUP_NAME) return false;
   const params = new URLSearchParams(window.location.search);
@@ -45,8 +40,6 @@ export function relayOAuthCallbackIfPopup(): boolean {
   return true;
 }
 
-// Resolves with the callback page's message: the one-time code, or the provider's refusal. Only our
-// origin, this popup and the expected shape are accepted, and listening stops after the first.
 function awaitPopupResult(popup: Window): Promise<PopupResult> {
   return new Promise((resolve, reject) => {
     const poll = window.setInterval(() => {
@@ -77,8 +70,6 @@ function awaitPopupResult(popup: Window): Promise<PopupResult> {
 
 const LEGACY_REFRESH_KEY = /^afm\.(wso2\.refresh|oauth\..+\.refresh)$/;
 
-// Removes refresh tokens an earlier version left in localStorage. The pattern also covers
-// 'afm.wso2.refresh', the token of a sign-in that no longer exists.
 export function clearLegacyRefreshTokens(): void {
   try {
     const stale: string[] = [];
@@ -106,7 +97,6 @@ interface Flow {
 export interface OAuthSignInDeps {
   post: (message: ClientMessage) => void;
   onPopupBlocked: () => void;
-  // Says why a flow failed. Closing the popup is the user's own choice and is not reported.
   onFailure: (reason: string) => void;
 }
 
@@ -116,11 +106,6 @@ export interface OAuthSignIns {
   onDone(id: string, ok: boolean, error?: string): void;
 }
 
-/**
- * Drives an interactive OAuth sign-in through a popup while the worker owns the exchange and
- * tokens. This side opens the popup on the click, points it at the worker's authorize URL and
- * relays the one-time code; it never sees a token.
- */
 export function createOAuthSignIns(deps: OAuthSignInDeps): OAuthSignIns {
   const flows = new Map<string, Flow>();
 

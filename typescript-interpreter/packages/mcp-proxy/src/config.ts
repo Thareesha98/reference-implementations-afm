@@ -41,7 +41,6 @@ export function dnsResolver(): Resolver {
 }
 
 export function configFromEnv(): ProxyConfig {
-  // Comma-separated: the custom domain and the platform default usually both need to work.
   const allowedOrigins = (process.env.AFM_ALLOWED_ORIGIN ?? "http://localhost:5173")
     .split(",")
     .map((origin) => origin.trim().replace(/\/$/, ""))
@@ -53,11 +52,9 @@ export function configFromEnv(): ProxyConfig {
     allowLoopback: process.env.AFM_ALLOW_LOOPBACK === "1",
     requestsPerMinute: positiveNumber(process.env.AFM_RATE_PER_MINUTE, 120),
     burst: positiveNumber(process.env.AFM_RATE_BURST, 30),
-    // Ten times the per-client allowance.
     globalRequestsPerMinute: positiveNumber(process.env.AFM_GLOBAL_RATE_PER_MINUTE, 1_200),
     globalBurst: positiveNumber(process.env.AFM_GLOBAL_BURST, 300),
     maxBodyBytes: positiveNumber(process.env.AFM_MAX_BODY_BYTES, 1_000_000),
-    // MCP replies are JSON-RPC text; 10MB is far past any real result.
     maxResponseBytes: positiveNumber(process.env.AFM_MAX_RESPONSE_BYTES, 10_000_000),
     maxUpstreamMs: positiveNumber(process.env.AFM_MAX_UPSTREAM_MS, 120_000),
     allowedTargetHosts: (process.env.AFM_ALLOWED_TARGET_HOSTS ?? "")
@@ -73,7 +70,6 @@ function positiveNumber(raw: string | undefined, fallback: number): number {
   return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
-// Zero is valid (nothing in front of the process); an empty setting means not configured.
 function hopCount(raw: string | undefined, fallback: number): number {
   if (raw === undefined || raw.trim() === "") return fallback;
   const value = Number(raw);

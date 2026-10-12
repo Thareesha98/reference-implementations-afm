@@ -14,9 +14,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Bundles the proxy into one dependency-free file, so the deployed app is just
-// `node server.mjs` with no install step on the server. That is what keeps the App Service
-// free tier viable: nothing to build remotely, nothing to keep warm.
 import { mkdirSync, writeFileSync, rmSync, readdirSync, existsSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join, resolve } from "node:path";
@@ -24,8 +21,6 @@ import { dirname, join, resolve } from "node:path";
 const here = dirname(fileURLToPath(import.meta.url));
 const outDir = join(here, "deploy");
 
-// esbuild is a devDependency of this package. If the workspace has not been installed with
-// it yet, fall back to the copy pnpm already stores for Vite so a fresh clone can still build.
 async function loadEsbuild() {
   try {
     return await import("esbuild");

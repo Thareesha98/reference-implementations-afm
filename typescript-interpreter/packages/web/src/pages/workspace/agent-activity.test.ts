@@ -35,7 +35,6 @@ const tool = (name: string, status: "running" | "ok" | "failed"): UiMessage => (
 });
 
 describe("what the diagram is allowed to light up", () => {
-  // A diagram that lights up when nothing is happening is worse than one that never does.
   it("stays dark when the agent is not running", () => {
     expect(reportedActivity(state({}), TOOLS).phase).toBe("idle");
     expect(reportedActivity(state({ status: "ready", messages: [user] }), TOOLS).phase).toBe("idle");
@@ -55,7 +54,6 @@ describe("what the diagram is allowed to light up", () => {
     expect(reportedActivity(state({ status: "streaming", messages }), TOOLS).phase).toBe("thinking");
   });
 
-  // Only the server whose tool is running should light up, never all of them.
   it("names the server the running tool belongs to", () => {
     const messages = [user, tool("get_issue", "running")];
     const activity = reportedActivity(state({ status: "streaming", messages, tools: TOOLS }), TOOLS);
@@ -81,8 +79,6 @@ describe("what the diagram is allowed to light up", () => {
 });
 
 describe("the round trip", () => {
-  // Out to the model, back again, out to a tool, back again, out to the model once more. The
-  // legs going back are transitions the worker cannot report as states, only as changes.
   it("brings the model's reply back before the tool starts", () => {
     expect(legAfter({ phase: "thinking" }, { phase: "tool", serverId: "a" }, false))
       .toEqual({ phase: "from-model" });
@@ -136,7 +132,6 @@ describe("which line broke", () => {
     expect(activity.brokenServerIds).toEqual(["https://gitlab.example/mcp"]);
   });
 
-  // A break from three questions ago says nothing about the answer on screen now.
   it("forgets a break from an earlier turn", () => {
     const messages: UiMessage[] = [user, tool("get_issue", "failed"), { kind: "user", id: 9, text: "again" }];
     expect(reportedActivity(state({ messages }), TOOLS).brokenServerIds).toEqual([]);

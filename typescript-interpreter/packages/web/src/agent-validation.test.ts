@@ -34,10 +34,6 @@ You are a helper.
 Answer clearly.
 `;
 
-/**
- * Clearing a field to retype it is the most ordinary edit there is, and it must not take the
- * Build view away along with the box being typed into.
- */
 describe("the Build view stays put while a field is empty", () => {
   for (const field of ["Role", "Instructions"] as const) {
     it(`survives ${field} being cleared`, () => {
@@ -50,7 +46,6 @@ describe("the Build view stays put while a field is empty", () => {
       const cleared = setSection(FILE, field, "");
       const retyped = setSection(cleared, field, "A poet.");
       expect(getSection(retyped, field)).toBe("A poet.");
-      // Typed all the way back in, the file runs again.
       expect(previewAgent(retyped).ok).toBe(true);
     });
 
@@ -64,21 +59,16 @@ describe("the Build view stays put while a field is empty", () => {
   it("survives both being empty at once, settings and all", () => {
     const drawable = buildableAgent(setSection(setSection(FILE, "Role", ""), "Instructions", ""));
     expect(drawable.ok).toBe(true);
-    // The name and the model still read, so the agent keeps its identity and its diagram while
-    // the two boxes are empty.
     if (drawable.ok) {
       expect(drawable.metadata.name).toBe("Code explain Agent");
       expect(drawable.metadata.model?.name).toBe("claude-sonnet-5");
     }
   });
 
-  // Running is a different question from drawing, and it stays strict: an agent with no role
-  // is not one you can run.
   it("still refuses to run a file with no role", () => {
     expect(previewAgent(setSection(FILE, "Role", "")).ok).toBe(false);
   });
 
-  // The one thing the diagram genuinely cannot draw is settings it cannot read.
   it("falls back to Raw only when the settings block is broken", () => {
     expect(buildableAgent("---\nmodel: [not, a, map]\n---\n\n# Role\n\nx\n").ok).toBe(false);
   });

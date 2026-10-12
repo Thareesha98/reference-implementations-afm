@@ -19,10 +19,6 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// The whole app has exactly one place that turns a string into live markup:
-// pages/workspace/RichText.tsx, and rich-text.ts sanitizes everything that reaches it. A second
-// sink anywhere else would bypass that sanitizing by construction, however careful its own code
-// tried to be - so this test keeps the count at one rather than trusting review to catch it.
 const SRC = fileURLToPath(new URL(".", import.meta.url));
 const ALLOWED = new Set(["pages/workspace/RichText.tsx"]);
 const SINK = /\.innerHTML\s*=|dangerouslySetInnerHTML|\.outerHTML\s*=|insertAdjacentHTML|document\.write\(|[^a-zA-Z0-9_.]eval\(|new Function\(/;

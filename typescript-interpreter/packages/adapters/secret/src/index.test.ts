@@ -75,10 +75,6 @@ describe("chainSecretPort", () => {
   });
 });
 
-// The browser host uses configSecretPort as its session-only store: values the user typed but
-// chose not to save are written into the object AFTER the port is built. If the port ever
-// snapshotted the object instead of reading it per resolve, the user would be re-prompted for
-// a key they had just entered.
 describe("configSecretPort as a live session store", () => {
   it("sees values added after the port was created", async () => {
     const session: Record<string, string> = {};

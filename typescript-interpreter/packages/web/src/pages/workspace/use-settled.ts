@@ -16,10 +16,6 @@
 
 import { useEffect, useState } from "react";
 
-/**
- * The value once it has stopped changing for `delayMs`, so the validity chip does not strobe while
- * a word is typed. The first value is returned immediately.
- */
 export function useSettled<T>(value: T, delayMs = 300): T {
   const [settled, setSettled] = useState(value);
 

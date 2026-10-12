@@ -53,8 +53,6 @@ export async function gateRequest(info: ProxyRequestInfo, config: ProxyConfig): 
 const DEFAULT_ALLOWED_HEADERS =
   "authorization, content-type, mcp-session-id, mcp-protocol-version, last-event-id";
 
-// A site can be reachable at more than one origin (custom domain and platform default), so the
-// allowed set is a list - still an exact allowlist, never a wildcard.
 export function corsHeaders(
   requestOrigin: string | undefined,
   allowedOrigins: string[],
@@ -66,8 +64,6 @@ export function corsHeaders(
       requestedHeaders !== undefined && requestedHeaders !== ""
         ? requestedHeaders
         : DEFAULT_ALLOWED_HEADERS,
-    // mcp-session-id is read by the Streamable HTTP transport; www-authenticate carries OAuth
-    // discovery data from a 401. Both must be exposed or the browser hides them.
     "Access-Control-Expose-Headers": "mcp-session-id, www-authenticate",
     "Access-Control-Max-Age": "600",
     Vary: "Origin, Access-Control-Request-Headers",

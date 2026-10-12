@@ -20,16 +20,11 @@ import type { DirectoryEntry } from "../../mcp-directory";
 import { markColour } from "./mark-colour";
 
 interface Props {
-  /** Owned by the panel, which keeps it in the header that stays put while the list scrolls. */
   query: string;
   onConnect: (entry: DirectoryEntry) => void;
   onInfo: (entry: DirectoryEntry) => void;
 }
 
-/**
- * Three zones: the name and Info on top, the description across the full width, then the publisher
- * beside Connect. One line in a 336px panel wrapped the description every second word.
- */
 function ServerRow({
   entry,
   onConnect,
@@ -71,10 +66,6 @@ function ServerRow({
   );
 }
 
-/**
- * The "pick from a list" half of Connect tools. The list is written down in mcp-directory.ts, so
- * every server in it is one its publisher documents and nothing here depends on a service.
- */
 export function ServerDirectory({ query, onConnect, onInfo }: Props) {
   const results = useMemo(() => searchDirectory(query), [query]);
 

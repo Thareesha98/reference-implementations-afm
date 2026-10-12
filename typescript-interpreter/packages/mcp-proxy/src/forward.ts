@@ -76,7 +76,6 @@ export function forwardedRequestHeaders(
   return out;
 }
 
-// TCP + TLS only, not first byte: a slow tool may take a long time to answer once connected.
 export const DEFAULT_CONNECT_TIMEOUT_MS = 10_000;
 
 export function openUpstream(
@@ -100,8 +99,6 @@ function attempt(
     return Promise.reject(new Error("Could not connect to any resolved address"));
   }
   return connectOnce(target, req, pinnedIp, signal, connectTimeoutMs).catch((error: unknown) => {
-    // The overall deadline or a browser abort stops everything; only a per-attempt failure falls
-    // back to the next address.
     if (!signal.aborted && index + 1 < target.addresses.length) {
       return attempt(target, req, index + 1, signal, connectTimeoutMs);
     }
@@ -153,8 +150,6 @@ function connectOnce(
       resolve({ response, abort: () => clientRequest.destroy() });
     });
 
-    // A pooled keep-alive socket is handed over already connected, so connect/secureConnect never
-    // fires for it - only a fresh socket needs to wait for one.
     clientRequest.on("socket", (socket) => {
       if (!socket.connecting) {
         clearConnectTimer();

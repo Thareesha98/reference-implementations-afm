@@ -28,15 +28,9 @@ export interface HistoryEntry {
   updatedAt: number;
 }
 
-/**
- * Conversations live in IndexedDB rather than localStorage, since messages can carry base64 images
- * that pass localStorage's ~5MB limit. One record per conversation, keyed by id, so sending a
- * message rewrites one record.
- */
 const DB_NAME = "afm-history";
 const STORE = "conversations";
 const HISTORY_MAX = 200;
-/** Where conversations lived before; read once during the upgrade below. */
 const LEGACY_KEY = "afm.history.v1";
 
 function legacyEntries(): HistoryEntry[] {
@@ -57,7 +51,6 @@ function connect(): Promise<IDBDatabase> {
     const request = indexedDB.open(DB_NAME, 1);
     request.onupgradeneeded = () => {
       const store = request.result.createObjectStore(STORE, { keyPath: "id" });
-      // Carried over inside the upgrade transaction; the old copy is dropped only once it commits.
       const legacy = legacyEntries();
       for (const entry of legacy) store.put(entry);
       if (legacy.length > 0) {
@@ -65,7 +58,6 @@ function connect(): Promise<IDBDatabase> {
           try {
             localStorage.removeItem(LEGACY_KEY);
           } catch {
-            // Keeping a stale copy is harmless; losing the migrated one is not.
           }
         });
       }
@@ -91,10 +83,6 @@ async function readAll(db: IDBDatabase): Promise<HistoryEntry[]> {
   return byRecency(await run<HistoryEntry[]>(db, "readonly", (store) => store.getAll()));
 }
 
-/**
- * Every caller renders the whole list afterwards, so each returns it. A failed read returns an
- * empty list rather than throwing, so a broken history cannot stop the app.
- */
 export async function loadHistory(): Promise<HistoryEntry[]> {
   try {
     return await readAll(await openDb());
@@ -103,7 +91,7 @@ export async function loadHistory(): Promise<HistoryEntry[]> {
   }
 }
 
-async function writeAll(db: IDBDatabase, entries: HistoryEntry[]): Promise<HistoryEntry[]> {
+async function pruneHistory(db: IDBDatabase, entries: HistoryEntry[]): Promise<HistoryEntry[]> {
   const ordered = byRecency(entries);
   const keep = ordered.slice(0, HISTORY_MAX);
   const kept = new Set(keep.map((entry) => entry.id));
@@ -115,7 +103,6 @@ async function writeAll(db: IDBDatabase, entries: HistoryEntry[]): Promise<Histo
   return keep;
 }
 
-// A change that fails part-way returns the list as it stands rather than throwing.
 async function changeHistory(change: (db: IDBDatabase) => Promise<HistoryEntry[]>): Promise<HistoryEntry[]> {
   try {
     return await change(await openDb());
@@ -127,14 +114,7 @@ async function changeHistory(change: (db: IDBDatabase) => Promise<HistoryEntry[]
 export function upsertHistoryEntry(entry: HistoryEntry): Promise<HistoryEntry[]> {
   return changeHistory(async (db) => {
     await run(db, "readwrite", (store) => store.put(entry));
-    return writeAll(db, await readAll(db));
-  });
-}
-
-export function removeHistoryEntry(id: string): Promise<HistoryEntry[]> {
-  return changeHistory(async (db) => {
-    await run(db, "readwrite", (store) => store.delete(id));
-    return readAll(db);
+    return pruneHistory(db, await readAll(db));
   });
 }
 
@@ -146,23 +126,6 @@ export function removeHistoryEntriesForAgent(agentId: string): Promise<HistoryEn
   });
 }
 
-export function clearHistory(): Promise<HistoryEntry[]> {
-  return changeHistory(async (db) => {
-    await run(db, "readwrite", (store) => store.clear());
-    return [];
-  });
-}
-
-export async function branchFrom(entry: HistoryEntry): Promise<HistoryEntry> {
-  const now = Date.now();
-  const branched: HistoryEntry = { ...entry, id: crypto.randomUUID(), startedAt: now, updatedAt: now };
-  await upsertHistoryEntry(branched);
-  return branched;
-}
-
-// Restores deleted conversations without disturbing newer ones: an existing entry wins unless the
-// restored copy is newer, so an undo never rolls a conversation back. Pure, so the rule is testable
-// without a database.
 export function mergeHistory(existing: HistoryEntry[], imported: HistoryEntry[]): HistoryEntry[] {
   const byId = new Map<string, HistoryEntry>();
   for (const item of existing) byId.set(item.id, item);
@@ -179,11 +142,9 @@ export function importHistoryEntries(imported: HistoryEntry[]): Promise<HistoryE
   return changeHistory(async (db) => {
     const existing = await readAll(db);
     const merged = mergeHistory(existing, imported);
-    // Only the entries the merge took from `imported` are written, so an undo does not re-save the
-    // whole store.
     const unchanged = new Map(existing.map((entry) => [entry.id, entry]));
     const changed = merged.filter((entry) => unchanged.get(entry.id) !== entry);
     await Promise.all(changed.map((entry) => run(db, "readwrite", (store) => store.put(entry))));
-    return writeAll(db, merged);
+    return pruneHistory(db, merged);
   });
 }

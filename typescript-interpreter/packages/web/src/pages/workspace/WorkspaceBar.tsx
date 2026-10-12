@@ -19,14 +19,13 @@ import type { SidePanel } from "./workspace-view";
 
 interface Props {
   agentName: string;
-  /** False only while an edit has not reached the library yet. */
   saved: boolean;
   saveFailed: boolean;
   canAct: boolean;
-  /** Which surface the side window shows, so its control can read as pressed. */
   open: SidePanel | null;
   onToggle: (panel: SidePanel) => void;
-  /** True when the file on screen differs from the one running: the only time Run does anything. */
+  agentsOpen: boolean;
+  onToggleAgents: () => void;
   canRun: boolean;
   running: boolean;
   onRun: () => void;
@@ -63,7 +62,6 @@ function Ico({
   );
 }
 
-/** Not a navigation bar: every control here acts on the agent in front of you. */
 export function WorkspaceBar({
   agentName,
   saved,
@@ -71,6 +69,8 @@ export function WorkspaceBar({
   canAct,
   open,
   onToggle,
+  agentsOpen,
+  onToggleAgents,
   canRun,
   running,
   onRun,
@@ -81,10 +81,9 @@ export function WorkspaceBar({
     <div className="u-bar">
       <span className="u-brand">AFM</span>
       <span className="u-sep" aria-hidden="true" />
-      <button className="u-agentname" onClick={() => onToggle("agents")} aria-expanded={open === "agents"}>
+      <button className="u-agentname" onClick={onToggleAgents} aria-expanded={agentsOpen}>
         {agentName} <span className="u-caret" aria-hidden="true" />
       </button>
-      {/* Not a button. Work is written as it settles, so this only reports; the one state worth interrupting for is a write that did not land. */}
       <span className={`u-saved ${saveFailed ? "is-failed" : ""}`}>
         {saveFailed ? "Couldn’t save" : saved ? "Saved" : "Saving…"}
       </span>

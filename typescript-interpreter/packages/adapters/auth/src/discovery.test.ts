@@ -23,8 +23,6 @@ import {
   registerClient,
 } from "./discovery";
 
-// Real traces, captured against mcp.linear.app on 2026-09-01 - a genuinely OAuth-protected,
-// production MCP server, not a fixture invented from reading the spec.
 const LINEAR_CHALLENGE =
   'Bearer realm="OAuth", resource_metadata="https://mcp.linear.app/.well-known/oauth-protected-resource/mcp", error="invalid_token", error_description="Missing or invalid access token"';
 const LINEAR_PRM = {
@@ -67,7 +65,6 @@ describe("parseChallengeScope", () => {
   });
 });
 
-/** A tiny router so each test can answer only the URLs it cares about. */
 function routedFetch(routes: Record<string, { status: number; headers?: Record<string, string>; json?: unknown }>) {
   const requested: string[] = [];
   const fn = (async (input: string | URL, _init?: RequestInit) => {

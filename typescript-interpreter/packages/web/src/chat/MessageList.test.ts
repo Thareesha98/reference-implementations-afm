@@ -17,14 +17,14 @@ import { describe, it, expect } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MessageList } from "./MessageList";
-import type { AgentStatus, UiMessage } from "../chat-state";
+import type { UiMessage } from "../chat-state";
 
 const THREAD: UiMessage[] = [
   { kind: "user", id: 1, text: "hello" },
   { kind: "assistant", id: 2, text: "Hi there" },
 ];
 
-function list(status: AgentStatus, messages: UiMessage[], notReady: string | null = null): string {
+function list(status: Parameters<typeof MessageList>[0]["status"], messages: UiMessage[], notReady: string | null = null): string {
   return renderToStaticMarkup(
     createElement(MessageList, {
       messages,

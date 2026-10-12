@@ -16,21 +16,14 @@
 
 import type { AfmIssue } from "../../agent-validation";
 
-/** Which part of the Build view a problem belongs to, so it is shown where it is fixed. */
 export type IssueTarget = "role" | "instructions" | "model" | "tools" | "file";
 
 export interface PlainIssue {
-  /** What to do about it, in words for someone who has never seen YAML. */
   text: string;
-  /** The original wording. */
   detail: string;
   target: IssueTarget;
 }
 
-/**
- * Turns a validator's wording into something a person can act on. Anything not recognised keeps its
- * original wording; a wrong friendly message is worse than an unfriendly true one.
- */
 export function inPlainWords(issue: AfmIssue): PlainIssue {
   const raw = issue.message;
   const detail = raw;

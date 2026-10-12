@@ -14,19 +14,13 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { describe, it, expect } from "vitest";
-import { liveElapsedMs } from "./live-elapsed";
+import type { ContentPart } from "@afm/engine";
+import type { ImageAttachment } from "./protocol";
 
-describe("liveElapsedMs", () => {
-  it("returns the baseline unchanged right when it was received", () => {
-    expect(liveElapsedMs(5000, 1000, 1000)).toBe(5000);
-  });
-
-  it("adds real wall-clock time that has passed since the baseline arrived", () => {
-    expect(liveElapsedMs(5000, 1000, 3500)).toBe(7500);
-  });
-
-  it("never goes backwards if now is somehow before receivedAt", () => {
-    expect(liveElapsedMs(5000, 3500, 1000)).toBe(5000);
-  });
-});
+export function userContent(text: string, images?: ImageAttachment[]): string | ContentPart[] {
+  if (images === undefined || images.length === 0) return text;
+  return [
+    ...(text.trim() !== "" ? [{ type: "text" as const, text }] : []),
+    ...images.map((image) => ({ type: "image" as const, data: image.data, mediaType: image.mediaType })),
+  ];
+}

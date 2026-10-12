@@ -33,7 +33,6 @@ describe("createRateLimiter", () => {
     limiter.take("ip", start);
     limiter.take("ip", start);
     expect(limiter.take("ip", start)).toBe(false);
-    // 60/minute == 1 per second
     expect(limiter.take("ip", start + 1_100)).toBe(true);
   });
 
@@ -89,8 +88,6 @@ describe("clientIpFor", () => {
   });
 
   it("ignores an entry the caller forged to the left of the trusted hop", () => {
-    // The caller sent "1.2.3.4"; the front end appended their real address after it. Trusting the
-    // leftmost entry would let anyone choose their own bucket - or someone else's.
     const headers = { "x-forwarded-for": "1.2.3.4, 203.0.113.9" };
     expect(clientIpFor(headers, SOCKET, 1)).toBe("203.0.113.9");
   });
@@ -130,7 +127,6 @@ describe("clientIpFor", () => {
 
     expect(limiter.take(first, now)).toBe(true);
     expect(limiter.take(first, now)).toBe(false);
-    // Before this, both requests keyed on the load balancer's address and shared one bucket.
     expect(limiter.take(second, now)).toBe(true);
   });
 });

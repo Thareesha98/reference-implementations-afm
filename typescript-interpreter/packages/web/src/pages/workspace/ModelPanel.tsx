@@ -23,23 +23,15 @@ import type { Issue } from "./setup-check";
 
 interface Props {
   content: string;
-  /** Names the agent can already use, in memory or sealed behind a passkey. */
   savedSecrets: string[];
-  /** Of those, the ones sealed on disk, which survive a reload. */
   passkeySecrets: string[];
   onApply: (content: string) => void;
-  /** What Setup found wrong with the model, said in the window it sends the user to. */
   issue: Issue | null;
   onSaveKey: (name: string, value: string, keep: boolean) => Promise<boolean>;
-  /** Present when the window was opened from Setup, which it returns to. */
   onBack?: () => void;
   onClose: () => void;
 }
 
-/**
- * Who provides the model, which model, and the key that unlocks it. Held as a draft and written on
- * Save, so half-finished edits never reach the file.
- */
 export function ModelPanel({ content, savedSecrets, passkeySecrets, issue, onApply, onSaveKey, onBack, onClose }: Props) {
   const fileProvider = getModelField(content, "provider");
 
@@ -50,8 +42,6 @@ export function ModelPanel({ content, savedSecrets, passkeySecrets, issue, onApp
   const [keep, setKeep] = useState(false);
 
   const known = findProvider(provider);
-  // The name the file already points at wins while the provider is unchanged; looking up the
-  // catalogue's name instead would report a saved key as missing.
   const fileSecretName = envSecretName(getModelApiKey(content));
   const secretName =
     provider === fileProvider && fileSecretName !== "" ? fileSecretName : (known?.secretName ?? "");
@@ -77,7 +67,6 @@ export function ModelPanel({ content, savedSecrets, passkeySecrets, issue, onApp
     onClose();
   }
 
-  // The title and the way out belong to the side window that holds this panel.
   return (
     <>
       <div className="u-panel-body">

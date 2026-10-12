@@ -27,11 +27,6 @@ export function requestInStore<T>(
   });
 }
 
-/**
- * One connection per tab rather than one per call, since an open connection blocks a version
- * upgrade. Dropped when the browser closes it or another tab upgrades; a failed open is not
- * remembered.
- */
 export function sharedConnection(connect: () => Promise<IDBDatabase>): () => Promise<IDBDatabase> {
   let connection: Promise<IDBDatabase> | null = null;
   return () => {

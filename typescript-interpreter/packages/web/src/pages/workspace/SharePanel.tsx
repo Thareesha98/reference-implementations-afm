@@ -27,7 +27,11 @@ interface Props {
   agentSource: string;
 }
 
-/** What a recipient will want to find in the file, and whether it is there yet. */
+const DELIVERY_OPTIONS = [
+  { id: "inline", name: "In the link", sub: "Recommended for small agents" },
+  { id: "url", name: "Hosted file", sub: "For larger agents you keep updated" },
+] as const;
+
 export function shareChecks(metadata: AgentMetadata | null): { label: string; done: boolean }[] {
   const filled = (text: string | undefined) => (text?.trim() ?? "") !== "";
   return [
@@ -40,7 +44,6 @@ export function shareChecks(metadata: AgentMetadata | null): { label: string; do
   ];
 }
 
-/** The two ways to hand an agent to someone, in a panel under the button. */
 export function SharePanel({ agentSource }: Props) {
   const [method, setMethod] = useState<ShareMethod>("url");
   const [fileUrl, setFileUrl] = useState("");
@@ -61,30 +64,6 @@ export function SharePanel({ agentSource }: Props) {
     method,
     agentSource,
     normalized !== null && normalized.ok ? normalized.url : null,
-  );
-
-  const choice = (
-    label: string,
-    options: { id: string; name: string; sub: string }[],
-    value: string,
-    onPick: (id: string) => void,
-  ) => (
-    <div className="u-group">
-      <span className="u-label">{label}</span>
-      <div className="u-seg fill">
-        {options.map((option) => (
-          <button
-            key={option.id}
-            className={value === option.id ? "on" : ""}
-            aria-pressed={value === option.id}
-            onClick={() => onPick(option.id)}
-          >
-            {option.name}
-          </button>
-        ))}
-      </div>
-      <p className="u-hint">{options.find((option) => option.id === value)?.sub}</p>
-    </div>
   );
 
   return (
@@ -123,15 +102,22 @@ export function SharePanel({ agentSource }: Props) {
 
       {tab === "link" ? (
         <>
-          {choice(
-            "Delivery",
-            [
-              { id: "inline", name: "In the link", sub: "Recommended for small agents" },
-              { id: "url", name: "Hosted file", sub: "For larger agents you keep updated" },
-            ],
-            method,
-            (id) => setMethod(id as ShareMethod),
-          )}
+          <div className="u-group">
+            <span className="u-label">Delivery</span>
+            <div className="u-seg fill">
+              {DELIVERY_OPTIONS.map((option) => (
+                <button
+                  key={option.id}
+                  className={method === option.id ? "on" : ""}
+                  aria-pressed={method === option.id}
+                  onClick={() => setMethod(option.id)}
+                >
+                  {option.name}
+                </button>
+              ))}
+            </div>
+            <p className="u-hint">{DELIVERY_OPTIONS.find((option) => option.id === method)?.sub}</p>
+          </div>
 
           {method === "url" && (
             <div className="u-group">

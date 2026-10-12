@@ -14,14 +14,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// An AFM file is YAML frontmatter between --- fences followed by Markdown. A general highlighter
-// guesses which is which and gets `${env:...}` wrong, so this walks the file the way the format
-// defines it.
 
 export type TokenKind =
   | "plain"
   | "delimiter"
-  /** A top-level frontmatter key: the agent's own fields. */
   | "root-key"
   | "key"
   | "punct"
@@ -49,10 +45,8 @@ const VARIABLE = /\$\{[^}\n]*\}/g;
 
 const YAML = new RegExp(
   [
-    // A `#` only opens a comment after whitespace, so a URL fragment stays part of the URL.
     "(?<comment>(?:^|[ \\t])#.*)",
     "(?<variable>\\$\\{[^}\\n]*\\})",
-    // The `:` must be followed by a space or end of line, otherwise `https://x` reads as a key.
     "(?<key>^[ \\t]*(?:-[ \\t]+)?[A-Za-z_][A-Za-z0-9_.\\-]*(?=[ \\t]*:(?:[ \\t]|$)))",
     "(?<url>https?://\\S+)",
     "(?<string>\"(?:[^\"\\\\\\n]|\\\\.)*\"|'(?:[^'\\n]|'')*')",
@@ -71,7 +65,6 @@ const MARKDOWN = new RegExp(
     "(?<code>`[^`\\n]+`)",
     "(?<emphasis>\\*\\*[^*\\n]+\\*\\*|__[^_\\n]+__)",
     "(?<link>\\[[^\\]\\n]*\\]\\([^)\\n]*\\))",
-    // After emphasis, so `**bold**` is never read as two italic runs.
     "(?<italic>\\*[^*\\n]+\\*|(?<![A-Za-z0-9_])_[^_\\n]+_(?![A-Za-z0-9_]))",
     "(?<url>https?://\\S+)",
   ].join("|"),
@@ -83,10 +76,8 @@ const KEY_DASH = /^([ \t]*-[ \t]+)(.*)$/;
 function pushText(tokens: Token[], kind: TokenKind, text: string): void {
   if (text === "") return;
   if (kind === "key") {
-    // An unindented key is one of the agent's own fields; an indented one is detail under it.
     const nested = /^[ \t]/.test(text);
     const named: TokenKind = nested ? "key" : "root-key";
-    // A key matched under a list item carries the `- ` with it; the dash is punctuation.
     const dash = KEY_DASH.exec(text);
     if (dash !== null) {
       tokens.push({ kind: "punct", text: dash[1] ?? "" });
@@ -96,7 +87,6 @@ function pushText(tokens: Token[], kind: TokenKind, text: string): void {
     tokens.push({ kind: named, text });
     return;
   }
-  // `${env:KEY}` inside a quoted string keeps its own colour so it stands out.
   if (kind !== "string") {
     tokens.push({ kind, text });
     return;

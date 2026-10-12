@@ -148,7 +148,6 @@ async function extractPdfText(file: File): Promise<{ text: string; pages: number
 }
 
 export async function extractFile(file: File, path: string = file.name): Promise<ExtractResult> {
-  // The path is listed in the system prompt, so a line break in a file name must not add lines there.
   const cleanPath = path.replace(/[\u0000-\u001f\u007f\u0085\u2028\u2029]+/g, " ");
   if (file.size > MAX_FILE_BYTES) {
     return { ok: false, name: file.name, reason: `is larger than ${MAX_FILE_BYTES / (1024 * 1024)} MB` };
@@ -189,7 +188,6 @@ export async function extractFiles(collected: CollectedFile[]): Promise<BatchExt
 }
 
 export const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
-// A small cap keeps a turn's cost and latency predictable.
 export const MAX_IMAGES_PER_MESSAGE = 4;
 export const IMAGE_MEDIA_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
 export const IMAGE_ACCEPT = IMAGE_MEDIA_TYPES.join(",");
@@ -212,8 +210,6 @@ export interface ImagePickOutcome {
   skipped: { name: string; reason: string }[];
 }
 
-// `alreadyStaged` is how many images already wait to be sent, so the cap holds across several
-// picks.
 export async function pickImages(files: File[], alreadyStaged: number): Promise<ImagePickOutcome> {
   const attached: ImageAttachment[] = [];
   const skipped: { name: string; reason: string }[] = [];

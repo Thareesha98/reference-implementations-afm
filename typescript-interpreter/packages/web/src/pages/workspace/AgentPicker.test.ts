@@ -15,7 +15,7 @@
 // under the License.
 
 import { describe, it, expect } from "vitest";
-import { whenAgo } from "./AgentPicker";
+import { groupByRecency, shortAgo, whenAgo } from "./AgentPicker";
 
 const NOW = Date.UTC(2026, 8, 26, 12, 0, 0);
 const MINUTE = 60_000;
@@ -38,5 +38,51 @@ describe("whenAgo", () => {
     [40 * DAY, "40 days ago"],
   ])("says how long ago %i milliseconds was", (ago, words) => {
     expect(whenAgo(NOW - ago, NOW)).toBe(words);
+  });
+});
+
+describe("shortAgo", () => {
+  it.each([
+    [10_000, "now"],
+    [MINUTE, "1m"],
+    [45 * MINUTE, "45m"],
+    [HOUR, "1h"],
+    [20 * HOUR, "20h"],
+    [DAY - MINUTE, "23h"],
+    [DAY, "1d"],
+    [2 * DAY + 5 * HOUR, "2d"],
+    [37 * DAY, "37d"],
+  ])("writes %i milliseconds ago as %s", (ago, text) => {
+    expect(shortAgo(NOW - ago, NOW)).toBe(text);
+  });
+
+  it("does not go negative when the clock is behind", () => {
+    expect(shortAgo(NOW + HOUR, NOW)).toBe("now");
+  });
+});
+
+describe("groupByRecency", () => {
+  const at = (ago: number) => ({ updatedAt: NOW - ago });
+
+  it("puts the last day under Today and the rest under Earlier, keeping the order", () => {
+    const recent = [at(MINUTE), at(20 * HOUR)];
+    const old = [at(DAY), at(9 * DAY)];
+    expect(groupByRecency([...recent, ...old], NOW)).toEqual([
+      { label: "Today", agents: recent },
+      { label: "Earlier", agents: old },
+    ]);
+  });
+
+  it("leaves out a group with nothing in it", () => {
+    expect(groupByRecency([at(HOUR)], NOW).map((group) => group.label)).toEqual(["Today"]);
+    expect(groupByRecency([at(3 * DAY)], NOW).map((group) => group.label)).toEqual(["Earlier"]);
+    expect(groupByRecency([], NOW)).toEqual([]);
+  });
+
+  it("agrees with the age written beside each agent", () => {
+    for (const ago of [MINUTE, 59 * MINUTE, 23 * HOUR + 59 * MINUTE, DAY, 2 * DAY]) {
+      const [group] = groupByRecency([at(ago)], NOW);
+      expect(group!.label === "Today").toBe(!shortAgo(NOW - ago, NOW).endsWith("d"));
+    }
   });
 });

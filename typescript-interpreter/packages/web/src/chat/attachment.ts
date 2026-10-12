@@ -37,7 +37,6 @@ export function fileExtension(name: string): string {
   return dot === -1 ? "" : name.slice(dot + 1).toLowerCase();
 }
 
-// Older saved conversations hold a plain name list; reopening one must not blank what was attached.
 export function attachedFilesOf(message: AttachmentMessage): AttachedFile[] {
   if (Array.isArray(message.files)) return message.files;
   const legacy = (message as { names?: unknown }).names;
@@ -45,7 +44,6 @@ export function attachedFilesOf(message: AttachmentMessage): AttachedFile[] {
   return legacy.filter((name): name is string => typeof name === "string").map((name) => ({ name }));
 }
 
-// The worker holds a file under its path; older saved conversations only had a name.
 export function attachedFileKey(file: AttachedFile): string {
   return file.path ?? file.name;
 }

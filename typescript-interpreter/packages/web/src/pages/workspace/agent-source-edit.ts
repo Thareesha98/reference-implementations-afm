@@ -28,8 +28,6 @@ function frontmatterLines(content: string): string[] | null {
   return end === null ? null : content.slice(0, end).split("\n");
 }
 
-// Runs `edit` on the frontmatter's lines and puts the result back, so nothing outside the fences
-// is touched. `edit` returns null to leave the file exactly as it was.
 function editFrontmatter(content: string, edit: (lines: string[]) => string[] | null): string {
   const end = frontmatterEnd(content);
   if (end === null) return content;
@@ -50,8 +48,6 @@ function keyIndent(lines: string[], block: Span, fallback: string): string {
   return indentOf(lines.slice(block.start + 1, block.end).find((line) => line.trim() !== ""), fallback);
 }
 
-// Where a block ends: the first non-blank line indented no deeper than the line that opened it.
-// Blank lines inside a block belong to it.
 function blockEnd(lines: string[], from: number, parentIndent: number, limit = lines.length): number {
   let end = from;
   while (end < limit && (lines[end]?.trim() === "" || indentOf(lines[end]).length > parentIndent)) end += 1;
@@ -66,10 +62,6 @@ function withValue(line: string, value: string): string {
   return `${line.slice(0, line.indexOf(":"))}: ${value}`;
 }
 
-/**
- * Everything below the frontmatter: the Role, the Instructions and other prose. It becomes the
- * agent's system prompt.
- */
 export function agentBrief(content: string): string {
   const end = frontmatterEnd(content);
   return (end === null ? content : content.slice(end)).trim();
@@ -79,10 +71,6 @@ export function envSecretName(value: string): string {
   return /^\$\{env:([^}]+)\}$/.exec(value.trim())?.[1]?.trim() ?? "";
 }
 
-/**
- * One YAML scalar as written. Double-quoted follows JSON escapes closely enough for JSON.parse;
- * single-quoted escapes a quote by doubling it.
- */
 function unquoteScalar(raw: string): string {
   if (raw.length >= 2 && raw.startsWith("'") && raw.endsWith("'")) {
     return raw.slice(1, -1).replace(/''/g, "'");
@@ -147,15 +135,12 @@ const MODEL_LINE = /^model:[ \t]*$/;
 const BLOCK_LINE = /^[ \t]/;
 
 function quoteIfNeeded(value: string): string {
-  // An empty value is written as `""`; a bare `name:` is YAML null and fails validation.
   if (value === "") return '""';
   return value.includes(":") || value.includes("#") ? JSON.stringify(value) : value;
 }
 
 function modelBlock(lines: string[]): Span | null {
   const start = lines.findIndex((line) => MODEL_LINE.test(line));
-  // `model: gpt-4o` on one line is not the nested mapping these controls edit; leave it for Raw
-  // mode.
   if (start === -1) return null;
   let end = start + 1;
   while (end < lines.length && (lines[end] === "" || BLOCK_LINE.test(lines[end] ?? ""))) end += 1;
@@ -163,8 +148,6 @@ function modelBlock(lines: string[]): Span | null {
 }
 
 function fieldLine(lines: string[], block: Span, field: ModelField): number {
-  // Anchored to the block's own indent so a deeper key, such as one under `authentication:`, is
-  // never mistaken for the model's own.
   const pattern = new RegExp(`^${keyIndent(lines, block, "  ")}${field}:`);
   for (let i = block.start + 1; i < block.end; i += 1) {
     if (pattern.test(lines[i] ?? "")) return i;
@@ -181,8 +164,6 @@ export function getModelField(content: string, field: ModelField): string {
   return index === -1 ? "" : unquoteScalar(valueOf(lines[index] ?? ""));
 }
 
-// Rewrites one scalar in the top-level `model:` mapping, creating the mapping or key if missing.
-// Only the target line changes, so comments and key order survive.
 export function setModelField(content: string, field: ModelField, value: string): string {
   const escaped = quoteIfNeeded(value);
   return editFrontmatter(content, (lines) => {
@@ -204,8 +185,6 @@ export function setModelField(content: string, field: ModelField, value: string)
   });
 }
 
-// `api_key` sits under `model.authentication`, one level deeper than fieldLine's block indent, so
-// it has its own lookup.
 function apiKeyLine(lines: string[], block: Span): number {
   let authIndent: string | null = null;
   for (let i = block.start + 1; i < block.end; i += 1) {
@@ -231,15 +210,11 @@ export function getModelApiKey(content: string): string {
   return index === -1 ? "" : unquoteScalar(valueOf(lines[index] ?? ""));
 }
 
-// Rewrites `model.authentication.api_key` in place, keeping the author's quoting. Returns the
-// content untouched when there is no such line instead of inventing an authentication block.
 export function setModelApiKey(content: string, value: string): string {
   return editFrontmatter(content, (lines) => {
     const block = modelBlock(lines);
     if (block === null) return null;
     const index = apiKeyLine(lines, block);
-    // No key line yet, so create it: writing nothing would make choosing a provider look like it
-    // worked while the file pointed at no key.
     if (index === -1) {
       const indent = keyIndent(lines, block, "  ");
       const authAt = findAuthenticationLine(lines, block);
@@ -276,10 +251,6 @@ function sectionBounds(content: string, heading: string): Span | null {
   return { start: bodyStart, end: bodyEnd };
 }
 
-/**
- * Only blank lines between sections are stripped, never spaces: these two functions round-trip on
- * every keystroke, so trimming would delete a just-typed space.
- */
 export function getSection(content: string, heading: string): string {
   const bounds = sectionBounds(content, heading);
   if (bounds === null) return "";
@@ -288,8 +259,6 @@ export function getSection(content: string, heading: string): string {
 
 export function setSection(content: string, heading: string, body: string): string {
   const bounds = sectionBounds(content, heading);
-  // A valid file can lack the heading being written into; returning the content unchanged would
-  // make the field look broken.
   if (bounds === null) {
     return `${content.replace(/\n+$/, "")}\n\n# ${heading}\n\n${body}\n`;
   }
@@ -298,8 +267,6 @@ export function setSection(content: string, heading: string, body: string): stri
   return `${before}\n${body}\n\n${after.replace(/^\n+/, "")}`;
 }
 
-// Tool selection lives in `tool_filter` on the server that owns the tools, so it survives a reload
-// and travels with the shared file.
 
 function mcpServerRange(lines: string[], serverName: string): (Span & { indent: string }) | null {
   const toolsAt = lines.findIndex((line) => /^tools:[ \t]*$/.test(line));
@@ -313,7 +280,6 @@ function mcpServerRange(lines: string[], serverName: string): (Span & { indent: 
     const item = /^([ \t]*)-[ \t]+name:[ \t]*"?([^"\n]*?)"?[ \t]*$/.exec(line);
     if (item === null) continue;
     if (start !== -1) {
-      // The next server starts here, so ours ends on the previous line.
       if ((item[1] ?? "").length <= itemIndent.length) return { start, end: i, indent: itemIndent };
       continue;
     }
@@ -326,10 +292,6 @@ function mcpServerRange(lines: string[], serverName: string): (Span & { indent: 
   return { start, end: blockEnd(lines, start + 1, itemIndent.length), indent: itemIndent };
 }
 
-/**
- * Replaces the server's `tool_filter` with an explicit allow-list and the tools turned off, or
- * removes it when `allow` is null. Only that block changes.
- */
 export function setServerToolFilter(content: string, serverName: string, allow: string[] | null, deny: string[] = []): string {
   return editFrontmatter(content, (lines) => {
     const range = mcpServerRange(lines, serverName);
@@ -342,7 +304,6 @@ export function setServerToolFilter(content: string, serverName: string, allow: 
       if (filterPattern.test(lines[i] ?? "")) filterAt = i;
     }
 
-    // An empty list is written inline: `allow:` with no items is YAML null, which fails validation.
     const list = (key: string, names: string[]) =>
       names.length === 0 ? [`${prop}  ${key}: []`] : [`${prop}  ${key}:`, ...names.map((name) => `${prop}    - ${name}`)];
     const block = allow === null ? [] : [`${prop}tool_filter:`, ...list("allow", allow), ...(deny.length === 0 ? [] : list("deny", deny))];
@@ -360,8 +321,6 @@ export interface NewMcpServer {
 }
 
 function yamlValue(value: string): string {
-  // A bare value is fine unless YAML would read it as something else. URLs contain ':' but not ':
-  // ', so they stay bare.
   return /:\s|^\s|\s$|^[[{>|*&!%@`'"]/.test(value) || value === "" ? JSON.stringify(value) : value;
 }
 
@@ -381,10 +340,6 @@ function serverLines(server: NewMcpServer, indent: string): string[] {
   return lines;
 }
 
-/**
- * Appends a server to `tools.mcp`, creating either key when missing. Written as lines so comments,
- * key order and formatting elsewhere survive.
- */
 export function addMcpServer(content: string, server: NewMcpServer): string {
   return editFrontmatter(content, (lines) => {
     const toolsAt = lines.findIndex((line) => /^tools:[ \t]*$/.test(line));
@@ -429,10 +384,6 @@ export function removeMcpServer(content: string, serverName: string): string {
   });
 }
 
-/**
- * A key with nothing under it is YAML null and fails validation, so one that lost its last child is
- * removed.
- */
 function dropEmptyToolsKeys(lines: string[]): string[] {
   const hasChild = (at: number): boolean => {
     const indent = indentOf(lines[at]).length;

@@ -14,10 +14,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Typechecks every package, not just the engine. `npm run typecheck` used to run one tsconfig
-// out of seven, so six packages could be broken and the command still said nothing.
-//
-// The list is discovered rather than written down: a new package is covered the day it exists.
 import { spawnSync } from "node:child_process";
 import { readdirSync, existsSync } from "node:fs";
 import { join, relative } from "node:path";

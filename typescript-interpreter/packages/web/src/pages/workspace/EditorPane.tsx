@@ -35,12 +35,9 @@ interface EditableProps {
 
 interface Props extends EditableProps {
   activity: AgentActivity;
-  /** Servers heard from, and ones tried and not reached. */
   reach: ServerReach;
-  /* The panels these open live in the side window; the stage only says which one. */
   onOpenModel: () => void;
   onOpenServer: (name: string | null) => void;
-  /** Bumped when something outside asks to see the file itself, such as a problem in it. */
   showRaw?: number;
   onOpenPanel?: (panel: "model" | "tools") => void;
 }
@@ -57,8 +54,6 @@ function agentFilename(content: string): string | undefined {
 
 export function EditorPane({ content, onChange, activity, reach, onOpenModel, onOpenServer, showRaw = 0, onOpenPanel }: Props) {
   const [mode, setMode] = useState<EditorMode>("simple");
-  // Not on mount: only a later request switches the view, so opening an agent with a problem still
-  // starts on the diagram.
   const firstRaw = useRef(showRaw);
   useEffect(() => {
     if (showRaw !== firstRaw.current) setMode("raw");
@@ -109,8 +104,6 @@ function RawEditor({
   onChange,
   issues,
 }: EditableProps & { issues: ReturnType<typeof collectAfmIssues> }) {
-  // Warnings still let the file run, so only an error marks its line. A line the schema could not
-  // pin down (line: null) has nothing to highlight.
   const errorLines = new Set(
     issues.filter((issue) => issue.severity === "error" && issue.line !== null).map((issue) => issue.line as number),
   );
@@ -167,7 +160,6 @@ function SimpleEditor({
             </svg>
           </span>
           <h4>The settings at the top can&apos;t be read</h4>
-          {}
           <p>Something in the block above <code>---</code> is not valid, so the diagram cannot be drawn from it. The rest of your writing is untouched.</p>
         </div>
         <FileCheckPanel issues={issues} plain onFix={onFix} />

@@ -20,8 +20,6 @@ import { Composer } from "../../chat/Composer";
 import { PermissionRequestModal } from "../../overlay/PermissionRequestModal";
 import type { useStandaloneSession } from "../../worker-client/useStandaloneSession";
 
-// Composer's own fallback ("Load an agent first...") reads as a failed click once an agent exists, so
-// each disabled status short of "ready" says what is happening instead.
 const WAITING_PLACEHOLDER: Partial<Record<AgentStatus, string>> = {
   "no-agent": "Press Run to start…",
   connecting: "Loading the agent…",
@@ -33,7 +31,6 @@ interface Props {
   serverNameByUrl: Map<string, string>;
   onReplaceKey: () => void;
   onRetry: () => void;
-  /** What the agent says about itself, for the opening state. */
   description?: string;
   role?: string;
   iconUrl?: string;
@@ -54,8 +51,6 @@ export function ChatPane({
   return (
     <div className="xc">
       {state.status === "no-agent" ? (
-        // The ways to start an agent live in the drawer; repeating them here showed the same
-        // buttons twice.
         <div className="u-empty">
           <span className="u-empty-ico" aria-hidden="true">
             <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"

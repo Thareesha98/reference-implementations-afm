@@ -21,10 +21,6 @@ import { enrollPasskey } from "./enroll";
 import { unlockWithPasskey } from "./unlock";
 import { knownCredentialId, rememberCredentialId, forgetCredentialId } from "./credential";
 
-// Everything about protecting saved secrets behind one passkey. Sealing, unlocking and
-// consolidating only derive keys and hand them to the worker, which alone holds the plaintext.
-// Ceremonies must run straight from a click, and the passkey's result is kept for the tab so
-// nothing asks twice.
 
 type Post = (message: ClientMessage) => void;
 
@@ -55,7 +51,6 @@ async function sealedEntries(): Promise<SealedEntry[]> {
   return entries;
 }
 
-// The distinct passkeys some blobs were sealed under, normally one.
 function distinctCredentials(entries: SealedEntry[]): Uint8Array<ArrayBuffer>[] {
   const ids: Uint8Array<ArrayBuffer>[] = [];
   for (const { blob } of entries) {
@@ -73,9 +68,6 @@ async function ceremony(credentialId: Uint8Array<ArrayBuffer>): Promise<Opened> 
   return { credentialId, prf: await importPrf(await unlockWithPasskey(credentialId)) };
 }
 
-// The credential this browser saves everything behind. A new one is enrolled only when none is
-// known, or the remembered one is gone and nothing is sealed under it; otherwise sealed keys would
-// be orphaned.
 async function credentialMaterial(): Promise<Opened> {
   if (opened !== null) return opened;
   const existing = knownCredentialId();
@@ -96,8 +88,6 @@ function primaryOf(all: Opened[]): Opened | undefined {
   return all.find((credential) => known !== null && sameBytes(credential.credentialId, known)) ?? all[0];
 }
 
-// When keys ended up under several passkeys, the worker re-seals them under one so the next reload
-// asks once.
 async function consolidate(post: Post, entries: SealedEntry[], all: Opened[]): Promise<void> {
   const primary = primaryOf(all);
   if (primary === undefined) return;
@@ -117,16 +107,11 @@ async function consolidate(post: Post, entries: SealedEntry[], all: Opened[]): P
         salt,
       });
     } catch {
-      // Leave this one under its own passkey rather than risk losing it.
     }
   }
   rememberCredentialId(primary.credentialId);
 }
 
-/**
- * Saves `name` behind the device passkey. A cancelled or unsupported ceremony leaves the key
- * working for this tab instead of blocking the save.
- */
 export async function seal(post: Post, name: string): Promise<boolean> {
   try {
     const { credentialId, prf } = await credentialMaterial();
@@ -139,7 +124,6 @@ export async function seal(post: Post, name: string): Promise<boolean> {
   }
 }
 
-/** Opens every sealed secret, with one ceremony per distinct passkey. */
 export async function unlockAll(post: Post): Promise<boolean> {
   const entries = await sealedEntries();
   const all: Opened[] = [];

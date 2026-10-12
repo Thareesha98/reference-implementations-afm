@@ -16,7 +16,6 @@
 
 import { AgentAvatar } from "./AgentAvatar";
 
-/** The agent, once, at the top of the thread; alignment already says who is speaking. */
 export function ThreadHead({ name, iconUrl = "" }: { name: string; iconUrl?: string }) {
   return (
     <div className="xc-hero">

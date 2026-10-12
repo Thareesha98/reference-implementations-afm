@@ -20,8 +20,6 @@ import { collectFromDataTransfer, collectFromFileList, supportsDirectoryDrop, pi
 import type { CollectedFile } from "../attachments";
 import type { ImageAttachment } from "../protocol";
 import { useVoiceInput } from "./voice";
-import { BudgetMeter } from "./BudgetMeter";
-import type { BudgetSnapshot } from "../chat-state";
 import { grownHeight } from "./composer-size";
 
 export interface AttachOutcome {
@@ -36,9 +34,6 @@ interface Props {
   streaming: boolean;
   disabled: boolean;
   placeholder?: string;
-  seedText?: string;
-  seedNonce?: number;
-  budget?: BudgetSnapshot | null;
 }
 
 function feedbackLine(attached: string[], skipped: number, noun: string): string | null {
@@ -55,9 +50,6 @@ export function Composer({
   streaming,
   disabled,
   placeholder,
-  seedText,
-  seedNonce,
-  budget,
 }: Props) {
   const [text, setText] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -69,29 +61,17 @@ export function Composer({
   const [attaching, setAttaching] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
-  // Staged for the turn about to be sent; cleared when it sends.
   const [images, setImages] = useState<ImageAttachment[]>([]);
 
-  useEffect(() => {
-    if (seedNonce !== undefined && seedNonce > 0) {
-      setText(seedText ?? "");
-      ref.current?.focus();
-    }
-  }, [seedNonce, seedText]);
-
-  // Also grows for text that arrives without a change event, such as a dictated transcript or a
-  // seeded draft.
   useEffect(() => {
     if (ref.current) grow(ref.current);
   }, [text]);
 
-  // Measure again once the box has a width; a collapsed pane is 0px wide on first render.
   useEffect(() => {
     const el = ref.current;
     if (el === null) return;
     let lastWidth = el.clientWidth;
     const observer = new ResizeObserver(() => {
-      // Our own height change fires this too; only a new width needs measuring.
       if (el.clientWidth === lastWidth) return;
       lastWidth = el.clientWidth;
       grow(el);
@@ -100,7 +80,6 @@ export function Composer({
     return () => observer.disconnect();
   }, []);
 
-  // Text in the box when dictation started; the live transcript replaces what follows it.
   const voiceBaseTextRef = useRef("");
 
   const voice = useVoiceInput((liveTranscript) => {
@@ -118,7 +97,6 @@ export function Composer({
     ref.current?.focus();
   }
 
-  // Close the attach menu on an outside click or Escape.
   useEffect(() => {
     if (!attachMenuOpen) return;
 
@@ -187,7 +165,6 @@ export function Composer({
     if (message !== null) setFeedback(message);
   }
 
-  // Shared by the files and folder inputs; a folder pick is a flat FileList.
   function onFilesPicked(event: React.ChangeEvent<HTMLInputElement>) {
     const list = event.target.files;
     if (list !== null) void runAttach(collectFromFileList(list).files);
@@ -225,7 +202,6 @@ export function Composer({
         void runAttach(result.files.length > 0 ? result.files : collectFromFileList(flatFiles).files);
       });
     } else {
-      // A flat drop can mix images and documents; each goes to the pipeline that accepts it.
       const collected = collectFromFileList(flatFiles).files;
       const imageFiles = collected.filter((c) => isSupportedImageFile(c.file));
       const otherFiles = collected.filter((c) => !isSupportedImageFile(c.file));
@@ -242,16 +218,11 @@ export function Composer({
 
   return (
     <div
-      className={`xc-dock ${budget !== undefined ? "has-meta-row" : ""}`}
+      className="xc-dock"
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
     >
-      {budget !== undefined && (
-        <div className="composer-meta-row">
-          {budget !== null && <BudgetMeter budget={budget} live={streaming} />}
-        </div>
-      )}
       {dragOver && (
         <div className="composer-drop-overlay">
           <span>Drop to attach (PDF, Markdown, text, or an image)</span>

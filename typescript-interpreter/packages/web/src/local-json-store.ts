@@ -14,9 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-/** Lists this browser keeps in localStorage are read and written the same way, shared here. */
 
-/** Reads one stored string; storage that is blocked or unavailable reads as nothing stored. */
 export function loadText(key: string): string | null {
   try {
     return localStorage.getItem(key);
@@ -25,10 +23,6 @@ export function loadText(key: string): string | null {
   }
 }
 
-/**
- * Reports whether the write landed: storage can refuse it (full or blocked), and pretending
- * otherwise turns "Saved" into a lie.
- */
 export function saveText(key: string, value: string): boolean {
   try {
     localStorage.setItem(key, value);
@@ -38,7 +32,6 @@ export function saveText(key: string, value: string): boolean {
   }
 }
 
-/** Anything unreadable - missing, corrupt, or not an array - counts as empty rather than throwing. */
 export function loadJsonArray<T>(key: string): T[] {
   const raw = loadText(key);
   if (raw === null) return [];

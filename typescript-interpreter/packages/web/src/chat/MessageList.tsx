@@ -25,7 +25,7 @@ import { attachedFilesOf, attachedFileKey, attachmentBadge, describeAttachment }
 interface Props {
   messages: UiMessage[];
   streaming: boolean;
-  status: AgentStatus;
+  status: Exclude<AgentStatus, "no-agent">;
   agentName: string;
   iconUrl?: string;
   loadSteps: LoadStep[];
@@ -35,7 +35,6 @@ interface Props {
   onDetachFile?: (messageId: number, key: string) => void;
   description?: string;
   role?: string;
-  /** Only offered before the conversation starts. */
   onAsk?: (question: string) => void;
   onReplaceKey?: () => void;
   serverOf?: (toolName: string) => string | undefined;
@@ -51,7 +50,6 @@ function lastIndexOfKind(messages: UiMessage[], kind: UiMessage["kind"]): number
   return -1;
 }
 
-/** Groups each answer with the tool calls behind it, drawn under the answer as a footnote. */
 function toolsBeforeAnswers(messages: UiMessage[]): Map<number, ToolMessage[]> {
   const attached = new Map<number, ToolMessage[]>();
   let pending: ToolMessage[] = [];
@@ -108,13 +106,11 @@ export function MessageList(props: Props) {
   const lastIndex = messages.length - 1;
   const lastAssistant = lastIndexOfKind(messages, "assistant");
   const footnotes = toolsBeforeAnswers(messages);
-  // A call still running has no answer to sit under yet, so it stands on its own line.
   const openTools = messages.filter(
     (message): message is ToolMessage =>
       message.kind === "tool" && message.status === "running" && !isAttached(message, footnotes),
   );
   const canAct = status === "ready";
-  // Removing a file mid-turn would fail the tool call, so removal waits until the agent is idle.
   const canDetach = onDetachFile !== undefined && !streaming;
   const waiting = streaming && messages[lastIndex]?.kind !== "assistant" && openTools.length === 0;
 

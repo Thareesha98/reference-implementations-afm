@@ -38,6 +38,14 @@ function chat(status: AgentStatus): string {
 }
 
 describe("the message box before an agent is ready", () => {
+  it("owns the no-agent presentation instead of the disconnected Test prompt", () => {
+    const html = chat("no-agent");
+    expect(html).toContain("Not started yet");
+    expect(html).toContain("Press <strong>Run</strong>");
+    expect(html).not.toContain("Not tested yet");
+    expect(html).not.toContain("Test this agent");
+  });
+
   it.each([
     ["no-agent", "Press Run to start…"],
     ["connecting", "Loading the agent…"],

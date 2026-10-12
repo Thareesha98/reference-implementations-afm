@@ -28,7 +28,6 @@ import { seal, unlockAll } from "../passkey/vault";
 import { createOAuthSignIns, type OAuthSignIns } from "../oauth-signin";
 
 export interface SessionHooks {
-  agentId?: () => string | null;
   permissionSeed?: () => string[];
   onRememberPermission?: (request: PendingPermission, allow: boolean) => void;
 }
@@ -42,7 +41,6 @@ export interface LoadOptions {
   carryConversation?: boolean;
 }
 
-/** Marks where the agent changed, so the thread above does not look like this agent's work. */
 function freshStartNotice(messages: UiMessage[]): UiMessage {
   const highest = messages.reduce((max, message) => Math.max(max, message.id), 0);
   return {
@@ -54,12 +52,10 @@ function freshStartNotice(messages: UiMessage[]): UiMessage {
   };
 }
 
-/** Only reached if the worker never answers; it has its own, shorter limit. */
 const PROBE_DEADLINE_MS = 30_000;
 
 export function useStandaloneSession(hooks: SessionHooks = {}) {
   const [state, dispatch] = useReducer(chatReducer, initialChatState);
-  // Held in a ref so callbacks close over fresh state without rebuilding the worker.
   const hooksRef = useRef(hooks);
   hooksRef.current = hooks;
   const workerRef = useRef<Worker | null>(null);
@@ -166,10 +162,6 @@ export function useStandaloneSession(hooks: SessionHooks = {}) {
     post({ type: "detach-file", path: key });
   }
 
-  /**
-   * Replaces the last answer: the reducer drops it from the transcript and the worker from the
-   * history, so the model is asked the same question against the same context.
-   */
   function regenerate(): void {
     dispatch({ type: "regenerate-start" });
     post({ type: "regenerate" });
@@ -184,7 +176,6 @@ export function useStandaloneSession(hooks: SessionHooks = {}) {
     post({ type: "send", text, images, keep });
   }
 
-  /** Puts the pane back to "no agent yet" when the editor moves to a different agent. */
   function clearAgent(): void {
     dispatch({ type: "agent-cleared" });
     post({ type: "reset-chat" });
@@ -194,16 +185,11 @@ export function useStandaloneSession(hooks: SessionHooks = {}) {
     post({ type: "remove-secret", name });
   }
 
-  /**
-   * Hands the worker a typed value, approved for `host` when it is a server's. Optionally seals it
-   * behind the device passkey; a failed or cancelled seal leaves it working for this tab.
-   */
   async function storeSecret(name: string, value: string, keep: boolean, host?: string): Promise<boolean> {
     post({ type: "set-secret", name, value, host });
     return keep ? rememberWithPasskey(name) : false;
   }
 
-  // Seal a secret the worker already holds behind the device passkey. Must run inside the click.
   function rememberWithPasskey(name: string): Promise<boolean> {
     return seal(post, name);
   }
@@ -212,18 +198,14 @@ export function useStandaloneSession(hooks: SessionHooks = {}) {
     post({ type: "passkey-forget", name });
   }
 
-  // One ceremony opens every sealed key (see passkey/vault). Must run inside the click.
   function openKeys(): Promise<boolean> {
     return unlockAll(post);
   }
 
-  // Opens the sign-in popup on this click and resolves true once the worker has the tokens.
   function startOAuthSignIn(provider: OAuthProviderRef, remember = false): Promise<boolean> {
     return oauth.start(provider, remember);
   }
 
-  // Drops the worker's session for this server (access and refresh tokens). Never touches the agent
-  // file.
   function signOutOAuth(provider: OAuthProviderRef): void {
     post({ type: "oauth-sign-out", provider });
   }
@@ -232,8 +214,6 @@ export function useStandaloneSession(hooks: SessionHooks = {}) {
     const request = state.pendingPermission;
     dispatch({ type: "permission-dismissed" });
     post({ type: "permission-response", id, decision: allow ? "allow" : "deny", remember });
-    // The worker forgets on every load; recording it here keeps "don't ask again" across loads in
-    // this tab.
     if (remember && request !== null && request.id === id) {
       hooksRef.current.onRememberPermission?.(request, allow);
     }
@@ -247,8 +227,6 @@ export function useStandaloneSession(hooks: SessionHooks = {}) {
   function probe(message: (id: string) => ClientMessage): Promise<ProbeResult> {
     const id = crypto.randomUUID();
     return new Promise((resolve) => {
-      // The worker gives up first and says why; this is only for when it never answers, since a
-      // spinner with nothing behind it is the worst outcome.
       const deadline = window.setTimeout(() => {
         probeWaitersRef.current.delete(id);
         resolve({ failure: { kind: "slow", message: "Nothing answered in time." } });
@@ -269,7 +247,6 @@ export function useStandaloneSession(hooks: SessionHooks = {}) {
     return probe((id) => ({ type: "probe-model", id, model }));
   }
 
-  /** Drops the written file without using it, so the review screen closes. */
   function dismissDraft(): void {
     dispatch({ type: "draft-dismissed" });
   }

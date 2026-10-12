@@ -21,14 +21,8 @@ type ToolMessage = Extract<UiMessage, { kind: "tool" }>;
 
 const clip = (text: string) => (text.length > 240 ? `${text.slice(0, 240)}…` : text);
 
-/**
- * What the agent did, as a footnote that opens to show the call. The duration is measured here
- * because the transcript carries none.
- */
 export function ToolFootnote({ tool, server }: { tool: ToolMessage; server?: string }) {
   const startedAt = useRef(Date.now());
-  // A call already finished on mount came from a stored transcript and has no recorded duration, so
-  // it gets no number.
   const watched = useRef(tool.status === "running");
   const [elapsed, setElapsed] = useState<number | null>(null);
   const [open, setOpen] = useState(false);

@@ -46,8 +46,6 @@ You are **Paper Navigator**, a research assistant.
 
 describe("highlightAfm", () => {
   it("never loses or duplicates a character", () => {
-    // The highlighted layer sits directly behind the textarea, so any drift in the text
-    // itself would show up as the caret landing on the wrong character.
     expect(
       highlightAfm(SAMPLE)
         .map((token) => token.text)
@@ -74,9 +72,7 @@ describe("highlightAfm", () => {
     expect(kindOf(tokens, "model")).toBe("root-key");
     expect(kindOf(tokens, "  provider")).toBe("key");
     expect(kindOf(tokens, "    api_key")).toBe("key");
-    // The same `name` appears at the top level and under a list item; they read differently.
     expect(kindOf(tokens, "name")).toBe("root-key");
-    // A key under a list item keeps its `- ` as punctuation rather than colouring it as a key.
     const dash = tokens.findIndex((token) => token.kind === "punct" && token.text === "    - ");
     expect(dash).toBeGreaterThan(-1);
     expect(tokens[dash + 1]).toEqual({ kind: "key", text: "name" });

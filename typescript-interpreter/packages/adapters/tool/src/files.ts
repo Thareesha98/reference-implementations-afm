@@ -58,8 +58,6 @@ export function readFileText(path: string, files: Map<string, FileInfo>, offset 
   if (offset < 0 || offset >= info.text.length) {
     throw new FileToolError(`offset ${offset} is out of range - '${path}' is ${info.text.length} characters long`);
   }
-  // A limit below 1 would read nothing yet ask the model to call again at the same offset, so it is
-  // rejected.
   const size = Math.floor(limit);
   if (!Number.isFinite(size) || size < 1) {
     throw new FileToolError(`limit must be a positive number of characters - got ${limit}`);
@@ -102,7 +100,6 @@ export function searchFilesText(query: string, files: Map<string, FileInfo>): st
   if (lines.length === 0) {
     return `No matches found for "${trimmed}".`;
   }
-  // Say when the list is capped, or the model reads it as the full total.
   const header = truncated
     ? `First ${lines.length} matches for "${trimmed}" (there are more - narrow the query to see the rest):`
     : `${lines.length} match(es) for "${trimmed}":`;

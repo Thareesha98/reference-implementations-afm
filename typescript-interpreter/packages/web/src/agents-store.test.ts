@@ -15,7 +15,7 @@
 // under the License.
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { clear, findAgent, loadAgents, removeAgent, saveAgent } from "./agents-store";
+import { findAgent, loadAgents, removeAgent, saveAgent } from "./agents-store";
 
 function memoryStorage() {
   const map = new Map<string, string>();
@@ -73,9 +73,9 @@ describe("the agents library", () => {
     expect(loadAgents()).toEqual([keep]);
   });
 
-  it("clears the library", () => {
-    saveAgent(draft("One"));
-    expect(clear()).toEqual([]);
+  it("leaves an empty library when its last agent is removed", () => {
+    const saved = saveAgent(draft("One")).saved;
+    expect(removeAgent(saved.id)).toEqual([]);
     expect(loadAgents()).toEqual([]);
   });
 

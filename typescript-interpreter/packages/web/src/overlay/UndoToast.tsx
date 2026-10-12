@@ -21,11 +21,9 @@ interface Props {
   actionLabel?: string;
   onAction: () => void;
   onDismiss: () => void;
-  /** How long the way back stays available. */
   ms?: number;
 }
 
-/** Says what happened and offers a way back instead of asking first. */
 export function UndoToast({ message, actionLabel = "Undo", onAction, onDismiss, ms = 7000 }: Props) {
   useEffect(() => {
     const timer = window.setTimeout(onDismiss, ms);

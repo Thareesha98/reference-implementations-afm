@@ -19,16 +19,9 @@ import type { ReactNode } from "react";
 interface Props {
   title: string;
   onClose: () => void;
-  /** Chat only: hands the conversation the whole window. */
   onExpand?: () => void;
-  /**
-   * Stacked over the conversation rather than replacing it, so the chat keeps its scroll position
-   * and half-typed message.
-   */
   over?: boolean;
-  /** The panel supplies its own body and foot. */
   flush?: boolean;
-  /** No title bar: the heading and the close button float over the content. */
   floating?: boolean;
   heading?: ReactNode;
   children: ReactNode;
@@ -48,7 +41,6 @@ function Ico({ path, label, onClick }: { path: string; label: string; onClick: (
 const EXPAND = "M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7";
 const CLOSE = "M18 6L6 18M6 6l12 12";
 
-/** One surface in the side window: what it is, a way out, and the body. */
 export function SidePane({ title, heading, onClose, onExpand, over = false, flush = false, floating = false, children }: Props) {
   return (
     <section className={`u-panel ${over ? "is-over panel-slide-in" : ""} ${floating ? "is-floating" : ""}`} aria-label={title}>

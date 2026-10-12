@@ -87,7 +87,6 @@ describe("searchDirectory", () => {
 const REDIRECT_URI = "http://localhost:5173/";
 const CIMD_CLIENT_ID = "https://afm.example.com/oauth/client-metadata.json";
 
-// Real traces, captured against mcp.linear.app on 2026-09-01.
 const LINEAR_CHALLENGE =
   'Bearer realm="OAuth", resource_metadata="https://mcp.linear.app/.well-known/oauth-protected-resource/mcp", error="invalid_token", error_description="Missing or invalid access token"';
 const LINEAR_PRM = {
@@ -142,8 +141,6 @@ describe("resolveMcpServerAuth", () => {
       authorizeUrl: "https://mcp.linear.app/authorize",
       tokenUrl: "https://mcp.linear.app/token",
       clientId: CIMD_CLIENT_ID,
-      // Linear's real 401 sends no scope hint of its own, so this falls back to the PRM's
-      // scopes_supported - covered on its own in the next test.
       scopes: ["read", "write"],
     });
     expect(requested).not.toContain("https://mcp.linear.app/register");
@@ -278,10 +275,6 @@ describe("resolveMcpServerAuth", () => {
     expect(result?.clientId).toBe("");
   });
 
-  // Real trace, captured against mcp.atlassian.com on 2026-09-01: its 401 carries a
-  // WWW-Authenticate challenge with no resource_metadata param at all, and it serves no
-  // Protected Resource Metadata document at either well-known candidate - but it acts as its
-  // own authorization server, publishing valid RFC 8414 metadata at its own root well-known.
   it("falls back to the server's own origin as its authorization server when it publishes no PRM at all - Atlassian's real shape", async () => {
     const { fn, requested } = routedFetch({
       "https://mcp.atlassian.com/v1/mcp": {
@@ -309,8 +302,6 @@ describe("resolveMcpServerAuth", () => {
       clientId: "atlassian-dcr-client",
       scopes: undefined,
     });
-    // Never guesses a path-suffixed well-known on the resource's own origin for this fallback -
-    // that already 404s for Atlassian (checked live) and only the bare-root document is real.
     expect(requested).toContain("https://mcp.atlassian.com/.well-known/oauth-authorization-server");
   });
 

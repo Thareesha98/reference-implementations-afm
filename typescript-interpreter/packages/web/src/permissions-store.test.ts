@@ -50,8 +50,6 @@ describe("grantsToRevoke", () => {
 });
 
 describe("permissionScopeFor", () => {
-  // Choosing tools writes tool_filter into the file, so a content-hash scope would change on
-  // every run and orphan every remembered permission.
   it("survives an edit to the agent file", () => {
     const before = permissionScopeFor("agent-1", SOURCE);
     const after = permissionScopeFor("agent-1", SOURCE + "\ntool_filter added\n");

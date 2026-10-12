@@ -14,17 +14,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
-/**
- * Three general openers. They are not built from the agent's own words: that would spend a model
- * call on the person's key before they asked anything.
- */
 export const OPENERS = [
   "What can you help me with?",
   "What should I know before I start?",
   "Give me an example of something you do well.",
 ] as const;
 
-/** What the agent says about itself: the description, else the role turned into the first person. */
 export function selfDescription(description: string, role: string): string {
   const said = description.trim();
   if (said !== "") return said;

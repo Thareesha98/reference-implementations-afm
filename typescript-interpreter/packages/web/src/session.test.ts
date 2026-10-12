@@ -32,8 +32,6 @@ function replyingModel(): ModelPort {
   };
 }
 
-// Progress stages are collected separately: they are a running commentary, and mixing them
-// into `emitted` would make every assertion about the load contract depend on their wording.
 function makeSession(createModel = async () => replyingModel()) {
   const emitted: ServerMessage[] = [];
   const steps: LoadStep[] = [];
@@ -161,16 +159,12 @@ describe("AgentSession", () => {
     emitted.length = 0;
     await session.send("hello");
     const deltas = emitted.filter((m) => m.type === "text-delta");
-    // What matters here is that a reply streamed in pieces and the turn closed - not what the
-    // stand-in model happens to say.
     expect(deltas.length).toBeGreaterThan(1);
     expect(deltas.map((m) => (m.type === "text-delta" ? m.text : "")).join("").trim()).not.toBe("");
     expect(emitted.at(-1)).toEqual({ type: "turn-finished", reason: "stop" });
   });
 
   it("remembers what a tool said, so a follow-up does not ask for it again", async () => {
-    // Keeping only the user text and the final answer would drop the tool exchange, leaving
-    // the next question to a model that never saw the result.
     const seen: ChatMessage[][] = [];
     let turn = 0;
     const model = async () => ({
@@ -253,9 +247,6 @@ describe("AgentSession", () => {
     expect(emitted[0]?.type).toBe("error");
   });
 
-  // `skills:` is still valid in an agent file - the editor accepts it and the agent runs - but
-  // this runtime does not load skills, so nothing is fetched, no catalog reaches the model, and
-  // no activate_skill tool is offered.
   it("runs an agent that declares skills, without loading them", async () => {
     const seenSystemPrompts: string[] = [];
     const capturingModel = async () => ({
@@ -284,7 +275,6 @@ describe("AgentSession", () => {
 
     await session.load(WITH_SKILLS);
     expect(emitted[0]).toMatchObject({ type: "loaded", name: "Tester" });
-    // The agent is ready and its own tools work; only the skill tools are absent.
     expect(emitted[1]).toMatchObject({ type: "tools-listed" });
 
     await session.send("hi");
@@ -338,8 +328,6 @@ describe("AgentSession", () => {
       },
     });
 
-    // Files are attached after the agent has loaded, so the tool list has to be rebuilt or the
-    // next message is answered with "nothing is attached".
     let attached = "No files are currently attached.";
     const session = new AgentSession({
       createModel: capturingModel,
@@ -504,8 +492,6 @@ describe("AgentSession load steps", () => {
     ]);
   });
 
-  // Skills are not loaded by this runtime at all, so a file declaring them must not grow a
-  // stage that never runs.
   it("announces no skills stage, even for an agent that declares skills", async () => {
     const { session, steps } = makeSession();
     await session.load(WITH_SKILLS);
@@ -524,8 +510,6 @@ describe("AgentSession load steps", () => {
   });
 });
 
-// "Try again" replaces the last answer, and the history it rebuilds has to stay well-formed:
-// an assistant message carrying toolCalls must never survive without its tool results.
 describe("AgentSession regenerate", () => {
   const TOOL_AGENT = VALID;
 
@@ -564,11 +548,9 @@ describe("AgentSession regenerate", () => {
 
     await session.regenerate();
 
-    // The retry starts from the same context the first attempt had: just the user's question.
     const retry = seen[seen.length - 1] ?? [];
     expect(retry).toEqual([{ role: "user", content: "what is it?" }]);
 
-    // Nothing in the rebuilt request carries toolCalls without the matching tool messages.
     const orphaned = retry.filter(
       (message) => message.role === "assistant" && (message.toolCalls?.length ?? 0) > 0,
     );
@@ -608,7 +590,6 @@ describe("AgentSession load failure", () => {
     await session.load(BROKEN);
     expect(emitted.some((m) => m.type === "agent-not-ready")).toBe(true);
 
-    // Before this was fixed the old agent was still loaded, so the message went through.
     emitted.length = 0;
     await session.send("still there?");
     expect(emitted).toEqual([{ type: "error", message: "No agent loaded yet." }]);
@@ -639,7 +620,6 @@ describe("AgentSession concurrent sends", () => {
     release();
     await first;
 
-    // The guard must not be sticky - once the turn ends the next send goes through.
     emitted.length = 0;
     await session.send("three");
     expect(emitted.some((m) => m.type === "error")).toBe(false);

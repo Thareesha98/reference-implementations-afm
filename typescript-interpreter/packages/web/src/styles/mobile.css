@@ -1,39 +1,17 @@
-/*
-  Phone and small-tablet layout. Imported last so it wins on specificity ties.
-
-  RULE FOR THIS FILE: every rule lives inside a max-width media query, with one exception -
-  hiding elements that exist only for mobile. Nothing here may change a viewport wider than
-  900px.
-*/
-
-/* Mobile-only elements, hidden by default so desktop never sees them. */
 
 @media (max-width: 900px) {
-  /* Inputs below 16px make iOS Safari zoom the page on focus and never zoom back out. */
-  input.field,
-  textarea.field {
-    font-size: 16px;
-  }
   .btn {
     min-height: 44px;
   }
 }
 
 @media (max-width: 720px) {
-  .composer-meta-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px 10px;
-    font-size: 11px;
-  }
   .xc-user {
     max-width: 88%;
   }
-  /* What an answer offers reveals on hover, which a phone cannot do. */
   .xc-acts {
     opacity: 1;
   }
-  /* Wide content scrolls inside itself, never the page. */
   pre,
   .args-pre {
     max-width: 100%;
@@ -48,7 +26,6 @@
   .modal-actions .btn {
     width: 100%;
   }
-  /* A sheet anchored to the bottom is reachable one-handed. */
   .overlay {
     align-items: flex-end;
     padding: 0;
@@ -63,8 +40,6 @@
 }
 
 @media (max-width: 720px) {
-  /* Everything in the bar acts on the agent, so nothing can be dropped - it scrolls instead of
-     pushing Run off the edge. */
   .u-bar {
     gap: 8px;
     padding: 0 8px;
@@ -81,8 +56,6 @@
   .u-agentname {
     max-width: 30vw;
   }
-  /* Stacked, the brief has the whole column to itself, so it is given room to be read in -
-     on the card, not on the field inside it, which would simply grow through its own border. */
   .u-brief {
     min-height: 460px;
   }
@@ -92,10 +65,16 @@
 }
 
 @media (max-width: 960px) {
-  /* There is no width to dock anything at, so the window covers the stage completely. It is
-     still the same element in the same place - only its width changes - so the conversation is
-     never torn down and rebuilt on the way in or out. */
   .u-side {
     width: 100%;
+  }
+  .u-side-left {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 13;
+    width: 100%;
+    box-shadow: 18px 0 44px rgba(31, 38, 51, 0.14);
   }
 }

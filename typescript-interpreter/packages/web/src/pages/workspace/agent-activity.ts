@@ -19,13 +19,6 @@ import type { ChatState, UiMessage } from "../../chat-state";
 import type { ToolInfo } from "../../protocol";
 import { lastUserIndex } from "../../chat-state";
 
-/**
- * Which part of the agent is doing something, and which connection broke. Every value is read from
- * what the worker reported, so the diagram never lights up when nothing is happening.
- *
- * The `from-` phases are legs the worker reports only as transitions (a model reply, a tool
- * result); they are held on screen briefly so they can be seen.
- */
 export type ActivityPhase =
   | "idle"
   | "incoming"
@@ -39,7 +32,6 @@ export interface AgentActivity {
   phase: ActivityPhase;
   serverId?: string;
   brokenServerIds: string[];
-  /** The turn died and no tool caused it, which leaves the model call. */
   modelBroken: boolean;
 }
 
@@ -65,10 +57,6 @@ function serverOf(toolName: string, tools: ToolInfo[]): string | undefined {
   return tools.find((tool) => tool.name === toolName)?.serverId;
 }
 
-/**
- * Which connections broke during the turn on screen; scoped to it because an older break says
- * nothing about the agent being viewed.
- */
 function brokenLines(state: ChatState, tools: ToolInfo[]): { servers: string[]; model: boolean } {
   const turnStart = lastUserIndex(state.messages);
   if (turnStart === -1) return { servers: [], model: false };
@@ -79,12 +67,9 @@ function brokenLines(state: ChatState, tools: ToolInfo[]): { servers: string[]; 
     const serverId = serverOf(message.name, tools);
     if (serverId !== undefined) servers.add(serverId);
   }
-  // A turn that died without a failed tool died in the model call, the only other place it leaves
-  // this browser.
   return { servers: [...servers], model: state.error !== null && servers.size === 0 };
 }
 
-/** The phase implied by the worker's reports, ignoring the short travelling legs. */
 export function reportedActivity(state: ChatState, tools: ToolInfo[]): AgentActivity {
   const broken = brokenLines(state, tools);
   const rest = { brokenServerIds: broken.servers, modelBroken: broken.model };
@@ -107,10 +92,6 @@ const LEG_MS: Record<Leg["phase"], number> = {
   "from-tool": 620,
 };
 
-/**
- * The travelling leg to play, if the step just taken had one: the model hands back, a tool runs,
- * the tool hands back, and the agent asks the model again.
- */
 export function legAfter(prev: PhasePoint, next: PhasePoint, newMessage: boolean): Leg | null {
   if (newMessage) return { phase: "incoming" };
   if (next.phase === "idle") return null;

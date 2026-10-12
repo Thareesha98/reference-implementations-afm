@@ -41,7 +41,6 @@ describe("tidying a paragraph into bullets", () => {
     );
   });
 
-  // The one promise: it moves line breaks, it never rewrites words.
   it("never changes a single word", () => {
     const before = "Answer clearly and keep replies short. Always say where you found it.";
     const after = tidyIntoBullets(before);

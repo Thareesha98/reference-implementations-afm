@@ -27,7 +27,7 @@ describe("opening a panel over the chat", () => {
   });
 
   it("does the same for every panel a person can open from the chat", () => {
-    for (const panel of ["model", "tools", "share", "settings", "info", "agents", "setup"] as const) {
+    for (const panel of ["model", "tools", "share", "settings", "info", "setup"] as const) {
       expect(closePanel(openPanel(chat, panel))).toEqual(chat);
     }
   });
@@ -47,13 +47,6 @@ describe("opening a panel over nothing", () => {
 
   it("closing with nothing open stays closed", () => {
     expect(closePanel(NOTHING_OPEN)).toEqual(NOTHING_OPEN);
-  });
-});
-
-describe("the start menu", () => {
-  it("is given back after a panel opened over it is closed", () => {
-    const start: SideState = { open: "start", under: [] };
-    expect(closePanel(openPanel(start, "tools"))).toEqual(start);
   });
 });
 

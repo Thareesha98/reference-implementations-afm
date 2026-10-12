@@ -16,14 +16,13 @@
 
 import { createContext, useContext, useState } from "react";
 import type { ReactNode } from "react";
-import { loadAgents, saveAgent, removeAgent, clear as clearAgents } from "../agents-store";
+import { loadAgents, saveAgent, removeAgent } from "../agents-store";
 import type { SavedAgent, AgentOrigin, AgentSaveResult } from "../agents-store";
 
 interface AgentsLibraryValue {
   agents: SavedAgent[];
   save: (agent: { id?: string; name: string; description: string; source: string; origin: AgentOrigin }) => AgentSaveResult;
   remove: (id: string) => void;
-  clear: () => void;
 }
 
 const AgentsLibraryContext = createContext<AgentsLibraryValue | null>(null);
@@ -39,7 +38,6 @@ export function AgentsLibraryProvider({ children }: { children: ReactNode }) {
       return result;
     },
     remove: (id) => setAgents(removeAgent(id)),
-    clear: () => setAgents(clearAgents()),
   };
 
   return <AgentsLibraryContext.Provider value={value}>{children}</AgentsLibraryContext.Provider>;

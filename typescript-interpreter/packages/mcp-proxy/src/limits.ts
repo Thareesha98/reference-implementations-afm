@@ -17,8 +17,6 @@
 import ipaddr from "ipaddr.js";
 import type { IncomingHttpHeaders } from "node:http";
 
-// Origin can be forged outside a browser, so it does not authenticate the caller. The proxy bounds
-// abuse instead: rate limits, size caps and time caps.
 
 export interface RateLimitConfig {
   requestsPerMinute: number;
@@ -37,7 +35,6 @@ interface Bucket {
 
 const SWEEP_AFTER_MS = 10 * 60 * 1000;
 
-// Token bucket per client IP: bursts are allowed, sustained floods are not.
 export function createRateLimiter(config: RateLimitConfig): RateLimiter {
   const buckets = new Map<string, Bucket>();
   const perMs = config.requestsPerMinute / 60_000;
@@ -75,8 +72,6 @@ export function createRateLimiter(config: RateLimitConfig): RateLimiter {
   };
 }
 
-// The target allowlist is off by default because an agent file may name any MCP server; a
-// deployment with a fixed set can turn it on.
 export function isAllowedTarget(target: string, allowedHosts: string[]): boolean {
   if (allowedHosts.length === 0) return true;
   let host: string;
@@ -92,13 +87,6 @@ export function clientKeyFor(remoteAddress: string | undefined): string {
   return remoteAddress ?? "unknown";
 }
 
-// Behind a load balancer the socket address is the balancer, not the caller. The caller is in
-// X-Forwarded-For, which each proxy appends to, so only the rightmost entries are trustworthy:
-// count in from the right by the number of trusted hops, never from the left.
-//
-// Hops: 1 for Azure App Service or an AWS ALB in append mode, 2 for a Google Cloud external load
-// balancer ("<client-ip>,<lb-ip>"), 0 for nothing in front (use the socket address). When unsure,
-// err low: too high reaches the part of the header the caller wrote.
 export function clientIpFor(
   headers: IncomingHttpHeaders,
   socketAddress: string | undefined,
@@ -115,15 +103,12 @@ export function clientIpFor(
     .map((entry) => entry.trim())
     .filter((entry) => entry.length > 0);
 
-  // Fewer entries than trusted hops means the request did not come through the expected chain, so
-  // fall back to the socket address.
   const ip = forwardedIp(entries[entries.length - trustedProxyHops]);
   return ip ?? clientKeyFor(socketAddress);
 }
 
 function forwardedIp(entry: string | undefined): string | undefined {
   if (entry === undefined) return undefined;
-  // Azure appends "ip:port"; IPv6 arrives bracketed, with or without a port.
   const bracketed = /^\[([^\]]+)\](?::\d+)?$/.exec(entry);
   const parts = entry.split(":");
   const value = bracketed?.[1] ?? (parts.length === 2 ? (parts[0] as string) : entry);

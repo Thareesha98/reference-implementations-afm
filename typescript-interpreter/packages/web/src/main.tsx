@@ -18,8 +18,6 @@ import { createRoot } from "react-dom/client";
 import { RouterRoot } from "./app/App";
 import { isFramed } from "./frame-guard";
 import { clearLegacyRefreshTokens, relayOAuthCallbackIfPopup } from "./oauth-signin";
-// The two faces the interface design is set in, shipped with the build rather than fetched from
-// Google at runtime.
 import "@fontsource/instrument-sans/400.css";
 import "@fontsource/instrument-sans/500.css";
 import "@fontsource/instrument-sans/600.css";

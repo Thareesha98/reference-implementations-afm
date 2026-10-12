@@ -1,4 +1,3 @@
-/* ---- RootLayout: the page fills the window, and its content scrolls inside it ---- */
 .root-shell {
   display: flex;
   flex-direction: column;

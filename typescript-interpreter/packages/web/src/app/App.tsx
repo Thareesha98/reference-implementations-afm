@@ -25,7 +25,6 @@ import { PermissionsLedgerProvider } from "../permissions/PermissionsLedgerConte
 import { WorkspacePage } from "../pages/workspace/WorkspacePage";
 import { Tip } from "./Tip";
 
-// The top strip acts on the agent being viewed; it is not page navigation.
 function RootLayout() {
   return (
     <div className="root-shell">

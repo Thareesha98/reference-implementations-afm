@@ -23,33 +23,14 @@ interface Props {
   className?: string;
   onChange: (markdown: string) => void;
   docKey?: string;
-  /**
-   * Back to the top when the caret leaves. True on the diagram, where the field is a summary; false
-   * in the writing window, where being scrolled away would lose your place.
-   */
   rewindOnBlur?: boolean;
   ariaLabel: string;
 }
 
-/**
- * Formatted text on screen, Markdown in the file.
- *
- * The box is deliberately not controlled by React: re-rendering on every keystroke would reset the
- * caret, so the text is seeded once and the box owns it from then on. `value` is read back after
- * every edit and handed up as Markdown; `docKey` is the only thing that re-seeds.
- *
- * `execCommand` is deprecated with no replacement, but every browser implements it and a
- * selection-and-range editor of our own is a far larger surface to get wrong.
- */
 export function RichText({ value, placeholder, className = "", onChange, docKey = "", rewindOnBlur = false, ariaLabel }: Props) {
   const box = useRef<HTMLDivElement>(null);
-  // What we last handed up; a match came from us, so re-seeding would only reset the caret.
   const lastEmitted = useRef<string | null>(null);
 
-  /**
-   * Whether there is text below the fold. The fade is drawn only while something is hidden; a
-   * permanent one would dim the last line of every short field.
-   */
   function markOverflow() {
     const node = box.current;
     if (node === null) return;
@@ -70,7 +51,6 @@ export function RichText({ value, placeholder, className = "", onChange, docKey 
     const node = box.current;
     if (node === null) return;
     const markdown = toMarkdown(node);
-    // Only when it differs: opening and closing a field must leave the file alone.
     if (markdown === lastEmitted.current) return;
     lastEmitted.current = markdown;
     onChange(markdown);
@@ -100,7 +80,6 @@ export function RichText({ value, placeholder, className = "", onChange, docKey 
         if (mergeIntoPreviousItem(event)) read();
       }}
       onPaste={(event) => {
-        // Plain text only: pasted markup would put a page's styling into the agent's instructions.
         event.preventDefault();
         const text = event.clipboardData.getData("text/plain");
         document.execCommand("insertText", false, text);
@@ -123,7 +102,6 @@ export function applyCommand(command: Command, href?: string): void {
       document.execCommand(command.command);
       return;
     case "block": {
-      // Pressing a heading twice gives the paragraph back rather than nesting.
       const current = document.queryCommandValue("formatBlock").toLowerCase();
       document.execCommand("formatBlock", false, current === command.tag ? "p" : command.tag);
       return;
@@ -152,10 +130,6 @@ function escapeForInsert(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-/**
- * Backspace at the start of a list item joins it onto the one above, keeping its text. Left alone
- * the browser turns the item into a paragraph and drops it out of the list.
- */
 function mergeIntoPreviousItem(event: React.KeyboardEvent<HTMLDivElement>): boolean {
   if (event.key !== "Backspace") return false;
   const selection = window.getSelection();
@@ -173,7 +147,6 @@ function mergeIntoPreviousItem(event: React.KeyboardEvent<HTMLDivElement>): bool
   while (item.firstChild !== null) previous.appendChild(item.firstChild);
   item.remove();
 
-  // The caret goes where the two halves meet, so typing carries on mid-sentence.
   const merged = document.createRange();
   merged.setStart(previous, joinAt);
   merged.collapse(true);

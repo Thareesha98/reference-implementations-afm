@@ -69,15 +69,10 @@ const TOOLS: Tool[][] = [
   ],
 ];
 
-/**
- * A whole window for one field. Writing the Role and the Instructions is most of the work; the
- * screen shows formatted text while the file keeps the Markdown the agent reads.
- */
 export function FocusEditor({ title, hint, value, placeholder, onChange, onClose }: Props) {
   const [mode, setMode] = useState<WriteMode>("rich");
   const [linking, setLinking] = useState(false);
   const [href, setHref] = useState("");
-  // Where the cursor was before the link box took focus, so the link lands on the chosen words.
   const savedRange = useRef<Range | null>(null);
 
   useEffect(() => {
@@ -135,7 +130,6 @@ export function FocusEditor({ title, hint, value, placeholder, onChange, onClose
                 <button
                   key={tool.key}
                   className="u-tbtn"
-                  // Keep the selection in the box: the button never takes focus from it.
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => applyCommand(tool.command)}
                   data-tip={tool.label}
@@ -164,7 +158,6 @@ export function FocusEditor({ title, hint, value, placeholder, onChange, onClose
             </button>
           </div>
 
-          {}
           <span className="u-spacer" />
           <button
             className="u-btn ghost sm"

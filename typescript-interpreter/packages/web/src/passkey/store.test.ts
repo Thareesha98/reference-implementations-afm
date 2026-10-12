@@ -17,9 +17,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import type { StoredSecret } from "./store";
 
-// Node has no IndexedDB and the build takes no new dependencies, so this is the smallest stand-in
-// that speaks the same request/onsuccess shape store.ts uses. It checks that our call sequence
-// and result handling are right; it is not a substitute for the real thing in a browser.
 function fakeIndexedDb() {
   const data = new Map<string, unknown>();
   const settle = <T,>(result: T) => {
@@ -68,8 +65,6 @@ let loadBlob: typeof import("./store").loadBlob;
 let listNames: typeof import("./store").listNames;
 let removeBlob: typeof import("./store").removeBlob;
 
-// The store keeps one connection for the life of the module, so each test needs a fresh module as
-// well as a fresh fake database - otherwise it would read the previous test's data.
 beforeEach(async () => {
   vi.resetModules();
   fake = fakeIndexedDb();
@@ -100,7 +95,6 @@ describe("the passkey blob store", () => {
     expect(await loadBlob("A")).toBeNull();
   });
 
-  // The whole point of the design: what lands on disk cannot decrypt itself.
   it("writes only ciphertext, iv, credentialId and salt - never a key", async () => {
     await saveBlob("OPENAI_API_KEY", blob());
     const written = fake.data.get("OPENAI_API_KEY") as Record<string, unknown>;

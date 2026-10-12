@@ -14,18 +14,13 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// One encryption key per stored value. The PRF output is constant for a passkey, so a random
-// per-value salt goes into HKDF.
 const HKDF_INFO = new TextEncoder().encode("afm-secret-v1");
 
-// Uint8Array is generic over its buffer since TS 5.7, and WebCrypto rejects
-// SharedArrayBuffer-backed views, so ArrayBuffer is explicit.
 export interface SealedValue {
   iv: Uint8Array<ArrayBuffer>;
   data: Uint8Array<ArrayBuffer>;
 }
 
-/** Fresh HKDF salt, stored beside the ciphertext. */
 export function randomSalt(): Uint8Array<ArrayBuffer> {
   return crypto.getRandomValues(new Uint8Array(32));
 }
@@ -39,14 +34,12 @@ export function deriveAesKey(prf: CryptoKey, salt: BufferSource): Promise<Crypto
     { name: "HKDF", hash: "SHA-256", salt, info: HKDF_INFO },
     prf,
     { name: "AES-GCM", length: 256 },
-    // Non-extractable: the key bytes cannot be read back out.
     false,
     ["encrypt", "decrypt"],
   );
 }
 
 export async function encryptString(key: CryptoKey, text: string): Promise<SealedValue> {
-  // AES-GCM needs a unique IV per key, so each value gets a random one.
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const data = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, new TextEncoder().encode(text));
   return { iv, data: new Uint8Array(data) };

@@ -25,11 +25,9 @@ export interface Budget {
 
 export const DEFAULT_MAX_ITERATIONS = 10;
 
-// About 25k tokens.
 export const MAX_TOOL_RESULT_CHARS = 100_000;
 
 export interface PermissionBroker {
-  /** Must settle once `signal` aborts, so a Stop never leaves the turn waiting on an answer. */
   request(call: ToolCall, signal?: AbortSignal): Promise<"allow" | "deny">;
 }
 
@@ -44,7 +42,6 @@ export type LoopEvent =
   | { type: "tool-call"; id: string; name: string; args: unknown }
   | { type: "tool-result"; id: string; name: string; ok: boolean; content: string; media?: ToolResultMedia[] }
   | { type: "waiting"; attempt: number; ofAttempts: number; delayMs: number; reason: string }
-  /** The whole conversation the turn produced, emitted once just before `finish`. */
   | { type: "turn-complete"; messages: ChatMessage[] }
   | {
       type: "budget-update";
@@ -59,8 +56,6 @@ export type LoopEvent =
     }
   | { type: "finish"; reason: "stop" | "max-iterations" | "budget" | "aborted" };
 
-// Rate limits clear on their own, so wait and retry rather than fail a turn that has already made
-// tool calls.
 const RATE_LIMIT_BACKOFF_MS = [5_000, 15_000, 30_000];
 
 function clipToolResult(content: string): string {
@@ -68,7 +63,6 @@ function clipToolResult(content: string): string {
   let cut = MAX_TOOL_RESULT_CHARS;
   const high = content.charCodeAt(cut - 1);
   const low = content.charCodeAt(cut);
-  // Don't split a surrogate pair across the cut.
   if (high >= 0xd800 && high <= 0xdbff && low >= 0xdc00 && low <= 0xdfff) cut -= 1;
   return `${content.slice(0, cut)}\n\nThe tool result was cut: only the first ${cut} of ${content.length} characters are shown.`;
 }
@@ -116,7 +110,6 @@ export async function* runAgentTurn(input: AgentTurnInput): AsyncIterable<LoopEv
   let totalOutputTokens = 0;
   const startedAt = Date.now();
 
-  // Every exit goes through here so the conversation is always handed back.
   let reason: "stop" | "max-iterations" | "budget" | "aborted" = "max-iterations";
 
   turn: for (let iteration = 0; iteration < maxIterations; iteration++) {
@@ -136,7 +129,6 @@ export async function* runAgentTurn(input: AgentTurnInput): AsyncIterable<LoopEv
     for (;;) {
       try {
         for await (const event of model.stream(
-          // A copy, so an adapter that keeps the array does not see it change.
           { system, messages: [...conversation], tools: toolDescriptors },
           signal,
         )) {
@@ -171,7 +163,6 @@ export async function* runAgentTurn(input: AgentTurnInput): AsyncIterable<LoopEv
         }
         break;
       } catch (error) {
-        // Retry only before anything was emitted, or the replayed stream would repeat text.
         const started = assistantText !== "" || toolCalls.length > 0;
         const waitMs = retryAfterMs(error) ?? RATE_LIMIT_BACKOFF_MS[attempt];
         if (
@@ -200,7 +191,6 @@ export async function* runAgentTurn(input: AgentTurnInput): AsyncIterable<LoopEv
       }
     }
 
-    // Recorded on every iteration so the answer the user read is part of the conversation.
     if (assistantText !== "" || toolCalls.length > 0) {
       conversation.push(
         toolCalls.length > 0
@@ -216,7 +206,6 @@ export async function* runAgentTurn(input: AgentTurnInput): AsyncIterable<LoopEv
 
     for (const call of toolCalls) {
       let result: ToolResult;
-      // Every tool call needs a result, so calls skipped after a Stop are recorded as cancelled.
       if (signal.aborted) {
         result = CANCELLED;
       } else {
@@ -243,7 +232,6 @@ export async function* runAgentTurn(input: AgentTurnInput): AsyncIterable<LoopEv
       };
     }
 
-    // After the results, so every call has an answer.
     if (signal.aborted) {
       reason = "aborted";
       break turn;

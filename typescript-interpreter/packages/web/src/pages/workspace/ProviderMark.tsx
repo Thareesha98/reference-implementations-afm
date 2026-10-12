@@ -14,10 +14,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-/**
- * The provider's own mark. These are simplified monochrome marks legible at 16px; swap in the
- * official SVGs if available.
- */
 export function ProviderMark({ provider, size = 16 }: { provider: string; size?: number }) {
   const common = { width: size, height: size, viewBox: "0 0 24 24", "aria-hidden": true as const };
 

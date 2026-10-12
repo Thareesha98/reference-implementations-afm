@@ -19,9 +19,6 @@ import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { clientMetadata, cspForMetaTag, originOf, withConnectSource } from "./vite.config";
 
-// The header actually served (Azure Static Web Apps reads this file) and the fallback <meta>
-// vite.config.ts builds from it are the same string by construction - this asserts the shape of
-// that one value, so a future edit can't reopen the exfiltration hole a bare `https:` was.
 const configPath = fileURLToPath(new URL("./public/staticwebapp.config.json", import.meta.url));
 const config = JSON.parse(readFileSync(configPath, "utf8"));
 const csp: string = config.globalHeaders["Content-Security-Policy"];
@@ -35,7 +32,6 @@ describe("the shipped Content-Security-Policy", () => {
   it("does not allow connect-src to any https host", () => {
     const values = directive("connect-src");
     expect(values).not.toContain("https:");
-    // Every source is either 'self' or a specific host - nothing that widens past that.
     for (const value of values) {
       expect(value === "'self'" || /^https:\/\/[a-z0-9.-]+$/.test(value)).toBe(true);
     }
@@ -62,20 +58,11 @@ describe("the shipped Content-Security-Policy", () => {
     expect(directive("img-src")).toEqual(["'self'", "data:", "blob:", "https:"]);
   });
 
-  // The header half of the clickjacking control, for hosts that send headers (Azure Static Web
-  // Apps reads this file). GitHub Pages sends none of them, so frame-guard.ts is what keeps
-  // another site from framing the real app and overlaying fake controls on a "send my key" /
-  // "allow tool" button there. Nothing in this app frames itself (no <iframe> anywhere in src/),
-  // so there is no reason for any other origin to be allowed to frame it either.
   it("refuses to be framed by anyone", () => {
     expect(directive("frame-ancestors")).toEqual(["'none'"]);
     expect(config.globalHeaders["X-Frame-Options"]).toBe("DENY");
   });
 
-  // frame-ancestors (and report-uri, sandbox) are ignored by browsers when delivered via <meta>
-  // - the fallback copy vite.config.ts builds for hosts that don't emit the header must drop it,
-  // not repeat it, or every production load logs a console warning for a directive that was
-  // never going to be enforced there anyway.
   it("strips frame-ancestors from the <meta> fallback, keeping the rest", () => {
     const meta = cspForMetaTag(csp);
     expect(meta).not.toContain("frame-ancestors");

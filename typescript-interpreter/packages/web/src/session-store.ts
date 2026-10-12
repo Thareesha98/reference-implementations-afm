@@ -15,22 +15,11 @@
 // under the License.
 
 import type { UiMessage } from "./chat-state";
-import type { ChatMessage, ToolCall, ContentPart } from "@afm/engine";
+import type { ChatMessage, ToolCall } from "@afm/engine";
 import { splitFrontmatter } from "@afm/engine";
 import { encodeInlineAfm } from "./load-paths";
+import { userContent } from "./message-content";
 
-function userContentOf(message: Extract<UiMessage, { kind: "user" }>): string | ContentPart[] {
-  if (message.images === undefined || message.images.length === 0) return message.text;
-  return [
-    ...(message.text.trim() !== "" ? [{ type: "text" as const, text: message.text }] : []),
-    ...message.images.map((image) => ({ type: "image" as const, data: image.data, mediaType: image.mediaType })),
-  ];
-}
-
-// Rebuilds the conversation the agent had from the rows on screen, including tool calls and
-// results, so a reopened chat can answer a follow-up about a tool's output. A tool row belongs to
-// the assistant turn before it: rows are gathered onto that turn and flushed when the next user or
-// assistant row begins.
 export function toSeededConversation(messages: UiMessage[]): ChatMessage[] {
   const conversation: ChatMessage[] = [];
   let assistantText: string | null = null;
@@ -55,14 +44,12 @@ export function toSeededConversation(messages: UiMessage[]): ChatMessage[] {
   for (const message of messages) {
     if (message.kind === "user") {
       flush();
-      conversation.push({ role: "user", content: userContentOf(message) });
+      conversation.push({ role: "user", content: userContent(message.text, message.images) });
     } else if (message.kind === "assistant") {
       flush();
       assistantText = message.text;
     } else if (message.kind === "tool") {
       toolCalls.push({ id: message.callId, name: message.name, args: message.args });
-      // A call still running when the chat was stored gets an empty result, since a tool call
-      // without one is rejected.
       toolResults.push({ id: message.callId, content: message.result ?? "" });
     }
   }
@@ -72,11 +59,6 @@ export function toSeededConversation(messages: UiMessage[]): ChatMessage[] {
 
 export type ShareMethod = "inline" | "url";
 
-/**
- * Share links over the one workspace route. Whoever opens one is shown what the file sets up and
- * chooses to run it or open it in the builder. The inline form carries the agent in the fragment,
- * which is never sent to a server; the url form carries only the address of a hosted file.
- */
 export function buildShareLink(
   origin: string,
   method: ShareMethod,
@@ -99,10 +81,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/**
- * Credential fields holding a typed-in value rather than a `${env:NAME}` reference; a link that
- * carries the file carries these too.
- */
 export function literalCredentialFields(source: string): string[] {
   let frontmatter: Record<string, unknown> | null;
   try {

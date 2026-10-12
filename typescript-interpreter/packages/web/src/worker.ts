@@ -32,9 +32,8 @@ import { destinationGatedVault } from "./secret-gate";
 import type { SecretUse } from "./secret-gate";
 import { resolveProbeAuth, probeToolUses } from "./probe-auth";
 import { failureOf, failureFromStatus, MissingCredentialError } from "./failure";
-import { stripCodeFence, buildAfmSource } from "./draft-format";
+import { generateDraft } from "./draft-generation";
 
-/** How long a check waits for a server to answer. */
 const PROBE_TIMEOUT_MS = 12_000;
 
 const scope = globalThis as unknown as {
@@ -42,15 +41,10 @@ const scope = globalThis as unknown as {
   addEventListener(type: "message", listener: (event: MessageEvent<ClientMessage>) => void): void;
 };
 
-// Secret custody (in-memory plaintext, passkey sealing, the hosts a value was entered for) lives in
-// worker-secret-store.
 const store = createWorkerSecretStore((message) => scope.postMessage(message));
 
-// The tool-scoped secret uses declared by the agent being loaded.
 let toolSecretUses: SecretUse[] = [];
 
-// A value in memory is reused wherever the agent declares it, but only for the destinations it was
-// entered for: an untrusted file could point the model key at a server of its own.
 function gatedVault(toolUses: () => SecretUse[] = () => toolSecretUses): SecretPort {
   return destinationGatedVault(store.memoryPort, { toolUses, approvedFor: store.approvedFor });
 }
@@ -67,9 +61,6 @@ const oauthDeps = {
   onInteractiveAuthRejected: signOutOAuth,
 };
 
-// Lists a server's tools through the same factory as a real run, so the Add-a-server panel can show
-// what it would allow and Setup can tell a server that answers from one that does not. Never opens
-// a sign-in: a missing one is a result.
 async function probeServer(probeId: string, server: AgentMetadata["tools"]): Promise<void> {
   let port: ToolPort | null = null;
   try {
@@ -90,7 +81,6 @@ async function probeServer(probeId: string, server: AgentMetadata["tools"]): Pro
   }
 }
 
-// Asks the provider whether it accepts the model's key, with a request that costs nothing.
 async function probeModel(probeId: string, model: AgentMetadata["model"]): Promise<void> {
   try {
     const check = await checkModelFromMetadata(await withResolvedKey(model));
@@ -122,56 +112,6 @@ async function resolveAuthoringModel(model: AgentMetadata["model"]): Promise<Mod
   return modelFromMetadata(await withResolvedKey(model));
 }
 
-type DraftResult = { kind: "draft"; source: string } | { kind: "clarify"; questions: string[] };
-
-async function generateDraft(promptText: string, model: AgentMetadata["model"], final: boolean): Promise<DraftResult> {
-  const modelPort = await resolveAuthoringModel(model);
-  const provider = (model?.provider ?? "openai").toLowerCase();
-  const modelName = model?.name ?? (provider === "anthropic" ? "claude-sonnet-4-5" : "gpt-4o");
-  const secretName = provider === "anthropic" ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY";
-  const fileSpec =
-    "When you're ready to generate, reply with ONLY this - no YAML, no frontmatter, no code " +
-    "fences, no commentary. The app builds the file's technical header (model, provider, " +
-    "authentication, interface) itself from fixed values; you never write it and never " +
-    "mention it:\n" +
-    "NAME: <a short agent name>\n\n" +
-    "# Role\n<1-2 sentences describing what the agent is>\n\n" +
-    "# Instructions\n<clear, step-by-step instructions for what it should do>";
-  const instruction = final
-    ? "You write AFM agent files. The user has already answered your follow-up questions " +
-      `below - do not ask any more questions, under any circumstances. ${fileSpec}\n\n` +
-      `Request: ${promptText}`
-    : "You write AFM agent files. First decide: is this request specific enough to write a " +
-      "genuinely useful agent (clear purpose, tone, and what it should and shouldn't do)? " +
-      "Only ask about the agent's purpose, behavior, tone, or content/domain needs - never " +
-      "about the AI model, provider, or interface, since those are fixed by the app, not " +
-      'something you or the user decide here. If something important is missing, reply with ' +
-      'ONLY this JSON and nothing else: {"clarify": ["question 1", "question 2"]} - 1 to 3 ' +
-      "short, concrete questions.\n" +
-      `Otherwise, ${fileSpec}\n\n` +
-      `Request: ${promptText}`;
-  const controller = new AbortController();
-  let text = "";
-  for await (const event of modelPort.stream(
-    { system: "", messages: [{ role: "user", content: instruction }], tools: [] },
-    controller.signal,
-  )) {
-    if (event.type === "text-delta") text += event.text;
-  }
-  const cleaned = stripCodeFence(text);
-  if (!final && cleaned.startsWith("{")) {
-    try {
-      const parsed = JSON.parse(cleaned) as { clarify?: unknown };
-      if (Array.isArray(parsed.clarify) && parsed.clarify.every((q) => typeof q === "string")) {
-        return { kind: "clarify", questions: parsed.clarify };
-      }
-    } catch {
-      // Not the clarify shape; treat the reply as a draft.
-    }
-  }
-  return { kind: "draft", source: buildAfmSource(cleaned, provider, modelName, secretName) };
-}
-
 const permissionBridge = createPermissionBridge((call) =>
   scope.postMessage({
     type: "permission-request",
@@ -200,8 +140,6 @@ const permission: PermissionBroker = {
 const attachedFiles = new Map<string, FileInfo>();
 const filesPort = filesToolPort(attachedFiles);
 
-// The one redirect URI registered in client-metadata.json; the popup lands here and main.tsx relays
-// the code.
 const OAUTH_REDIRECT_URI = `${self.location.origin}/`;
 
 const oauth = createOAuthManager({
@@ -226,7 +164,6 @@ scope.addEventListener("message", (event) => {
   const message = event.data;
   switch (message.type) {
     case "load":
-      // Set before session.load, which resolves variables.
       toolSecretUses = scanSecretUsage(message.content)
         .filter((usage) => usage.scope === "tool")
         .map((usage) => ({ name: usage.name, host: usage.host }));
@@ -256,7 +193,6 @@ scope.addEventListener("message", (event) => {
     case "cancel":
       session.cancel();
       break;
-    // The main thread ran the ceremony; this is only the decryption it cannot do.
     case "unlock-secret":
       store.acceptUnlock(message.name, message.key);
       break;
@@ -303,7 +239,7 @@ scope.addEventListener("message", (event) => {
       void probeModel(message.id, message.model);
       break;
     case "generate-draft":
-      void generateDraft(message.prompt, message.model, message.final ?? false)
+      void generateDraft(message.prompt, message.model, message.final ?? false, resolveAuthoringModel)
         .then((result) => {
           if (result.kind === "clarify") {
             scope.postMessage({ type: "draft-clarify", questions: result.questions });

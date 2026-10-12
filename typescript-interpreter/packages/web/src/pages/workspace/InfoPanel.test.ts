@@ -25,6 +25,12 @@ import { aboutRows, applyAbout, InfoPanel, startingDraft, versionError } from ".
 const value = (rows: ReturnType<typeof aboutRows>, label: string) => rows.find((row) => row.label === label)?.value;
 
 describe("aboutRows", () => {
+  it("identifies editable fields without deriving keys from display labels", () => {
+    expect(aboutRows(null).map(({ field, label }) => [field, label])).toEqual([
+      ["version", "Version"], ["authors", "Authors"], ["provider", "Provider"], ["license", "License"],
+    ]);
+  });
+
   it("has nothing to show when the settings cannot be read", () => {
     expect(aboutRows(null).map((row) => row.value)).toEqual([null, null, null, null]);
   });

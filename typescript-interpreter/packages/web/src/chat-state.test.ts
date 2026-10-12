@@ -121,7 +121,7 @@ describe("chatReducer", () => {
     });
     expect(state.pendingPermission).not.toBeNull();
 
-    state = chatReducer(state, { type: "viewing-different-agent" });
+    state = chatReducer(state, { type: "agent-cleared" });
     expect(state.pendingPermission).toBeNull();
   });
 
@@ -279,7 +279,6 @@ describe("load steps", () => {
   });
 });
 
-// An agent that ran out of iterations must not read as one that finished answering.
 describe("how a turn ended", () => {
   const finish = (reason: "stop" | "max-iterations" | "budget" | "aborted") =>
     ({ type: "server", message: { type: "turn-finished", reason } }) as const;
@@ -349,7 +348,6 @@ describe("a start that fails", () => {
   });
 });
 
-/** What the worker reports on a fresh page load. */
 function afterReload(sealedOnDisk: string[], inMemory: string[] = []): ChatState {
   let state = initialChatState;
   state = chatReducer(state, { type: "server", message: { type: "secrets-list", names: inMemory } });
@@ -357,8 +355,6 @@ function afterReload(sealedOnDisk: string[], inMemory: string[] = []): ChatState
 }
 
 describe("usableSecrets", () => {
-  // sessionSecrets is empty after a reload, so a screen reading savedSecrets alone would call
-  // a passkey-sealed key "not entered yet" and ask for it again.
   it("counts a key that only exists sealed on disk", () => {
     expect(usableSecrets(afterReload(["ANTHROPIC_API_KEY"]))).toEqual(["ANTHROPIC_API_KEY"]);
   });
@@ -380,8 +376,6 @@ describe("usableSecrets", () => {
     expect(usableSecrets(state).sort()).toEqual(["HF_TOKEN", "OPENAI_API_KEY"]);
   });
 
-  // Settings is the one screen that must still tell them apart: only an in-memory value can be
-  // dropped from memory, and only a sealed one can be forgotten from disk.
   it("still distinguishes sealed from in-memory for Settings", () => {
     const state = afterReload(["SEALED"], ["IN_MEMORY"]);
     expect(state.passkeySecrets).toEqual(["SEALED"]);

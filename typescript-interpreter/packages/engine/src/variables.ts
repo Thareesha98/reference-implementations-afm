@@ -20,7 +20,6 @@ import { splitFrontmatter } from "./parse";
 
 const VARIABLE = /\$\{([^}]+)\}/g;
 
-/** Resolves `${...}` references in the string values of parsed frontmatter. */
 export function resolveVariables(
   frontmatter: Record<string, unknown>,
   secrets: SecretPort,
@@ -28,7 +27,6 @@ export function resolveVariables(
   return resolveValue(frontmatter, secrets) as Promise<Record<string, unknown>>;
 }
 
-// References resolve one at a time, in file order, since each may open a prompt.
 async function resolveValue(value: unknown, secrets: SecretPort): Promise<unknown> {
   if (typeof value === "string") {
     return resolveText(value, secrets);
@@ -96,12 +94,10 @@ export type SecretScope = "model" | "tool" | "other";
 export interface SecretUsage {
   name: string;
   scope: SecretScope;
-  // Present for tool scope: where the credential would be sent.
   host?: string;
   serverName?: string;
 }
 
-// Finds every secret reference and the field it sits in, by reading the unresolved frontmatter.
 export function scanSecretUsage(content: string): SecretUsage[] {
   let frontmatter: Record<string, unknown> | null;
   try {
@@ -128,7 +124,6 @@ export function scanSecretUsage(content: string): SecretUsage[] {
     const names: string[] = [];
     for (const match of value.matchAll(VARIABLE)) {
       const { prefix, name } = splitReference(match[1] ?? "");
-      // http: is a runtime binding, not a stored secret.
       if (prefix !== "" && prefix !== "env") continue;
       if (name !== "") names.push(name);
     }
@@ -172,7 +167,6 @@ export function scanSecretUsage(content: string): SecretUsage[] {
     walk(transport.authentication, (name) => record({ name, scope: "tool", host, serverName }));
   }
 
-  // Names outside the credential fields are reported too, so callers can list every one.
   const credentialNames = new Set(found.map((usage) => usage.name));
   walk(frontmatter, (name) => {
     if (credentialNames.has(name)) return;
@@ -191,12 +185,10 @@ function hostOf(url: unknown): string | undefined {
   }
 }
 
-/** Every distinct variable name the frontmatter refers to, whatever it is used for. */
 export function referencedSecretNames(content: string): string[] {
   return [...new Set(scanSecretUsage(content).map((usage) => usage.name))];
 }
 
-// Approvals are stored as NAME@host, so a secret approved for one server is not reused for another.
 export function secretUseKey(name: string, host: string | undefined): string {
   return `${name}@${host ?? "unknown"}`;
 }

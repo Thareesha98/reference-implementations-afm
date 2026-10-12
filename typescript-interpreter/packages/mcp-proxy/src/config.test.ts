@@ -36,7 +36,6 @@ describe("configFromEnv", () => {
     expect(config.globalRequestsPerMinute).toBe(1_200);
     expect(config.globalBurst).toBe(300);
     expect(config.maxResponseBytes).toBe(10_000_000);
-    // Azure App Service: its front end appends the caller's address and nothing sits ahead of it.
     expect(config.trustedProxyHops).toBe(1);
   });
 

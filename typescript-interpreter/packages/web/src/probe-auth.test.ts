@@ -45,8 +45,6 @@ const authOf = (tools: AgentMetadata["tools"]) => {
 };
 
 describe("resolveProbeAuth", () => {
-  // The whole bug: the panel hands over the file's text, so the credential is still a
-  // reference. Sent as-is it is just a wrong password, and the server says Unauthorized.
   it("replaces a reference with the value behind it", async () => {
     const { port } = vault({ HF_TOKEN: "hf_the_real_token" });
     const out = await resolveProbeAuth(server({ type: "bearer", token: "${env:HF_TOKEN}" }), port);

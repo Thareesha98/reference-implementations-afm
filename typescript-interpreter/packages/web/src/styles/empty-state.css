@@ -118,7 +118,6 @@
 .load-step-failed {
   color: var(--danger);
 }
-/* Reserved so the label does not jog left and right as the run of dots grows. */
 .load-step-dots {
   display: inline-block;
   width: 1.4em;

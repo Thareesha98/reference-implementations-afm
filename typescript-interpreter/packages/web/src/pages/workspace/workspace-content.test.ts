@@ -59,6 +59,41 @@ describe("initialContent", () => {
   it("gives the empty template when there is nothing to open", () => {
     expect(initialContent(params(""), "", undefined)).toBe(EMPTY_TEMPLATE);
   });
+
+  it.each(["agentId=", "agentId=missing", "code=fixture&state=fixture"])("does not recover an absent saved agent from %s", (query) => {
+    const search = params(query);
+    const before = search.toString();
+    expect(initialContent(search, "", undefined)).toBe(EMPTY_TEMPLATE);
+    expect(search.toString()).toBe(before);
+  });
+
+  it.each(["agentId=a1&agentId=missing", "agentId=a1&code=fixture&state=fixture&keep=1&keep=2"])("opens the first saved id without rewriting %s", (query) => {
+    const search = params(query);
+    const before = search.toString();
+    expect(initialContent(search, "", undefined)).toBe(AGENT_SOURCE);
+    expect(search.toString()).toBe(before);
+  });
+
+  it("prefers a saved agent over inline content, but falls back to inline content for a missing id", () => {
+    const hash = `#afm=${encodeInlineAfm("inline source")}`;
+    expect(initialContent(params("agentId=a1"), hash, undefined)).toBe(AGENT_SOURCE);
+    expect(initialContent(params("agentId=missing"), hash, undefined)).toBe("inline source");
+  });
+
+  it("prefers the fragment over a legacy inline query even when the fragment is malformed", () => {
+    const search = params(`afm=${encodeInlineAfm(AGENT_SOURCE)}`);
+    expect(initialContent(search, `#afm=${encodeInlineAfm("fragment source")}`, undefined)).toBe("fragment source");
+    expect(initialContent(search, "#afm=%%%not-base64", undefined)).toBe(EMPTY_TEMPLATE);
+  });
+
+  it("preserves an explicitly empty draft instead of falling back to the URL", () => {
+    expect(initialContent(params("agentId=a1"), `#afm=${encodeInlineAfm(AGENT_SOURCE)}`, "")).toBe("");
+  });
+
+  it("leaves remote fetching to the effect rather than changing initial content", () => {
+    expect(initialContent(params("file=https://example.test/agent.afm.md&agentId=a1"), "", undefined)).toBe(AGENT_SOURCE);
+    expect(initialContent(params("file=https://example.test/agent.afm.md"), "", undefined)).toBe(EMPTY_TEMPLATE);
+  });
 });
 
 describe("EMPTY_TEMPLATE", () => {
@@ -76,5 +111,19 @@ describe("identityFor", () => {
     expect(identityFor(params("agentId=a1"), "", undefined)).toBe("a1");
     expect(identityFor(params(""), "#afm=zzz", undefined)).toBe("zzz");
     expect(identityFor(params(""), "", undefined)).toBe("blank");
+  });
+
+  it("orders identity by draft, remote file, saved id, then inline content", () => {
+    const search = params("file=https://example.test/a&agentId=a1&afm=query");
+    expect(identityFor(search, "#afm=fragment", "")).toBe("draft:");
+    expect(identityFor(search, "#afm=fragment", undefined)).toBe("file:https://example.test/a");
+    expect(identityFor(params("agentId=a1&afm=query"), "#afm=fragment", undefined)).toBe("a1");
+    expect(identityFor(params("afm=query"), "#afm=fragment", undefined)).toBe("fragment");
+  });
+
+  it("distinguishes an empty id from no id and ignores callback parameters", () => {
+    expect(identityFor(params("agentId=&code=fixture&state=fixture"), "", undefined)).toBe("");
+    expect(identityFor(params("code=fixture&state=fixture"), "", undefined)).toBe("blank");
+    expect(identityFor(params("agentId=a1&agentId=a2&code=fixture&state=fixture"), "", undefined)).toBe("a1");
   });
 });

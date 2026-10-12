@@ -16,9 +16,10 @@
 
 import type { ToolInfo } from "../../protocol";
 import { isSecretAuthField } from "./mcp-secret-fields";
+import type { AuthField } from "./server-config";
 
 interface AuthFieldsProps {
-  fields: readonly { key: string; name: string; hint: string; placeholder: string }[];
+  fields: readonly AuthField[];
   values: Record<string, string>;
   secretEdits: Record<string, string>;
   saved: (key: string) => boolean;
@@ -28,8 +29,6 @@ interface AuthFieldsProps {
   onSecretBlur: () => void;
 }
 
-// The per-method input rows. A secret field is masked and shows a saved or not accepted chip; a
-// plain field (a username, a URL) shows its value.
 export function AuthFields({ fields, values, secretEdits, saved, rejected, onValue, onSecretEdit, onSecretBlur }: AuthFieldsProps) {
   return (
     <>
@@ -44,7 +43,7 @@ export function AuthFields({ fields, values, secretEdits, saved, rejected, onVal
                   {rejected ? "not accepted" : "saved"}
                 </span>
               ) : (
-                <span className="u-row-meta">{field.hint}</span>
+                <span className="u-row-meta">{field.required ? "required" : "optional"}</span>
               )}
               {saved(field.key) && (
                 <button className="u-linkish" onClick={() => onSecretEdit(field.key, "")}>
@@ -65,7 +64,7 @@ export function AuthFields({ fields, values, secretEdits, saved, rejected, onVal
           <label className="u-group" key={field.key}>
             <span className="u-label-row">
               <span className="u-label">{field.name}</span>
-              <span className="u-row-meta">{field.hint}</span>
+              <span className="u-row-meta">{field.required ? "required" : "optional"}</span>
             </span>
             <input
               className="u-input mono"
@@ -95,8 +94,6 @@ interface ServerToolsProps {
   hideTip: () => void;
 }
 
-// The tools a server has, with a skeleton while looking and a hint before there is anything. Each
-// tool is a checkbox the agent may use.
 export function ServerTools({ url, probing, found, error, allowed, waiting, onToggle, onToggleAll, onCheckAgain, checkable, showTip, hideTip }: ServerToolsProps) {
   return (
     <div className="u-group grow">

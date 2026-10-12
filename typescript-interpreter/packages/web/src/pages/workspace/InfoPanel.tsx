@@ -66,7 +66,6 @@ export function startingDraft(metadata: AgentMetadata | null): Draft {
   };
 }
 
-/** Writes only the fields that were edited, so everything else in the file stays as it was. */
 export function applyAbout(content: string, start: Draft, draft: Draft, providerUrl: string): string {
   let next = content;
   for (const field of FIELDS.filter((name) => draft[name].trim() !== start[name])) {
@@ -87,18 +86,16 @@ export function versionError(text: string): string | null {
   return version === "" || SEMVER.test(version) ? null : "Use MAJOR.MINOR.PATCH, like 1.0.0";
 }
 
-/** The details the file gives about itself; a blank or missing one is null. */
-export function aboutRows(metadata: AgentMetadata | null): { label: string; value: string | null }[] {
+export function aboutRows(metadata: AgentMetadata | null): { field: Field; label: string; value: string | null }[] {
   const providerUrl = present(metadata?.provider?.url);
   return [
-    { label: "Version", value: present(metadata?.version) },
-    { label: "Authors", value: present(metadata?.authors?.join(", ")) },
-    { label: "Provider", value: present(metadata?.provider?.name) ?? (providerUrl === null ? null : hostOf(providerUrl)) },
-    { label: "License", value: present(metadata?.license) },
+    { field: "version", label: "Version", value: present(metadata?.version) },
+    { field: "authors", label: "Authors", value: present(metadata?.authors?.join(", ")) },
+    { field: "provider", label: "Provider", value: present(metadata?.provider?.name) ?? (providerUrl === null ? null : hostOf(providerUrl)) },
+    { field: "license", label: "License", value: present(metadata?.license) },
   ];
 }
 
-/** What the file says about itself and what this browser's library says about the file. */
 export function InfoPanel({ content, metadata, saved, onApply, onClose }: Props) {
   const [start] = useState(() => startingDraft(metadata));
   const [draft, setDraft] = useState(start);
@@ -221,7 +218,7 @@ export function InfoPanel({ content, metadata, saved, onApply, onClose }: Props)
           )}
 
           {aboutRows(metadata).map((row) => {
-            const field = row.label.toLowerCase() as Field;
+            const { field } = row;
             if (field === "license") {
               return (
                 <div className="u-info-row edit" key={row.label}>

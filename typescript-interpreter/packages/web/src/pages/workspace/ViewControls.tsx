@@ -19,10 +19,6 @@ interface Segment<T extends string> {
   label: string;
 }
 
-/**
- * One setting with a few positions, drawn as one control; the choice is exclusive, so independent
- * buttons would suggest two can be pressed.
- */
 function Segmented<T extends string>({
   options,
   value,
@@ -60,7 +56,6 @@ const MODE_SEGMENTS: Segment<EditorMode>[] = [
   { id: "raw", label: "Raw" },
 ];
 
-/** The same agent, drawn or written out. */
 export function ModeSwitch({ mode, onMode }: { mode: EditorMode; onMode: (mode: EditorMode) => void }) {
   return <Segmented options={MODE_SEGMENTS} value={mode} onChange={onMode} ariaLabel="Diagram or file" />;
 }
@@ -72,10 +67,6 @@ const WRITE_SEGMENTS: Segment<WriteMode>[] = [
   { id: "raw", label: "Raw" },
 ];
 
-/**
- * Formatted text or the Markdown underneath; rich text is a view of the file, not a different
- * document.
- */
 export function WriteModeSwitch({ mode, onMode }: { mode: WriteMode; onMode: (mode: WriteMode) => void }) {
   return <Segmented options={WRITE_SEGMENTS} value={mode} onChange={onMode} ariaLabel="Formatted text or Markdown" />;
 }

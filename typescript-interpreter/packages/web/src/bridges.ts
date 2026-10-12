@@ -16,16 +16,9 @@
 
 import type { ToolCall } from "@afm/engine";
 
-/**
- * A request the worker answers later, matched to its answer by key.
- */
 function createPendingBridge<K, V>() {
   const pending = new Map<K, (value: V) => void>();
   return {
-    /**
-     * Registers the key before the request is sent, so an immediate answer still finds its
-     * resolver.
-     */
     wait(key: K, abort?: { signal: AbortSignal; value: V }): Promise<V> {
       return new Promise((resolve) => {
         if (abort === undefined) {
@@ -68,7 +61,6 @@ export interface PermissionBridge {
 export function createPermissionBridge(request: (call: ToolCall) => void): PermissionBridge {
   const bridge = createPendingBridge<string, PermissionDecision>();
   return {
-    // A stopped run answers its own open question with a denial.
     ask(call, signal) {
       const decision = bridge.wait(call.id, signal && { signal, value: { allow: false, remember: false } });
       request(call);

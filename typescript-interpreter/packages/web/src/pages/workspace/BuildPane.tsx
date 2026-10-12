@@ -33,20 +33,15 @@ interface Props {
   metadata: AgentMetadata;
   onOpenModel: () => void;
   onOpenServer: (name: string | null) => void;
-  /** What the agent is doing now, so the diagram can show it. */
   activity: AgentActivity;
-  /** Servers heard from, and ones tried and not reached, each with why. */
   reach: ServerReach;
 }
 
-/** Evidence, not assumption: green means the server answered. */
 export interface ServerReach {
   ok: string[];
   failed: Record<string, string>;
 }
 
-// What the file says about a server; nothing here needs the agent to have run. Whether the address
-// works is ServerReach's question.
 function serverSummary(server: McpServer): { tools: string; state: "ready" | "sign-in" } {
   const allowed = server.tool_filter?.allow?.length;
   const auth = server.transport.type === "http" ? server.transport.authentication : undefined;
@@ -56,7 +51,6 @@ function serverSummary(server: McpServer): { tools: string; state: "ready" | "si
   };
 }
 
-/** A button rather than a click on the text: clicking into a field means place the cursor. */
 function ExpandButton({ onClick }: { onClick: () => void }) {
   return (
     <button className="u-ico tiny" onClick={onClick} data-tip="Write in a bigger window"
@@ -70,17 +64,12 @@ function ExpandButton({ onClick }: { onClick: () => void }) {
   );
 }
 
-/** Green claims the address works, so it is only shown once something has answered from it. */
 function nodeTone(state: "ready" | "sign-in", heard: "ok" | "failed" | "unknown"): string {
   if (heard === "failed") return "bad";
   if (state === "sign-in") return "";
   return heard === "ok" ? "ok" : "";
 }
 
-/**
- * The agent as it works: the brief decides, the model thinks, the servers are what it can reach.
- * The brief takes the middle and the only ring because writing it is most of the work.
- */
 export function BuildPane({
   content,
   onChange,
@@ -95,14 +84,11 @@ export function BuildPane({
   const servers = metadata.tools?.mcp ?? [];
   const urlOf = (server: McpServer) => (server.transport.type === "http" ? server.transport.url : undefined);
 
-  // A box lights up only while it does the work.
   const agentLive = phase === "incoming" || phase === "from-model" || phase === "from-tool";
   const modelLive = phase === "thinking" || phase === "answering";
-  // Only the server being called lights up.
   const onServer = (server: McpServer, at: ActivityPhase) =>
     phase === at && activity.serverId !== undefined && urlOf(server) === activity.serverId;
 
-  // out = away from the agent, back = towards it, so a round trip reads as one.
   const lead = (out: boolean, back: boolean, broken: boolean) =>
     `u-lead${out ? " live is-flowing" : ""}${back ? " live is-returning" : ""}${broken ? " broken" : ""}`;
   const brokenServer = (server: McpServer) => {
@@ -121,8 +107,6 @@ export function BuildPane({
   const modelName = metadata.model?.name ?? "";
   const modelLabel = modelName === "" ? "Choose a model" : shortModelLabel(modelName);
 
-  // The diagram is the instructions: whatever is missing gets a number, in the order it should be
-  // done, on the part that needs it.
   const role = getSection(content, "Role");
   const instructions = getSection(content, "Instructions");
   const write = (heading: string) => (text: string) => onChange(setSection(content, heading, text));

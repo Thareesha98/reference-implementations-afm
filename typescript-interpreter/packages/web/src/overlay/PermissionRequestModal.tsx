@@ -24,7 +24,6 @@ interface Props {
   onDecide: (allow: boolean, remember: boolean) => void;
 }
 
-// Two servers can offer the same tool name, so the destination is shown beside it.
 function destinationOf(serverId: string | undefined): string | null {
   return serverId === undefined || serverId === "" ? null : hostOf(serverId);
 }
@@ -50,7 +49,6 @@ export function PermissionRequestModal({ request, description, onDecide }: Props
             <>Runs in this tab - nothing leaves the browser</>
           )}
         </p>
-        {/* The tool's description is not shown: servers ship very long ones. It still feeds the risk badge. */}
         <pre className="args-pre permission-args">{formatArgs(request.args)}</pre>
         <p className="permission-reassurance">Nothing runs until you decide.</p>
         <div className="modal-actions permission-actions">

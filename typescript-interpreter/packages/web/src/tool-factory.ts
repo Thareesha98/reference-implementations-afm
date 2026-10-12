@@ -35,8 +35,6 @@ const BUILD_TIME_PROXY_URL = import.meta.env.VITE_MCP_PROXY_URL;
 export const defaultMcpProxyConfig: McpProxyConfig | null =
   BUILD_TIME_PROXY_URL !== undefined && BUILD_TIME_PROXY_URL !== "" ? { url: BUILD_TIME_PROXY_URL } : null;
 
-// Most MCP and authorization servers send no CORS headers for this origin, so MCP-adjacent requests
-// go through the proxy when one is configured, and directly otherwise.
 export function proxyAwareFetch(): typeof fetch {
   return defaultMcpProxyConfig !== null ? createProxiedFetch(defaultMcpProxyConfig) : fetch;
 }
@@ -52,7 +50,6 @@ export class McpProxyRequiredError extends Error {
 }
 
 export interface ToolSetupOptions {
-  /** Passed to every server. The Add-a-server panel uses a shorter one, since someone is watching. */
   setupTimeoutMs?: number;
 }
 

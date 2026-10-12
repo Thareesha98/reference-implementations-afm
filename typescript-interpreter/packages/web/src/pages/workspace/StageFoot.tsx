@@ -16,10 +16,6 @@
 
 import type { Readiness, ReadyFix } from "./readiness";
 
-/**
- * One line under the canvas saying whether the agent can run. Where a problem has a panel that
- * fixes it, the words naming it are the way there.
- */
 export function StageFoot({ state, onFix }: { state: Readiness; onFix: (fix: ReadyFix) => void }) {
   const { tone, lead, subject, tail, fix } = state;
   return (

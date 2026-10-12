@@ -20,7 +20,6 @@ import { markColour, providerColour } from "./mark-colour";
 import { ProviderMark } from "./ProviderMark";
 import { MODEL_ROW, summaryOf, type KeysState, type SetupRow } from "./setup-check";
 
-/** Long enough to see the last row turn ready before the chat takes over. */
 const AUTO_RUN_DELAY_MS = 500;
 
 interface Props {

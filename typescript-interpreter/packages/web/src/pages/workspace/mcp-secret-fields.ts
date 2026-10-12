@@ -17,8 +17,6 @@
 import { envSecretName } from "./agent-source-edit";
 import type { NewMcpServer } from "./agent-source-edit";
 
-// The auth fields that hold a credential, and what each is called once captured. Other fields, such
-// as a username or header name, are configuration and stay in the file.
 const SECRET_SUFFIX: Record<string, string> = {
   token: "_TOKEN",
   password: "_PASSWORD",
@@ -29,11 +27,6 @@ export function isSecretAuthField(fieldKey: string): boolean {
   return SECRET_SUFFIX[fieldKey] !== undefined;
 }
 
-/**
- * The env name a captured secret is filed under: the server's name, then the field. `taken` is
- * every name already used, in the file or earlier in the same save, so two servers named alike
- * never share a value.
- */
 export function mcpSecretEnvName(serverName: string, fieldKey: string, taken: string[]): string {
   const base =
     serverName
@@ -49,17 +42,10 @@ export function mcpSecretEnvName(serverName: string, fieldKey: string, taken: st
 }
 
 export interface AuthCapture {
-  /** What to write into the file: a reference wherever a credential was given. */
   fields: Record<string, string>;
-  /** What to hand the worker, so the value lives there and not in the file. */
   secrets: { name: string; value: string }[];
 }
 
-/**
- * Splits an auth block into what the file may hold and what it may not. A credential typed in full
- * becomes a `${env:NAME}` reference and is handed back separately; a field that already references
- * a name keeps it, so re-saving does not rename its secret.
- */
 export function captureAuthSecrets(
   serverName: string,
   fields: Record<string, string>,
@@ -83,10 +69,6 @@ export function captureAuthSecrets(
   return { fields: out, secrets };
 }
 
-/**
- * "missing" means the file names a credential nobody here holds, so the server would only answer
- * 401 and the user has to type it.
- */
 export type SecretFieldState = "editing" | "missing" | "saved" | "empty";
 
 export function secretFieldState(fileValue: string, typed: string | undefined, knownSecrets: string[]): SecretFieldState {
@@ -96,6 +78,6 @@ export function secretFieldState(fileValue: string, typed: string | undefined, k
   return knownSecrets.includes(name) ? "saved" : "missing";
 }
 
-export function lacksRequiredField(fields: readonly { key: string; hint: string }[], auth: NewMcpServer["auth"]): boolean {
-  return fields.some((field) => field.hint === "required" && auth?.fields[field.key] === undefined);
+export function lacksRequiredField(fields: readonly { key: string; required: boolean }[], auth: NewMcpServer["auth"]): boolean {
+  return fields.some((field) => field.required && auth?.fields[field.key] === undefined);
 }

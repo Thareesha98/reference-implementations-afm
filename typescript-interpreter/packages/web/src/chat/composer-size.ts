@@ -14,15 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-/** Matches `max-height` on `.composer textarea`; past this the box scrolls. */
 export const MAX_COMPOSER_HEIGHT = 180;
 
-/**
- * Height the message box should have, or `null` when there is nothing to measure.
- *
- * The workspace collapses the unused pane to zero width, and a zero-width textarea wraps one
- * character per line, which would pin the height at the cap. Without a width there is no answer.
- */
 export function grownHeight(clientWidth: number, scrollHeight: number, maxHeight = MAX_COMPOSER_HEIGHT): number | null {
   if (clientWidth <= 0) return null;
   return Math.min(scrollHeight, maxHeight);

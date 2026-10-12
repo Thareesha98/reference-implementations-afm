@@ -20,7 +20,6 @@ import type { Failure } from "./failure";
 
 export type AgentModelRef = AgentMetadata["model"];
 
-/** Taken from the loop's own finish event, so the two cannot drift. */
 export type TurnEndReason = Extract<LoopEvent, { type: "finish" }>["reason"];
 
 export interface ImageAttachment {
@@ -42,12 +41,8 @@ export type ClientMessage =
   | { type: "cancel" }
   | { type: "regenerate" }
   | { type: "reset-chat" }
-  // `host` is the server the value was entered for; the worker only hands it to that destination.
   | { type: "set-secret"; name: string; value: string; host?: string }
-  // A sealed secret opened by the main thread, which runs the ceremony and sends the derived key.
   | { type: "unlock-secret"; name: string; key: CryptoKey }
-  // The derived key crosses as a non-extractable CryptoKey; the plaintext secret never travels this
-  // way.
   | {
       type: "passkey-remember";
       name: string;
@@ -55,8 +50,6 @@ export type ClientMessage =
       credentialId: Uint8Array<ArrayBuffer>;
       salt: Uint8Array<ArrayBuffer>;
     }
-  // Moves a sealed copy from one passkey to another inside the worker; both keys are derived on the
-  // main thread and non-extractable.
   | {
       type: "passkey-reseal";
       name: string;
@@ -70,11 +63,7 @@ export type ClientMessage =
   | { type: "list-passkeys" }
   | { type: "remove-secret"; name: string }
   | { type: "permission-response"; id: string; decision: "allow" | "deny"; remember: boolean }
-  // Starts an interactive sign-in: the worker creates the PKCE verifier and state, so none of it
-  // lives on the main thread.
   | { type: "oauth-signin-start"; id: string; provider: OAuthProviderRef }
-  // The popup's one-time code. It carries no URLs: the worker exchanges against the endpoint
-  // captured at oauth-signin-start.
   | { type: "oauth-signin-code"; id: string; code: string; state: string; iss?: string }
   | { type: "oauth-sign-out"; provider: OAuthProviderRef }
   | { type: "generate-draft"; prompt: string; model: AgentModelRef; final?: boolean }

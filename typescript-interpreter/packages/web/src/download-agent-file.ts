@@ -14,13 +14,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
-/** The agent file itself, for saving rather than copying. */
 export function downloadAgentFile(content: string, filename = "agent.afm.md"): void {
   const url = URL.createObjectURL(new Blob([content], { type: "text/markdown" }));
   const anchor = document.createElement("a");
   anchor.href = url;
   anchor.download = filename;
   anchor.click();
-  // Some browsers cancel the download if the address disappears at once.
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

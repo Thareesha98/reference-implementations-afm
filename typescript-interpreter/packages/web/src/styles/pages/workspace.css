@@ -1,19 +1,8 @@
-/* ---------------------------------------------------------------------------
-   The design renders inside a fixed 604px card on a document. The app is the
-   whole window, so the only rules here are the ones that turn those fixed
-   dimensions into a filled viewport, plus the states the design draws that the
-   gallery had no way to show.
-
-   Every value that the design states is in design.css. Nothing here restates one.
-   --------------------------------------------------------------------------- */
 .workspace-shell {
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  /* Anchors the undo toast to this shell rather than to whatever ancestor further up the tree
-     happens to be positioned. */
-  position: relative;
 }
 .u-bar {
   flex: none;
@@ -29,35 +18,31 @@
 .u-stage-canvas {
   overflow: hidden;
 }
-/* The one canvas that centres what it holds rather than filling with it. */
 .u-stage-canvas-centre {
   display: block;
   overflow-y: auto;
   padding-bottom: 24px;
 }
 
-/* ---- the side window opens and closes ---- */
-.u-side {
+.u-side,
+.u-side-left {
   transition:
     width 0.28s cubic-bezier(0.16, 1, 0.3, 1),
     opacity 0.22s ease 0.06s;
 }
-.u-body:not(.has-side) .u-side {
+.u-body:not(.has-side) .u-side,
+.u-body:not(.has-left) .u-side-left {
   width: 0;
   overflow: hidden;
   border-left: none;
   opacity: 0;
   pointer-events: none;
-  /* Flipped to hidden only after the fade, so the closed window also leaves the tab order
-     instead of staying reachable by keyboard at zero width. */
   visibility: hidden;
   transition:
     width 0.28s cubic-bezier(0.16, 1, 0.3, 1),
     opacity 0.16s ease,
     visibility 0s linear 0.16s;
 }
-/* A run-only share link has no file to show. The window keeps the conversation it already holds
-   rather than the chat being mounted somewhere else, so nothing is torn down to expand it. */
 .u-body.is-chat-full .u-stage {
   display: none;
 }
@@ -66,17 +51,23 @@
   border-left: none;
 }
 .u-body.is-trust .u-stage,
-.u-body.is-trust .u-side {
+.u-body.is-trust .u-side,
+.u-body.is-trust .u-side-left {
   display: none;
 }
 
-/* Panels stack over the conversation rather than replacing it, so closing one gives back the
-   thread exactly where it was. */
+.u-side-left {
+  --slide-from: -8px;
+}
+.u-side-left .u-panel {
+  inset: 10px 4px 10px 10px;
+  animation: panel-slide 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
 .u-panel.is-over {
   z-index: 4;
 }
 
-/* Only drawn below the width where the window shrinks the stage instead of covering it. */
 .u-float-scrim {
   display: none;
 }
@@ -97,22 +88,17 @@
   }
 }
 
-/* ---- the brief's two fields are written in, not just read ---- */
 .u-field-text {
   outline: none;
   overflow-y: auto;
   white-space: pre-wrap;
   overflow-wrap: break-word;
 }
-/* Sized to what is written, between a floor and a ceiling: a role is usually a sentence or two,
-   but unbounded it pushed Instructions out of the card entirely. */
 .u-role {
   flex: none;
   min-height: 62px;
   max-height: 148px;
 }
-/* contenteditable has no placeholder of its own, and "empty" here is one empty paragraph -
-   which is what the editor leaves behind when the last character is deleted. */
 .u-field-text:empty::before,
 .u-field-text:has(> p:only-child > br:only-child)::before,
 .u-field-text:has(> br:only-child)::before {
@@ -120,14 +106,11 @@
   color: var(--faint);
   pointer-events: none;
 }
-/* Only while text is actually hidden below: a permanent fade would dim the last line of every
-   short field for no reason. */
 .u-field-text.has-more {
   -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 26px), transparent 100%);
   mask-image: linear-gradient(to bottom, #000 calc(100% - 26px), transparent 100%);
 }
 
-/* ---- the agent is working ---- */
 .u-lead.is-flowing::after {
   animation: afm-run-out 1.1s ease-in-out infinite;
 }
@@ -180,9 +163,6 @@
   }
 }
 
-/* ---- the file, written out ----
-   The design has this fill the stage edge to edge; a line of YAML that long is harder to track
-   back to its own start than it needs to be, so it's capped and centred like the Build card is. */
 .u-rawwrap {
   max-width: 900px;
   margin: 0 auto;
@@ -193,8 +173,6 @@
   min-height: 0;
   overflow: hidden;
 }
-/* The design numbers every line. The gutter is its own layer so the numbers are never part of
-   what gets selected or copied. */
 .code-editor-gutter {
   position: absolute;
   inset: 0 auto 0 0;
@@ -215,13 +193,10 @@
 .u-rawwrap .code-editor:focus-within {
   border-color: var(--accent);
 }
-/* Every property here affects where a glyph lands. The two layers must agree on all of them or
-   the caret drifts away from the text it is sitting on. */
 .code-editor-face {
   position: absolute;
   inset: 0;
   margin: 0;
-  /* Clears the gutter. */
   padding: 10px 16px 10px 60px;
   border: 0;
   font-family: "IBM Plex Mono", monospace;
@@ -239,11 +214,6 @@
   color: var(--ink2);
   user-select: none;
 }
-/* One block box per source line, so a highlighted line is exactly as wide as the editor
-   regardless of how far the text itself runs - and still highlights correctly if it wraps.
-   Only the right edge is pulled out to .code-editor-face's own padding: the gutter is a
-   separate, later-painted layer that sits on top of this one, so a highlight reaching left
-   into its 60px column would paint over the line number instead of framing it. */
 .code-editor-line {
   display: block;
   margin: 0 -16px 0 0;
@@ -259,8 +229,6 @@
   color: transparent;
   caret-color: var(--ink);
   overflow-y: auto;
-  /* The textarea's own scrollbar would narrow its text column and wrap lines a character earlier
-     than the layer behind it, so it scrolls without one. */
   scrollbar-width: none;
 }
 .code-editor-input::-webkit-scrollbar {
@@ -291,8 +259,6 @@
 [data-theme="dark"] .syn-literal { color: #b79bf0; }
 [data-theme="dark"] .syn-string { color: #6fc49b; }
 
-/* ---- the writing window ----
-   The design draws it inside its own card; in the app it covers the window. */
 .u-focus {
   position: fixed;
   z-index: 60;
@@ -300,7 +266,6 @@
 .u-focus-panel {
   max-height: 100%;
 }
-/* Groups inside the toolbar, with the design's divider between them. */
 .u-tool-group {
   display: flex;
   gap: 3px;
@@ -316,7 +281,6 @@
   display: flex;
   align-items: center;
 }
-/* The body scrolls; the design's static screen never had to. */
 .u-focus-scroll {
   flex: 1;
   min-height: 0;
@@ -355,7 +319,6 @@
   border-bottom: 1px solid var(--line-2);
 }
 
-/* ---- states the gallery could not show ---- */
 .skeleton-rows {
   border: 1px solid var(--line);
   border-radius: 11px;
@@ -420,7 +383,6 @@
   margin-top: 4px;
 }
 
-/* Two things the design draws but does not name, because the gallery had no state for them. */
 .u-spacer {
   flex: 1;
 }
@@ -433,8 +395,6 @@
   justify-content: center;
 }
 
-/* The design sets its own list indent on the field; the shared markdown rules are for the
-   conversation, where the measure is different. */
 .u-field-text ul,
 .u-field-text ol {
   margin: 0 0 0 20px;
@@ -444,17 +404,10 @@
   margin-bottom: 5px;
 }
 
-/* The design's example link is one line; a real one is a few hundred characters, so it is given
-   a bound and its own scroll rather than pushing the panel's actions off the bottom. */
 .u-code {
   max-height: 128px;
   overflow-y: auto;
 }
-.u-row-name.mono {
-  font-family: "IBM Plex Mono", monospace;
-  font-size: 12px;
-}
-/* A row that is mostly one button, with a quiet second action at its end. */
 .u-row-pick {
   display: flex;
   align-items: center;
@@ -470,8 +423,153 @@
   cursor: pointer;
 }
 
-/* The design's composer field is a div; the app's is a textarea, which arrives with a border,
-   a background and a resize grip of its own. */
+.u-agents {
+  padding: 12px;
+}
+.u-agent-search {
+  position: relative;
+  display: block;
+  flex: none;
+  margin-bottom: 10px;
+}
+.u-agent-search svg {
+  position: absolute;
+  top: 50%;
+  left: 11px;
+  width: 15px;
+  height: 15px;
+  translate: 0 -50%;
+  color: var(--faint);
+  pointer-events: none;
+}
+.u-agent-search .u-input {
+  padding-left: 33px;
+}
+.u-agent-new,
+.u-agent {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  flex: none;
+  padding: 7px;
+  border-radius: 10px;
+}
+.u-agent-new {
+  align-self: stretch;
+  margin: 0 -2px;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.u-agent-new:hover,
+.u-agent:hover {
+  background: var(--sunk);
+}
+.u-agent.on {
+  background: var(--accent-soft);
+}
+.u-agent-plus {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 999px;
+  color: var(--ink2);
+}
+.u-agent-plus svg {
+  width: 15px;
+  height: 15px;
+}
+.u-agent-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.u-agent-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 13px -2px 0;
+}
+.u-agent-group .u-label {
+  padding-left: 7px;
+  margin-bottom: 1px;
+}
+.u-agent .u-row-pick {
+  gap: 11px;
+}
+.u-agent .u-mk {
+  width: 28px;
+  height: 28px;
+  font-size: 12px;
+}
+.u-agent-name {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.u-agent-end {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+.u-agent-ago {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  color: var(--faint);
+}
+.u-agent-open {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ok);
+}
+.u-agent-del {
+  width: 26px;
+  height: 26px;
+  border-color: var(--line);
+  background: var(--surface);
+  color: var(--bad);
+}
+@media (hover: hover) {
+  .u-agent-end {
+    display: grid;
+    justify-items: end;
+  }
+  .u-agent-end > * {
+    grid-area: 1 / 1;
+    transition: opacity 0.15s ease;
+  }
+  .u-agent-del {
+    opacity: 0;
+    pointer-events: none;
+  }
+  .u-agent:hover .u-agent-del,
+  .u-agent-end:focus-within .u-agent-del {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .u-agent:hover .u-agent-ago,
+  .u-agent:hover .u-agent-open,
+  .u-agent-end:focus-within .u-agent-ago,
+  .u-agent-end:focus-within .u-agent-open {
+    opacity: 0;
+  }
+}
+
 textarea.xc-field {
   border: 0;
   outline: none;
@@ -485,7 +583,6 @@ textarea.xc-field {
 textarea.xc-field::placeholder {
   color: var(--faint);
 }
-/* In a flex row an inline-flex pill will shrink until its words wrap. */
 .xc-used,
 .xc-live {
   flex: none;
@@ -496,19 +593,11 @@ textarea.xc-field::placeholder {
   font-size: 11.5px;
   color: var(--faint);
 }
-/* A field's label wraps its input; a <label> is inline, so a 100%-wide input inside one
-   measures against the text rather than the panel. */
 label.u-group {
   display: block;
 }
 
-/* ---------------------------------------------------------------------------
-   What the design draws as a static picture, made to work as a live screen.
-   --------------------------------------------------------------------------- */
 
-/* The model sits with the top of the brief, the tools with its bottom, so the rail spans the
-   card rather than bunching against its first line - inset at both ends, so neither the step
-   limit nor the last tool sits past the card's own edge. */
 .u-rail {
   padding: 7% 0;
 }
@@ -517,11 +606,7 @@ label.u-group {
   min-height: 14px;
 }
 
-/* The design's thread is a fixed mockup, so it never had to scroll. A real conversation does. */
 .xc-wrap {
-  overflow-y: auto;
-}
-.xc-wrap.mid {
   overflow-y: auto;
 }
 .u-panel-body {
@@ -529,9 +614,6 @@ label.u-group {
   -webkit-overflow-scrolling: touch;
 }
 
-/* Connect tools: a working oauth2 server collapsed to one line, with a way back to the fields
-   behind it - the four-field form has no reason to stay on screen once it isn't needed, and
-   every pixel it keeps costs the tools list below it, which is the part anyone actually reads. */
 .u-signedin-row {
   display: flex;
   align-items: center;
@@ -539,13 +621,8 @@ label.u-group {
   margin-top: 12px;
 }
 
-/* Connect tools: the tabs and the search box stay put while the directory scrolls under them.
-   The negative margins reach back over .u-panel-body's own padding so nothing shows beside or
-   above them as rows pass behind. */
 .u-connect-head {
   position: sticky;
-  /* -14px, not 0: sticky offsets are measured from the scrollport's PADDING edge, so at 0 the
-     panel's own 14px of top padding stays uncovered and rows scroll visibly through it. */
   top: -14px;
   z-index: 2;
   flex: none;
@@ -557,10 +634,7 @@ label.u-group {
   padding: 14px 13px 12px;
 }
 
-/* ---- Connect tools: directory row + server detail ---- */
 
-/* Three stacked zones. One line could not hold a name, an Info button, a publisher and Connect
-   in 336px - the description ended up wrapping every second word. */
 .u-srv-row {
   display: flex;
   flex-direction: column;
@@ -585,7 +659,6 @@ label.u-group {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* Indented to the mark, so description and publisher line up under the name. */
 .u-srv-desc,
 .u-srv-foot {
   padding-left: 34px;
@@ -623,7 +696,6 @@ label.u-group {
   color: var(--accent);
 }
 
-/* The publisher's own domain, with a tick: every server in the directory is one it documents. */
 .u-pub {
   font-family: "IBM Plex Mono", monospace;
   font-size: 10.5px;
@@ -730,8 +802,6 @@ label.u-group {
   word-break: break-all;
 }
 
-/* Name, state chip and up to two actions on one line. The name is the only part that may give
-   way, so it ellipsises while the chip and the buttons keep their size. */
 .u-key-row {
   cursor: default;
 }
@@ -745,36 +815,26 @@ label.u-group {
   flex: none;
 }
 
-/* A little air between the auth-method pills and the fields under them - .u-group's own
-   margin only applies between the fields themselves, not above the first one. */
 .u-auth-fields {
   margin-top: 12px;
 }
-/* Plain .u-group has no display rule of its own (most callers just want the spacing), so a
-   button and its trailing caption here sat in ordinary text flow and wrapped into each other. */
 .u-signin-row {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
 }
-/* However tall the fields above get, the list of what a server can actually do keeps a real,
-   readable minimum instead of being squeezed toward zero by flex:1's default shrink. */
 .u-group.grow .u-rows.scroll {
   min-height: 180px;
 }
-/* A server's tools arrive once they are found, in place of the skeleton. */
 .u-rows.is-found {
   animation: fade-up 0.25s ease;
 }
 
-/* Start an agent: Provider and Model share a row evenly - .u-group has no flex-sizing of its
-   own (it is normally a lone block), so two of them in a row need telling to split it. */
 .u-input-col {
   flex: 1;
   min-width: 0;
 }
-/* A caution, not an error - the amber .u-chip.warn already uses this pairing elsewhere. */
 .u-warn-note {
   display: flex;
   align-items: flex-start;
@@ -828,7 +888,6 @@ label.u-group {
   transform: translateX(-2px);
 }
 
-/* ---- the About panel ---- */
 .u-info-id {
   display: flex;
   align-items: center;
@@ -1129,33 +1188,6 @@ label.u-group {
   font-size: 12.5px;
 }
 
-/* A few seconds' safety net after a destructive editor switch - low enough not to fight the
-   stage for attention, gone on its own if nobody needs it. */
-.u-undo-toast {
-  position: absolute;
-  left: 50%;
-  bottom: 22px;
-  translate: -50% 0;
-  animation: fade-up 0.25s ease;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  background: var(--ink);
-  color: var(--surface);
-  border-radius: 999px;
-  padding: 10px 10px 10px 16px;
-  font-size: 12.5px;
-  box-shadow: 0 12px 28px -12px rgba(0, 0, 0, 0.35);
-  z-index: 30;
-}
-.u-undo-toast .u-linkish {
-  color: var(--surface);
-  font-weight: 600;
-  text-decoration: underline;
-}
-
-/* Expanded, the conversation has no title bar: its status and close button float over the top, and
-   the thread uses more of the window. */
 .u-panel.is-floating > .u-panel-head {
   position: absolute;
   inset: 0 0 auto;
@@ -1187,9 +1219,6 @@ label.u-group {
   max-width: none;
 }
 
-/* Docked, the conversation is 336px wide. The design sets 16.5px for the expanded view, where
-   the measure is 62 characters; at this width the same size gives about 30, which reads as
-   shouting. The expanded view keeps the design's size exactly. */
 .u-body:not(.is-chat-full) .xc-text,
 .u-body:not(.is-chat-full) .xc-say {
   font-size: 14px;
@@ -1257,7 +1286,6 @@ label.u-group {
   z-index: 2;
 }
 
-/* ---- starting an agent ---- */
 .u-setup-col {
   width: 100%;
   max-width: 420px;
@@ -1282,33 +1310,15 @@ label.u-group {
   min-height: 92px;
 }
 
-/* ---- a server and the tools under it ---- */
-.u-row.is-nested {
-  padding-left: 30px;
-  background: var(--sunk);
-}
-.u-row + .u-row.is-nested {
-  border-top: 1px solid var(--line-2);
-}
-.u-check svg {
-  opacity: 0;
-}
-.u-check.on svg {
-  opacity: 1;
-}
-/* A tool's own name is an identifier, so it is set as one. */
 .u-row-name.mono {
   font-family: "IBM Plex Mono", monospace;
   font-size: 12px;
 }
 
-/* Reads as text until you need it, which is what "quiet" means. */
 .u-btn.quiet:hover {
   color: var(--ink);
   background: var(--sunk);
 }
-/* In a panel the setup column is read from the top; the design centres it because there it has
-   a whole stage to sit in the middle of. */
 .u-panel-body .u-setup {
   justify-content: flex-start;
   align-items: stretch;
@@ -1318,9 +1328,7 @@ label.u-group {
   max-width: none;
 }
 
-/* ---- pieces the port left without a home ---- */
 
-/* Each turn is a row of the thread, so the person's own words can sit at its end. */
 .xc-turn {
   display: flex;
   flex-direction: column;
@@ -1383,7 +1391,6 @@ label.u-group {
   background: var(--bad);
 }
 
-/* The two fields are written in as well as read. */
 .rich-text {
   outline: none;
   overflow-y: auto;
@@ -1391,7 +1398,6 @@ label.u-group {
   overflow-wrap: break-word;
 }
 
-/* A failure that names the thing to do about it. */
 .repair {
   display: flex;
   align-items: center;
@@ -1413,7 +1419,6 @@ label.u-group {
   flex: none;
 }
 
-/* Loading or failing to load a shared file, said across the top of the room. */
 .draft-banner {
   flex: none;
   display: flex;
@@ -1431,8 +1436,6 @@ label.u-group {
   color: var(--bad);
 }
 
-/* What a tool does, on hover. Fixed to the window, not placed inside the list: the panel
-   scrolls, so a bubble positioned within it is cut off the moment it is wider than a row. */
 .tool-tip {
   position: fixed;
   z-index: 40;
@@ -1469,14 +1472,10 @@ label.u-group {
   min-width: 0;
 }
 
-/* The brief's two fields are where the writing happens, so they get the room: the composition
-   is wider by about 7% of the card, and the rail stays narrow - so all of the extra lands on
-   the measure people actually read. */
 .u-flow {
   max-width: 1096px;
 }
 
-/* Run sits beside four icon controls, so it is sized to them rather than to a form button. */
 .u-bar .u-btn.primary {
   height: 30px;
   padding: 0 13px;

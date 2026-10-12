@@ -16,11 +16,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { grownHeight } from "../../chat/composer-size";
 
-/**
- * Grows a text box with what is typed in it, up to `maxHeight`, past which it scrolls. It measures
- * again when the box changes width, because a window that is still opening is a few pixels wide and
- * wraps its text one character per line.
- */
 export function useAutosize(value: string, maxHeight: number) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const [width, setWidth] = useState(0);

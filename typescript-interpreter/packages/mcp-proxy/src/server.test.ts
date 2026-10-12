@@ -88,7 +88,6 @@ function startTarget(requiredHeader?: { name: string; value: string }): Promise<
   return listen(server);
 }
 
-/** A target that accepts the connection and never answers, for exercising the upstream timers. */
 function startSilentTarget(): Promise<RunningServer & { sockets: Socket[] }> {
   const sockets: Socket[] = [];
   const server = createNetServer((socket) => {
@@ -104,7 +103,6 @@ function startSilentTarget(): Promise<RunningServer & { sockets: Socket[] }> {
   });
 }
 
-/** A target that answers with `bytes` bytes of body, for exercising the response cap. */
 function startBulkTarget(bytes: number): Promise<RunningServer> {
   const server = createServer((_req, res) => {
     res.on("error", () => {});
@@ -237,7 +235,6 @@ describe("the assembled proxy (gate → SSRF → forward → CORS), with authent
     proxy = await listen(
       createProxyServer(
         makeConfig({
-          // Per client, nothing is in the way; the global bucket is the only thing counting.
           requestsPerMinute: 10_000,
           burst: 10_000,
           globalRequestsPerMinute: 60,
@@ -259,7 +256,6 @@ describe("the assembled proxy (gate → SSRF → forward → CORS), with authent
 
     expect((await send("203.0.113.1")).status).toBe(200);
     expect((await send("203.0.113.2")).status).toBe(200);
-    // A third, unrelated address - the per-client limiter is happy, the global cap is not.
     expect((await send("203.0.113.3")).status).toBe(429);
   });
 
@@ -304,9 +300,6 @@ describe("the assembled proxy (gate → SSRF → forward → CORS), with authent
     target = await startBulkTarget(400_000);
     proxy = await listen(createProxyServer(makeConfig({ maxResponseBytes: 50_000 })));
 
-    // The overrun is detected while the body streams, after the status line is already on its
-    // way, so the cut surfaces as a dropped transfer rather than a status code - and depending on
-    // how much the socket had flushed, it can land on either the headers or the body.
     await expect(
       fetch(`${proxy.url}?target=${encodeURIComponent(target.url)}`, {
         method: "POST",
@@ -373,8 +366,6 @@ describe("the assembled proxy (gate → SSRF → forward → CORS), with authent
     expect(output).not.toContain("BODY-SHOULD-NOT-APPEAR");
   });
 
-  // A request line the URL parser rejects must be answered, not left to throw inside the async
-  // handler: an unhandled rejection there ends the whole process.
   it.each(["//", "http://"])("answers 400 to a request target of %s instead of failing", async (requestTarget) => {
     proxy = await listen(createProxyServer(makeConfig()));
     const port = Number(new URL(proxy.url).port);

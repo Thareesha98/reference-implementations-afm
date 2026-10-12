@@ -44,7 +44,6 @@ describe("model frontmatter editing", () => {
   });
 
   it("does not confuse an MCP server's name with the model's name", () => {
-    // `name: deepwiki` sits outside the model block; `type:` sits deeper inside it.
     expect(getModelField(FULL, "name")).not.toBe("deepwiki");
   });
 
@@ -85,8 +84,6 @@ describe("model frontmatter editing", () => {
   });
 
   it("writes an empty value as an empty string, never as YAML null", () => {
-    // A bare `name:` parses as null and fails validation, which would collapse the Simple
-    // view the moment the model field is cleared.
     const next = setModelField(FULL, "name", "");
     expect(next).toContain('name: ""');
     expect(next).not.toMatch(/^ +name:\s*$/m);
@@ -101,8 +98,6 @@ describe("model frontmatter editing", () => {
 
   it("leaves an inline `model:` shorthand alone rather than rewriting its shape", () => {
     const source = "---\nname: Tester\nmodel: gpt-4o\n---\n\n# Role\nr\n";
-    // Nothing here matches the nested mapping these controls edit, so a new block is added
-    // rather than the existing scalar being silently reinterpreted.
     expect(getModelField(source, "name")).toBe("");
   });
 
@@ -149,13 +144,10 @@ r
 `;
     expect(getModelApiKey(toolKey)).toBe("");
     const next = setModelApiKey(toolKey, "${env:ANTHROPIC_API_KEY}");
-    // The server's own key is left exactly where it was; only the model gains one.
     expect(next).toContain("api_key: ${env:TOOL_KEY}");
     expect(getModelApiKey(next)).toBe("${env:ANTHROPIC_API_KEY}");
   });
 
-  // The block is created rather than skipped: writing nothing would make choosing a provider
-  // look like it had worked while the file still pointed at nobody's key.
   it("creates the authentication block when the file has none", () => {
     const bare = "---\nname: T\nmodel:\n  provider: openai\n  name: gpt-4o\n---\n\n# Role\nr\n";
     const next = setModelApiKey(bare, "${env:ANTHROPIC_API_KEY}");
@@ -189,7 +181,6 @@ describe("setServerToolFilter", () => {
   it("adds an allow-list to the named server only", () => {
     const next = setServerToolFilter(WITH_SERVERS, "gitlab", ["list_issues", "get_issue"]);
     expect(next).toContain("      tool_filter:\n        allow:\n          - list_issues\n          - get_issue");
-    // the other server is untouched
     expect(next).toContain("    - name: deepwiki\n      transport:");
   });
 
@@ -254,8 +245,6 @@ describe("reading the brief and the key it points at", () => {
     expect(agentBrief(file)).toBe("# Role\n\nA helper.");
   });
 
-  // Changing the model must not count as rewriting the agent, or every model swap would throw
-  // the conversation away.
   it("ignores frontmatter changes", () => {
     expect(agentBrief(file.replace("anthropic", "openai"))).toBe(agentBrief(file));
   });
@@ -264,8 +253,6 @@ describe("reading the brief and the key it points at", () => {
     expect(agentBrief(file.replace("A helper.", "A poet."))).not.toBe(agentBrief(file));
   });
 
-  // The catalogue name is a guess; the file is the fact. Guessing reports a saved, working key
-  // as missing and asks for it again.
   it("reads the key name the file actually points at", () => {
     expect(envSecretName(getModelApiKey(file))).toBe("MY_OWN_KEY");
   });
@@ -275,8 +262,6 @@ describe("reading the brief and the key it points at", () => {
   });
 });
 
-// YAML quotes both ways. Only the double-quoted form is JSON-compatible, so a single-quoted
-// scalar has to be unwrapped here or its quotes are written back into the file.
 describe("quoted scalars", () => {
   const file = (body: string) => `---\n${body}\n---\n\n# Role\nr\n\n# Instructions\ni\n`;
 
@@ -446,8 +431,6 @@ Be brief
 `;
 
 describe("typing in Role and Instructions", () => {
-  // The editor round-trips through the file on every keystroke. Trimming here removed the
-  // space the instant it was typed, so the next letter landed against the previous word.
   it("keeps a trailing space so the next word can be typed", () => {
     const typed = setSection(FILE, "Role", "You are a tester ");
     expect(getSection(typed, "Role")).toBe("You are a tester ");
@@ -490,8 +473,6 @@ describe("removing the last server", () => {
     return preview.metadata;
   }
 
-  // An empty `mcp:` reads back as null, and the schema wants an array - which is exactly what
-  // turned "delete this server" into a file that would not open.
   it("leaves a file that still parses", () => {
     const one = addMcpServer(FILE, { name: "exa", url: "https://mcp.exa.ai/mcp" });
     const none = removeMcpServer(one, "exa");
@@ -511,8 +492,6 @@ describe("removing the last server", () => {
 });
 
 describe("setting the model key", () => {
-  // Writing nothing made choosing a provider look like it had worked while the file still
-  // pointed at nobody's key.
   it("creates the authentication block when the file has none", () => {
     const next = setModelApiKey(FILE, "${env:OPENAI_API_KEY}");
     expect(getModelApiKey(next)).toBe("${env:OPENAI_API_KEY}");

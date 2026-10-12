@@ -39,12 +39,6 @@ export interface ReadinessInput {
   serverNameByUrl: Map<string, string>;
 }
 
-/**
- * One sentence saying whether the agent can run and, if not, what is missing.
- *
- * It replaces a "Valid" chip: a file can be valid and still not run. Only the first blocker is
- * named; the second usually goes away once the first is fixed.
- */
 export function readiness(input: ReadinessInput): Readiness {
   const { role, instructions, metadata, issues, status, current, failed, brokenServerIds, serverNameByUrl } = input;
 
@@ -69,8 +63,6 @@ export function readiness(input: ReadinessInput): Readiness {
     return { tone: "bad", lead: "Needs a model before it can run - ", subject: "choose one", fix: "model" };
   }
 
-  // A missing role is the commonest problem and the validator words it worst, and it is fixed on
-  // the canvas, so there is nothing to link to.
   if (role.trim() === "") {
     return { tone: "bad", lead: "Needs a role before it can run" };
   }
@@ -93,11 +85,6 @@ export function readiness(input: ReadinessInput): Readiness {
 
 type McpServers = NonNullable<NonNullable<AgentMetadata["tools"]>["mcp"]>;
 
-/**
- * An MCP client knows a server by URL and the agent file by name. Tool descriptors carry the URL
- * and `tool_filter` is written under the name, so turning a tool selection into a file edit joins
- * the two.
- */
 export function serverNameByUrl(servers: McpServers): Map<string, string> {
   const byUrl = new Map<string, string>();
   for (const server of servers) {

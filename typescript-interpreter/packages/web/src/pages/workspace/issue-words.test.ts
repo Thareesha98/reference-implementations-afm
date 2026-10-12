@@ -41,7 +41,6 @@ describe("saying the problem in words a person can act on", () => {
     expect(inPlainWords(issue("Unknown field 'colour'.")).text).toContain('"colour"');
   });
 
-  // A wrong friendly message is worse than an unfriendly true one.
   it("leaves anything it does not recognise exactly as it was", () => {
     const odd = "Expected array, received null";
     expect(inPlainWords(issue(odd)).text).toBe(odd);

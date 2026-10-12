@@ -5,14 +5,9 @@ packages:
 allowBuilds:
   esbuild: true
 
-# pnpm blocks dependency install/build scripts by default (a safety feature, so a
-# package can't run arbitrary code on install). Vitest's compiler, esbuild, needs
-# its install script to set up its native binary, so we allow just that one.
 onlyBuiltDependencies:
   - esbuild
 
-# Transitive dependencies of @modelcontextprotocol/sdk (its server-side packages) pinned to patched
-# releases. The browser bundle does not include them; this keeps the install free of known advisories.
 overrides:
   fast-uri: ">=3.1.6"
   ip-address: ">=10.3.1"

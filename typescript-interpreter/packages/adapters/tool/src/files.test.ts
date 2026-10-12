@@ -164,8 +164,6 @@ describe("filesToolPort", () => {
     expect(result.content).toContain("'path' is required");
   });
 
-  // Reporting the cap as the count - "20 match(es)" for a file with hundreds - would let the
-  // model take a truncated list for the complete one.
   it("says a capped result is capped, rather than reporting the cap as the total", () => {
     const many = filesMap([{ name: "big.md", path: "big.md", text: "hit ".repeat(100) }]);
     const result = searchFilesText("hit", many);

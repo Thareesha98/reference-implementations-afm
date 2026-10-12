@@ -49,7 +49,6 @@ function SignInFact({ auth, title }: { auth: DirectoryAuth; title: string }) {
   );
 }
 
-/** What the directory says about one server, read before connecting it. */
 export function ServerDetail({ entry, onBack, onConnect }: Props) {
   return (
     <>

@@ -3,14 +3,11 @@ dist/
 *.tsbuildinfo
 .DS_Store
 
-# Local env (keep secrets out of git)
 .env.local
 *.local
 
-# Local architecture / reference notes — intentionally kept out of git
 docs/
 
-# deployment
 deploy/.env.deploy
 packages/mcp-proxy/deploy/
 packages/mcp-proxy/proxy.zip

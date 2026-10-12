@@ -22,17 +22,10 @@ export interface SecretUse {
 }
 
 export interface SecretGateDeps {
-  /** Tool-scoped uses declared by the agent currently loading. */
   toolUses: () => SecretUse[];
-  /** Whether the value was entered for this destination. */
   approvedFor: (name: string, host: string | undefined) => boolean;
 }
 
-/**
- * A saved secret must not travel to a tool server it was not entered for, or an agent could point a
- * key saved for the model at a server of its own. Entering a value in a server's own window is the
- * approval, so nothing is ever asked: a use the value was not entered for simply does not resolve.
- */
 export function destinationGatedVault(inner: SecretPort, deps: SecretGateDeps): SecretPort {
   return {
     async resolve(ref) {

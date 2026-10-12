@@ -17,8 +17,6 @@
 import { findAgent } from "../../agents-store";
 import { inlineAfmParam, decodeInlineAfm } from "../../load-paths";
 
-// What "New agent" starts from: the settings an agent cannot do without and nothing written. Empty
-// on purpose: the diagram numbers what is missing.
 export const EMPTY_TEMPLATE = `---
 name: New Agent
 model:
@@ -36,7 +34,6 @@ interfaces:
 # Instructions
 `;
 
-// The source a load starts from: a draft, a saved agent, an inline share link or the template.
 export function initialContent(searchParams: URLSearchParams, hash: string, draftSource: string | undefined): string {
   if (draftSource !== undefined) return draftSource;
   const agentId = searchParams.get("agentId");
@@ -49,13 +46,11 @@ export function initialContent(searchParams: URLSearchParams, hash: string, draf
     try {
       return decodeInlineAfm(inline);
     } catch {
-      // A malformed share link opens the empty template.
     }
   }
   return EMPTY_TEMPLATE;
 }
 
-// A stable key for which agent this is, so a real change reloads and a mere edit does not.
 export function identityFor(searchParams: URLSearchParams, hash: string, draftSource: string | undefined): string {
   if (draftSource !== undefined) return `draft:${draftSource}`;
   const file = searchParams.get("file");

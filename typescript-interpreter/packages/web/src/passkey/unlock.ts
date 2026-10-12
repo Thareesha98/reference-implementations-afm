@@ -14,17 +14,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-/** Thrown when the device cannot do PRF; the caller falls back to memory only. */
 export class PasskeyUnsupportedError extends Error {}
 
-// What the authenticator evaluates its PRF over. It must never change, or stored ciphertext can no
-// longer be opened. Not a secret.
 export const PRF_EVAL_SALT = new TextEncoder().encode("afm-passkey-prf-v1");
 
-/**
- * One passkey ceremony, returning the PRF output. Must run on the main thread inside a user
- * gesture.
- */
 export async function unlockWithPasskey(
   credentialId: BufferSource,
   salt: BufferSource = PRF_EVAL_SALT,

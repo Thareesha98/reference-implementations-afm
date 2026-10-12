@@ -14,15 +14,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// The providers this runtime can build a model port for, with common model names. A convenience,
-// not a limit: anything else can be typed by hand.
 
 export interface ModelOption {
   id: string;
   label: string;
-  /** What the model card shows; the provider's mark is already there, so the brand is not. */
   short: string;
-  /** What it is for. */
   note?: string;
 }
 
@@ -30,7 +26,6 @@ export interface ProviderOption {
   id: string;
   label: string;
   host: string;
-  // The environment variable this provider's key is conventionally read from.
   secretName: string;
   models: ModelOption[];
 }
@@ -67,7 +62,6 @@ export function findProvider(id: string): ProviderOption | undefined {
   return MODEL_PROVIDERS.find((provider) => provider.id === id);
 }
 
-/** The short name for a model id, or the id itself when unlisted. */
 export function shortModelLabel(modelId: string): string {
   for (const provider of MODEL_PROVIDERS) {
     const found = provider.models.find((model) => model.id === modelId);

@@ -49,8 +49,6 @@ const signatureSchema = z
 
 const WHOLE_NUMBER = /^\s*[+-]?\d+\s*$/;
 
-// A number written as a variable is text once resolved ("7"); unresolved, while editing, it is left
-// unchecked.
 function numberFromText(value: unknown): unknown {
   if (typeof value !== "string") return value;
   if (value.includes("${")) return undefined;
@@ -60,8 +58,6 @@ function numberFromText(value: unknown): unknown {
 const JWT_ALGORITHMS = new Set(["RS256", "RS384", "RS512", "HS256", "HS384", "HS512"]);
 const OAUTH2_CREDENTIAL_BEARERS = new Set(["auth_header", "post_body"]);
 
-// Required and accepted fields per non-oauth2 authentication type. The recognized types are derived
-// from these keys.
 const AUTH_FIELDS = {
   bearer: { required: ["token"], allowed: ["token"] },
   basic: { required: ["username", "password"], allowed: ["username", "password"] },
@@ -72,11 +68,8 @@ const AUTH_FIELDS = {
   },
 } as const satisfies Record<string, { required: readonly string[]; allowed: readonly string[] }>;
 
-/** oauth2 is validated per grant type, so it has no entry above. */
 const RECOGNIZED_AUTH_TYPES: readonly string[] = [...Object.keys(AUTH_FIELDS), "oauth2"];
 
-// Only the scheme is checked, and only for absolute URLs; an unresolved `${...}` is valid while
-// editing.
 function httpUrl(field: string): z.ZodType<string> {
   return z.string().superRefine((value, ctx) => {
     if (value.includes("${")) return;
@@ -158,7 +151,6 @@ const clientAuthentication = z
       return;
     }
 
-    // Safe: `type` is one of these keys.
     const fields = AUTH_FIELDS[type as keyof typeof AUTH_FIELDS];
     const missing = fields.required.filter((field) => !provided.has(field));
     if (missing.length > 0) {
@@ -334,7 +326,6 @@ const localSkillSource = z
   })
   .strict();
 
-// Validation follows the spec (0.4.0), which defines one skill source.
 const skillSource = localSkillSource;
 
 export const agentMetadataSchema = z

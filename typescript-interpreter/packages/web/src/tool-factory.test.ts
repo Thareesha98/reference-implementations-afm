@@ -148,8 +148,6 @@ describe("toolsFromMetadata - recovering from a revoked authorization_code token
         authorizeUrl: "https://gitlab.example.com/oauth/authorize",
         tokenUrl: "https://gitlab.example.com/oauth/token",
         clientId: "gitlab-client",
-        // The MCP server's own URL (RFC 8707) - so invalidating this session can never collide
-        // with a different server that happens to share the same authorize_url/client_id.
         resource: "https://a.example.com/mcp",
       },
     ]);

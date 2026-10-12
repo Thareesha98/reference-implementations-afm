@@ -1,4 +1,3 @@
-/* Long answers get a reading measure - full-width prose is tiring to read. */
 
 
 
@@ -20,8 +19,6 @@
 
 
 
-/* Attachments are the user's own content, so they sit on the user's side of the thread rather
-   than as a system marker down the middle. */
 .attachment-row {
   align-self: flex-end;
   display: flex;
@@ -65,8 +62,6 @@
   transform: scale(0.85);
   transition: opacity 0.15s ease, transform 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
-/* Kept out of the way until the file is the thing being looked at, but always reachable by
-   keyboard - focus-visible has to reveal it too or it can be tabbed to while invisible. */
 .attachment-card:hover .attachment-remove,
 .attachment-card:focus-within .attachment-remove {
   opacity: 1;
@@ -138,36 +133,6 @@
 
 
 
-/* Only where a budget meter can appear (the Run page) - Studio's test chat never passes a
-   budget, so its composer keeps its plain top padding. The extra space
-   here is fixed whether or not the meta row has anything in it this turn, so a turn starting
-   or finishing never nudges the composer - or the message list above it. */
-
-.composer-meta-row {
-  position: absolute;
-  top: 6px;
-  left: 24px;
-  right: 24px;
-  max-width: var(--chat-column);
-  margin: 0 auto;
-  padding-left: 14px;
-  min-height: 15px;
-  pointer-events: none;
-}
-.budget-meter {
-  display: block;
-  font-size: 11.5px;
-  color: var(--muted);
-  font-family: var(--mono);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-@media (max-width: 720px) {
-  .composer-meta-row {
-    display: none;
-  }
-}
 .composer-drop-overlay {
   position: absolute;
   inset: 6px 16px 8px;
@@ -320,7 +285,6 @@
 
 
 
-/* ---- copy button on code blocks ---- */
 .code-wrap {
   position: relative;
 }

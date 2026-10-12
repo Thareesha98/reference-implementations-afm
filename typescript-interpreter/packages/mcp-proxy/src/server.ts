@@ -31,8 +31,6 @@ import type { UpstreamConnection } from "./forward";
 import { createRateLimiter, isAllowedTarget, clientIpFor } from "./limits";
 import type { RateLimiter } from "./limits";
 
-// Requests carry MCP credentials in transit, so nothing on this path may log headers, body or
-// target. The only log is the startup line at the bottom.
 const GLOBAL_BUCKET = "all";
 
 function headerString(value: string | string[] | undefined): string | undefined {
@@ -88,8 +86,6 @@ function buildResponseHeaders(
     if (value === undefined) continue;
     if (lower.startsWith("access-control-")) continue;
     if (HOP_BY_HOP.has(lower)) continue;
-    // All servers share this origin, so a cookie one set would land in the same jar as the others';
-    // the browser never sends it back cross-origin anyway.
     if (lower === "set-cookie") continue;
     out[name] = value;
   }
@@ -120,8 +116,6 @@ async function handle(
     return;
   }
 
-  // Both buckets must pass: per-client bounds one abuser, global bounds the relay against rotating
-  // addresses. A rejected request must not spend a global token.
   const client = clientIpFor(req.headers, req.socket.remoteAddress, config.trustedProxyHops);
   if (!limiter.take(client) || !globalLimiter.take(GLOBAL_BUCKET)) {
     res.writeHead(429, { ...cors, "content-type": "application/json", "retry-after": "60" });
@@ -161,8 +155,6 @@ async function handle(
     return;
   }
 
-  // One deadline covers the whole exchange - connecting, waiting for headers, and streaming -
-  // rather than starting only once headers arrive.
   const controller = new AbortController();
   let connection: UpstreamConnection | undefined;
   let clientGone = false;
@@ -207,8 +199,6 @@ async function handle(
   upstream.pipe(res);
   upstream.on("error", () => res.destroy());
 
-  // A response declares no size, so it is counted as it streams. Observing beside pipe() keeps its
-  // backpressure.
   let received = 0;
   upstream.on("data", (chunk: Buffer) => {
     received += chunk.length;
@@ -232,7 +222,6 @@ export function createProxyServer(config: ProxyConfig): Server {
     burst: config.globalBurst,
   });
   return createServer((req, res) => {
-    // A failure in one request must never take the relay down with it.
     handle(req, res, config, limiter, globalLimiter).catch(() => {
       if (res.headersSent) {
         res.destroy();

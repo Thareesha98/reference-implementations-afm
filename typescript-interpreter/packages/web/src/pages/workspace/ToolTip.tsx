@@ -19,17 +19,10 @@ import { useEffect, useState } from "react";
 export interface TipTarget {
   title: string;
   body: string;
-  /** Where the row is on screen, so the bubble can point at it. */
   at: { top: number; left: number; height: number };
 }
 
-/**
- * What a tool does, shown beside the row being pointed at. Fixed to the window rather than placed
- * in the list: the panel scrolls, so a bubble inside it would be cut off at the edge.
- */
 export function ToolTip({ tip }: { tip: TipTarget | null }) {
-  // Held one frame so the bubble fades in from where it belongs instead of sliding from the last
-  // hovered row.
   const [shown, setShown] = useState(false);
   useEffect(() => {
     if (tip === null) {
@@ -54,10 +47,6 @@ export function ToolTip({ tip }: { tip: TipTarget | null }) {
   );
 }
 
-/**
- * Where the bubble goes for a row. Takes the measurement rather than the element so the rule can be
- * checked without a browser.
- */
 export function tipFor(title: string, body: string, box: DOMRectLike): TipTarget {
   return { title, body, at: { top: box.top, left: box.left, height: box.height } };
 }
@@ -68,13 +57,8 @@ export interface DOMRectLike {
   height: number;
 }
 
-/** As much as fits without the bubble becoming a wall of text. */
 const TIP_LIMIT = 260;
 
-/**
- * Enough of a description to know what the tool is for. Some servers put their whole procedure in
- * it; shown whole it would cover the panel. Cut at a word and marked.
- */
 export function shorten(text: string, limit = TIP_LIMIT): string {
   const clean = text.replace(/\s+/g, " ").trim();
   if (clean.length <= limit) return clean;
@@ -83,7 +67,6 @@ export function shorten(text: string, limit = TIP_LIMIT): string {
   return `${(lastSpace > limit / 2 ? cut.slice(0, lastSpace) : cut).replace(/[.,;:\s]+$/, "")}…`;
 }
 
-/** The position the bubble renders at: level with the row, just off its left edge. */
 export function tipPosition(tip: TipTarget): { top: number; left: number } {
   return { top: tip.at.top + tip.at.height / 2, left: tip.at.left - 12 };
 }

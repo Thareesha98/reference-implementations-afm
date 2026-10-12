@@ -422,8 +422,6 @@ describe("oauthProviderFrom", () => {
   });
 });
 
-// The agent file supplying these URLs is untrusted, so a file naming an insecure endpoint must
-// stop the flow before the browser is sent anywhere or the login code leaves the page.
 describe("insecure endpoints in an untrusted agent file", () => {
   const insecure = ["http://auth.example.com/oauth2/authorize", "javascript:alert(1)", "data:text/html,x"];
 
@@ -602,8 +600,6 @@ describe("createOAuth2MachineClient", () => {
     await expect(client.getAccessToken(fetchFn)).rejects.toThrow(/did not contain 'access_token'/);
   });
 
-  // The client_secret rides in this request, so an untrusted agent file must not be able to aim
-  // it at a cleartext endpoint.
   it("never sends the client secret to a non-https token_url", async () => {
     for (const tokenUrl of ["http://auth.example.com/token", "javascript:alert(1)", "data:text/plain,x"]) {
       const fetchFn = scriptedFetch([{ body: { access_token: "tok" } }]);
@@ -632,8 +628,6 @@ describe("requireHttpsUrl", () => {
     expect(() => requireHttpsUrl("http://id.example.com/token", "token_url")).toThrow(/must use https/);
   });
 
-  // Loopback is deliberately NOT exempt: these fields name an identity provider, and the one
-  // value local development needs on http - the redirect_uri - is not one of them.
   it("rejects http on loopback too", () => {
     expect(() => requireHttpsUrl("http://localhost:8080/token", "token_url")).toThrow(/must use https/);
     expect(() => requireHttpsUrl("http://127.0.0.1:8080/token", "token_url")).toThrow(/must use https/);

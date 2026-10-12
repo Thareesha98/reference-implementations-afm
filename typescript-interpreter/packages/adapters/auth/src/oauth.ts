@@ -22,7 +22,6 @@ function binaryString(bytes: Uint8Array): string {
   return binary;
 }
 
-/** Base64 of a UTF-8 string (`btoa` alone fails outside Latin-1). */
 export function base64(value: string): string {
   return btoa(binaryString(new TextEncoder().encode(value)));
 }
@@ -31,9 +30,6 @@ export function base64Url(bytes: Uint8Array): string {
   return btoa(binaryString(bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-// Agent files are untrusted, and their OAuth endpoints receive the login code, PKCE verifier and
-// client secret, so those URLs must be https. There is no loopback exception: the redirect_uri is
-// the only URL development needs on http, and it is not checked here.
 export function requireHttpsUrl(raw: string, field: string): string {
   let url: URL;
   try {
@@ -63,7 +59,6 @@ export interface OAuth2MachineConfig {
   credentialBearer?: "auth_header" | "post_body";
 }
 
-/** Grant types this client can complete without a user at a browser. */
 export type OAuth2MachineGrant = OAuth2MachineConfig["grantType"];
 
 const MACHINE_GRANTS: readonly string[] = ["client_credentials", "password", "refresh_token", "jwt_bearer"];
@@ -72,7 +67,6 @@ export function isOAuth2MachineGrant(grant: string): grant is OAuth2MachineGrant
   return MACHINE_GRANTS.includes(grant);
 }
 
-/** An AFM `authentication` mapping in this client's shape. */
 export function oauth2MachineConfig(
   grantType: OAuth2MachineGrant,
   auth: {
@@ -190,10 +184,6 @@ export interface OAuthProviderRef {
   tokenUrl: string;
   clientId: string;
   scopes?: string[];
-  /**
-   * Canonical URI of the resource the token is for (RFC 8707); for an MCP server, its own URL. Sent
-   * when known, so an audience-restricted token cannot be reused against another resource.
-   */
   resource?: string;
 }
 
@@ -203,7 +193,6 @@ export interface AuthorizationCodeConfig extends OAuthProviderRef {
 
 const lowerCase = (value: unknown): string => (typeof value === "string" ? value.toLowerCase() : "");
 
-/** Whether an `authentication` block asks for the browser sign-in flow rather than a machine grant. */
 export function isInteractiveOAuth(auth: { type?: unknown; grant_type?: unknown } | undefined): boolean {
   return lowerCase(auth?.type) === "oauth2" && lowerCase(auth?.grant_type) === "authorization_code";
 }
@@ -316,8 +305,6 @@ export function isExpired(tokens: AuthorizationCodeTokens, skewMs = 30_000): boo
   return Date.now() >= tokens.expiresAt - skewMs;
 }
 
-// Short synchronous digest, not for security: keeps a long authorizeUrl from pushing the resource
-// suffix out of the key's 64-character slice.
 function syncHash(value: string): string {
   let hash = 0;
   for (let index = 0; index < value.length; index += 1) {
@@ -328,15 +315,9 @@ function syncHash(value: string): string {
 
 export function authorizationCodeProviderKey(config: Pick<AuthorizationCodeConfig, "authorizeUrl" | "clientId" | "resource">): string {
   const base = `${config.authorizeUrl}::${config.clientId}`.replace(/[^a-zA-Z0-9]/g, "").slice(0, 64);
-  // The resource is part of the key: two MCP servers can share an authorization server and
-  // client_id, and a token issued for one must never be used for the other.
   return config.resource === undefined ? base : `${base}-${syncHash(config.resource)}`;
 }
 
-/**
- * Where createAuthorizationCodeSession() stores this provider's refresh token; lets a caller check
- * for a saved session without a network call.
- */
 export function authorizationCodeRefreshKey(config: Pick<AuthorizationCodeConfig, "authorizeUrl" | "clientId" | "resource">): string {
   return `afm.oauth.${authorizationCodeProviderKey(config)}.refresh`;
 }
@@ -349,9 +330,6 @@ function sameUrl(a: string, b: string): boolean {
   }
 }
 
-// RFC 9207: an answer that names its server must name the one this sign-in started with. Both
-// endpoints are compared, so a genuine authorization page cannot be paired with a foreign token
-// endpoint.
 async function requireSameServer(
   config: Pick<AuthorizationCodeConfig, "authorizeUrl" | "tokenUrl">,
   iss: string,
@@ -431,7 +409,6 @@ export function createAuthorizationCodeSession(
       }
       if (iss !== undefined) await requireSameServer(config, iss, fetchFn);
       tokens = await exchangeCodeForTokens(config, code, flow.verifier, fetchFn);
-      // A fresh sign-in must not land in whatever an older remembered session sealed under this key.
       persistentStore.remove(REFRESH_KEY);
       await persist();
     },

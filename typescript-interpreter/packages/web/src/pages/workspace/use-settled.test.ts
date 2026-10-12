@@ -17,8 +17,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { useSettled } from "./use-settled";
 
-// A tiny stand-in for React's hook runtime: enough to drive useState/useEffect through
-// renders without pulling a DOM renderer into a project that has none configured.
 type Cell = { value: unknown };
 let cells: Cell[] = [];
 let cursor = 0;
@@ -82,7 +80,6 @@ describe("useSettled", () => {
   });
 
   it("does not settle on a value that was only passed through mid-edit", () => {
-    // Typing `nam` then `name:` flips validity twice; the chip should never show the middle one.
     render(true);
     render(false);
     vi.advanceTimersByTime(200);

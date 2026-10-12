@@ -28,6 +28,7 @@ import type {
 import { compositeToolPort } from "@afm/adapter-tool";
 import type { ServerMessage, ImageAttachment } from "./protocol";
 import { permissionKey, serverMessageFromLoopEvent } from "./protocol";
+import { userContent } from "./message-content";
 
 const MAX_TOKENS_PER_TURN = 250_000;
 const MAX_WALL_CLOCK_MS = 180_000;
@@ -47,10 +48,6 @@ const FILES_SYSTEM_NOTE =
   "What is attached is listed below and is accurate as of this message, so do not call " +
   "list_files to find out whether something is attached.\n";
 
-/**
- * The tools the file lists as allowed on each server. Ticking a tool is the person saying yes to it,
- * and the file is where that tick lives, so it is what decides whether a call needs asking about.
- */
 function listedAsAllowed(metadata: AgentMetadata): Set<string> {
   const keys = new Set<string>();
   for (const server of metadata.tools?.mcp ?? []) {
@@ -81,15 +78,12 @@ export class AgentSession {
 
   constructor(private readonly deps: AgentSessionDeps) {}
 
-  // Each load stage reports when it starts and when it settles, so the loading screen shows real
-  // progress. Skipped stages are never announced.
   private step(key: string, label: string, state: "active" | "done" | "failed", note?: string): void {
     this.deps.emit({ type: "load-step", key, label, state, note });
   }
 
   async load(content: string, seedHistory?: ChatMessage[]): Promise<void> {
     this.endTurn();
-    // Loads can overlap; only the newest may install an agent or report on it.
     const number = ++this.loadCount;
     const current = (): boolean => number === this.loadCount;
     let stage = "file";
@@ -113,7 +107,6 @@ export class AgentSession {
       stage = "tools";
       const mcpTools = this.deps.createTools(loaded.metadata);
 
-      // `skills:` stays valid in a file, but this runtime does not load them.
       const tools = compositeToolPort([mcpTools, this.deps.filesTools]);
       const previousTools = this.tools;
       this.loaded = {
@@ -136,8 +129,6 @@ export class AgentSession {
     } catch (error) {
       if (!current()) return;
       const reason = describeError(error);
-      // The agent that was running is gone, so it must stop answering; otherwise a failed load
-      // would report "not ready" while the previous agent kept serving.
       this.loaded = null;
       this.allowed = new Set();
       this.model = null;
@@ -153,10 +144,6 @@ export class AgentSession {
     }
   }
 
-  // Setup has already checked that the model and every server answer, so the agent is usable the
-  // moment it is loaded. Reading the tools now only warms the connections for the first question and
-  // tells the chat which server each tool belongs to; nothing waits on it and nothing here can stop
-  // the agent.
   private async reportTools(tools: ToolPort, current: () => boolean): Promise<void> {
     try {
       const descriptors = await tools.list();
@@ -166,19 +153,11 @@ export class AgentSession {
         tools: descriptors.map((d) => ({ name: d.name, description: d.description, serverId: d.serverId })),
       });
     } catch {
-      // The first question asks again and reports what went wrong.
     }
   }
 
   async send(text: string, images?: ImageAttachment[], keep?: number): Promise<void> {
-    const content: string | ContentPart[] =
-      images !== undefined && images.length > 0
-        ? [
-            ...(text.trim() !== "" ? [{ type: "text" as const, text }] : []),
-            ...images.map((image) => ({ type: "image" as const, data: image.data, mediaType: image.mediaType })),
-          ]
-        : text;
-    await this.sendContent(content, keep);
+    await this.sendContent(userContent(text, images), keep);
   }
 
   private async sendContent(content: string | ContentPart[], keep?: number): Promise<void> {
@@ -190,8 +169,6 @@ export class AgentSession {
       return;
     }
 
-    // One turn at a time: overlapping sends would share the controller and overwrite each other's
-    // history.
     if (this.controller !== null) {
       this.deps.emit({ type: "error", message: "This agent is still answering - wait for it to finish, or press Stop." });
       return;
@@ -219,7 +196,6 @@ export class AgentSession {
         signal: controller.signal,
       })) {
         if (!current()) return;
-        // Keep the loop's full record (tool calls and results) so the next question builds on it.
         if (event.type === "turn-complete") {
           this.history = event.messages;
         }
@@ -231,13 +207,10 @@ export class AgentSession {
     } catch (error) {
       if (current()) this.deps.emit({ type: "error", message: describeError(error) });
     } finally {
-      // Cleared however the turn ended, so the next send is accepted and a later Stop cannot abort
-      // a finished turn.
       if (current()) this.controller = null;
     }
   }
 
-  // A tool the file lists is already allowed, so only the rest go to the person.
   private readonly permission: PermissionBroker = {
     request: async (call, signal) =>
       this.allowed.has(permissionKey(call.serverId, call.name)) ? "allow" : this.deps.permission.request(call, signal),
@@ -247,7 +220,6 @@ export class AgentSession {
     this.controller?.abort();
   }
 
-  // Unlike cancel(), the turn may not report back: its conversation is gone.
   private endTurn(): void {
     this.controller?.abort();
     this.controller = null;
@@ -258,10 +230,6 @@ export class AgentSession {
     this.history = [];
   }
 
-  /**
-   * Where the user last spoke. A turn that used tools ends with an assistant message and one `tool`
-   * message per call, and cutting between them is rejected by OpenAI and Anthropic.
-   */
   private lastUserIndex(): number {
     for (let i = this.history.length - 1; i >= 0; i -= 1) {
       if (this.history[i]?.role === "user") return i;
@@ -281,8 +249,6 @@ export class AgentSession {
       this.deps.emit({ type: "turn-finished", reason: "stop" });
       return;
     }
-    // Drops everything from that message on, including tool traffic; sendContent adds the user
-    // message back.
     this.history = this.history.slice(0, index);
     await this.sendContent(previous.content);
   }

@@ -28,7 +28,6 @@ interface Props {
   streaming: boolean;
   onRegenerate?: () => void;
   onEdit?: (text: string) => void;
-  /** Footnote for what the answer had to do. */
   footnote?: ReactNode;
 }
 
@@ -48,7 +47,6 @@ const EDIT = "M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-
 const RETRY = "M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8M3 3v5h5";
 const SPEAK = "M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298zM16 9a5 5 0 0 1 0 6M19.364 18.364a9 9 0 0 0 0-12.728";
 
-/** The person's words get a bubble; the agent's do not. */
 export function Message({ message, streaming, onRegenerate, onEdit, footnote }: Props) {
   const isUser = message.kind === "user";
   const { copied, copy } = useCopyFeedback();

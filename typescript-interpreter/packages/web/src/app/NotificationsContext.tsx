@@ -18,7 +18,7 @@ import { createContext, useContext, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { shouldNotify, notificationContent } from "./turn-notification";
 import type { AgentStatus, ChatState } from "../chat-state";
-import { loadText, saveText } from "../local-json-store";
+import { loadText } from "../local-json-store";
 
 const ENABLED_KEY = "afm.notifications";
 
@@ -39,30 +39,15 @@ function currentPermission(): NotificationSupport {
 interface NotificationsValue {
   enabled: boolean;
   permission: NotificationSupport;
-  setEnabled: (value: boolean) => Promise<void>;
 }
 
 const NotificationsContext = createContext<NotificationsValue | null>(null);
 
 export function NotificationsProvider({ children }: { children: ReactNode }) {
-  const [enabled, setEnabledState] = useState<boolean>(initialEnabled);
-  const [permission, setPermission] = useState<NotificationSupport>(currentPermission);
+  const [enabled] = useState<boolean>(initialEnabled);
+  const [permission] = useState<NotificationSupport>(currentPermission);
 
-  async function setEnabled(value: boolean): Promise<void> {
-    if (!value) {
-      setEnabledState(false);
-      saveText(ENABLED_KEY, "false");
-      return;
-    }
-    if (!isSupported()) return;
-    const result = await Notification.requestPermission();
-    setPermission(result);
-    const granted = result === "granted";
-    setEnabledState(granted);
-    saveText(ENABLED_KEY, String(granted));
-  }
-
-  const value: NotificationsValue = { enabled, permission, setEnabled };
+  const value: NotificationsValue = { enabled, permission };
 
   return <NotificationsContext.Provider value={value}>{children}</NotificationsContext.Provider>;
 }
@@ -75,7 +60,6 @@ function useNotificationsContext(): NotificationsValue {
   return value;
 }
 
-/** Watches the workspace's session; owns no worker of its own. */
 export function TurnNotificationWatcher({ state }: { state: ChatState }) {
   const { enabled, permission } = useNotificationsContext();
   const prevStatusRef = useRef<AgentStatus>(state.status);
@@ -94,8 +78,6 @@ export function TurnNotificationWatcher({ state }: { state: ChatState }) {
         notification.close();
       };
     } catch {
-      // Some browsers grant permission but refuse the constructor (Android Chrome wants a service
-      // worker).
     }
   }, [state.status, enabled, permission]);
 

@@ -14,19 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-/**
- * Markdown in the file, formatted text on the screen. The agent reads the characters, so `**bold**`
- * must stay `**bold**` on disk; these two functions carry the same content between the forms, one
- * to fill the editable box and one to read it back after every keystroke.
- *
- * The set they carry is deliberately small. Anything outside it stays plain text rather than
- * guessed at, since inventing structure changes what the agent was told.
- */
 
-/**
- * The part of a DOM node this file needs; a plain object satisfies it, so the reading direction is
- * testable without a browser.
- */
 export interface NodeLike {
   nodeType: number;
   nodeName: string;
@@ -55,7 +43,6 @@ function children(node: NodeLike): NodeLike[] {
   return Array.from({ length: node.childNodes.length }, (_, i) => node.childNodes[i] as NodeLike);
 }
 
-/** Inline markers made literal so a stray asterisk survives the round trip. */
 function escapeInline(text: string): string {
   return text.replace(/([\\`*_[\]])/g, "\\$1");
 }
@@ -69,8 +56,6 @@ function inlineOf(node: NodeLike): string {
   if (node.nodeType === TEXT) return escapeInline(node.textContent ?? "");
   if (node.nodeType !== ELEMENT) return "";
   if (node.nodeName === "BR") return "\n";
-  // Markdown does not read markers inside a code span, so escaping there would put backslashes in
-  // the file.
   if (node.nodeName === "CODE") {
     const code = rawText(node);
     return code.trim() === "" ? code : `\`${code}\``;
@@ -127,7 +112,6 @@ function blockOf(node: NodeLike): string[] {
     const text = children(node).map(inlineOf).join("").replace(/[ \t]+$/gm, "");
     return text.trim() === "" ? [] : [text];
   }
-  // An inline element at block level, which is what a browser leaves when a line has no wrapper.
   const inline = inlineOf(node);
   return inline.trim() === "" ? [] : [inline];
 }
@@ -143,28 +127,18 @@ const HTML_ESCAPES: Record<string, string> = {
   '"': "&quot;",
 };
 
-/**
- * Agent files are shared, so their text is never trusted as markup: everything is escaped before
- * any tag of ours touches it.
- */
 function escapeHtml(text: string): string {
   return text.replace(/[&<>"]/g, (char) => HTML_ESCAPES[char] ?? char);
 }
 
-// The one place an attribute is written. A scheme this runtime never meant to produce (javascript:,
-// data:, vbscript:) must not reach an href, so a link is only built for a scheme on this list. No
-// scheme (a relative path, an anchor) is left alone.
 const LINK_SCHEMES = new Set(["http", "https", "mailto"]);
 
 function hrefIsSafe(href: string): boolean {
-  // Browsers skip control characters and spaces before a scheme, so they are skipped here too.
   const scheme = /^([a-zA-Z][a-zA-Z0-9+.-]*):/.exec(href.replace(/[\u0000-\u0020\u007f]/g, ""))?.[1];
   return scheme === undefined || LINK_SCHEMES.has(scheme.toLowerCase());
 }
 
 function inlineHtml(text: string): string {
-  // Escaped markers are put aside first so `\*` stays a literal asterisk instead of opening
-  // emphasis.
   const held: string[] = [];
   const withHolds = text.replace(/\\([\\`*_[\]])/g, (_, char: string) => {
     held.push(char);
@@ -201,8 +175,6 @@ export function toHtml(markdown: string): string {
       quote = [];
     }
     if (para.length > 0) {
-      // Run-on lines stay one paragraph joined by breaks; a paragraph per line would come back
-      // doubled.
       out.push(`<p>${para.map(inlineHtml).join("<br>")}</p>`);
       para = [];
     }
@@ -235,6 +207,5 @@ export function toHtml(markdown: string): string {
     }
   }
   flush();
-  // Never empty: a contenteditable with no block puts the caret nowhere.
   return out.length === 0 ? "<p><br></p>" : out.join("");
 }

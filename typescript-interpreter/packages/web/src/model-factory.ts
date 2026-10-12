@@ -19,8 +19,6 @@ import type { KeyCheck } from "@afm/adapter-model";
 import type { AgentMetadata, ModelPort } from "@afm/engine";
 import { MissingCredentialError } from "./failure";
 
-// A blank value is not a key: clearing the Model panel field writes `api_key: ""`, which `??` would
-// pass through and send as an empty Authorization header.
 function apiKeyOf(model: AgentMetadata["model"]): string | null {
   const auth = model?.authentication;
   const key = auth?.api_key ?? auth?.token ?? null;

@@ -19,7 +19,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { WorkspaceBar } from "./WorkspaceBar";
 
-function bar(state: { canRun: boolean; running: boolean }): string {
+function bar(state: { canRun: boolean; running: boolean; agentsOpen?: boolean }): string {
   return renderToStaticMarkup(
     createElement(WorkspaceBar, {
       agentName: "Demo",
@@ -28,6 +28,8 @@ function bar(state: { canRun: boolean; running: boolean }): string {
       canAct: true,
       open: null,
       onToggle: () => {},
+      agentsOpen: false,
+      onToggleAgents: () => {},
       onRun: () => {},
       onToggleTheme: () => {},
       dark: false,
@@ -60,5 +62,15 @@ describe("the Run button", () => {
     const html = bar({ canRun: false, running: false });
     expect(html).toContain("u-play");
     expect(html).toContain('disabled=""');
+  });
+});
+
+describe("the agent name", () => {
+  it("reads as collapsed while the agents list is closed", () => {
+    expect(bar({ canRun: true, running: false })).toContain('aria-expanded="false"');
+  });
+
+  it("reads as expanded while the agents list is open", () => {
+    expect(bar({ canRun: true, running: false, agentsOpen: true })).toContain('aria-expanded="true"');
   });
 });

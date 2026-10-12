@@ -15,11 +15,11 @@
 // under the License.
 
 import { useEffect, useRef, useState } from "react";
-import { referencedSecretNames } from "@afm/engine";
 import type { AgentMetadata } from "@afm/engine";
 import type { ProbeResult } from "../../worker-client/useStandaloneSession";
-import { addMcpServer, removeMcpServer, setServerToolFilter } from "./agent-source-edit";
-import { captureAuthSecrets, isSecretAuthField, lacksRequiredField, secretFieldState } from "./mcp-secret-fields";
+import { removeMcpServer } from "./agent-source-edit";
+import { isSecretAuthField, lacksRequiredField, secretFieldState } from "./mcp-secret-fields";
+import { AUTH_METHODS, nameFromUrl, prepareServerSave } from "./server-config";
 import type { NewMcpServer } from "./agent-source-edit";
 import type { ToolInfo } from "../../protocol";
 import { discoverMcpServerAuth, resolveDirectoryClient } from "../../mcp-servers";
@@ -40,87 +40,15 @@ interface Props {
   editing: string | null;
   metadata: AgentMetadata;
   onApply: (content: string) => void;
-  /** The server at this address is no longer in the file, so nothing allowed for it stays allowed. */
   onServerDropped: (serverUrl: string) => void;
   onProbe: (server: NonNullable<AgentMetadata["tools"]>) => Promise<ProbeResult>;
-  /**
-   * Starts an interactive sign-in on this same click, never through a probe that hopes something
-   * else will pick it up.
-   */
   onSignIn: (provider: OAuthProviderRef, keep: boolean) => Promise<boolean> | void;
-  /**
-   * Drops the session this server's Sign in obtained (access and refresh tokens). Never touches the
-   * agent file.
-   */
   onSignOut: (provider: OAuthProviderRef) => void;
-  /**
-   * Files a credential where the model key goes, so the agent file only holds a `${env:NAME}`
-   * reference. It is approved for this server's host alone. Resolves true when it was also sealed
-   * on the device.
-   */
   onStoreSecret: (name: string, value: string, keep: boolean, host: string) => Promise<boolean>;
   knownSecrets: string[];
-  /** What Setup found wrong with this server, said in the window it sends the user to. */
   issue: Issue | null;
-  /** Present when the window was opened from Setup, which it returns to. */
   onBack?: () => void;
   onClose: () => void;
-}
-
-interface Method {
-  id: string;
-  label: string;
-  fields: { key: string; name: string; hint: string; placeholder: string }[];
-}
-
-const METHODS: Method[] = [
-  { id: "none", label: "None", fields: [] },
-  { id: "bearer", label: "Access token", fields: [{ key: "token", name: "token", hint: "required", placeholder: "${env:MY_TOKEN}" }] },
-  {
-    id: "basic",
-    label: "Username",
-    fields: [
-      { key: "username", name: "username", hint: "required", placeholder: "your username" },
-      { key: "password", name: "password", hint: "required", placeholder: "${env:MY_PASSWORD}" },
-    ],
-  },
-  {
-    id: "api-key",
-    label: "Key in a header",
-    fields: [
-      { key: "api_key", name: "api key", hint: "required", placeholder: "${env:MY_API_KEY}" },
-      { key: "header_name", name: "header name", hint: "optional", placeholder: "X-API-Key" },
-    ],
-  },
-  {
-    id: "oauth2",
-    label: "Provider sign-in",
-    fields: [
-      { key: "authorize_url", name: "authorize url", hint: "required", placeholder: "https://…/oauth/authorize" },
-      { key: "token_url", name: "token url", hint: "required", placeholder: "https://…/oauth/token" },
-      { key: "client_id", name: "client id", hint: "required", placeholder: "${env:MY_CLIENT_ID}" },
-      { key: "scopes", name: "scopes", hint: "optional", placeholder: "mcp" },
-    ],
-  },
-];
-
-/**
- * A server's name is not asked for: it is the recognisable part of its address, and only exists so
- * the file can refer to the server.
- */
-export function nameFromUrl(url: string, taken: string[]): string {
-  let host = "";
-  try {
-    host = new URL(url).hostname;
-  } catch {
-    return "";
-  }
-  const parts = host.split(".").filter((part) => !["mcp", "api", "www"].includes(part));
-  const base = (parts[0] ?? host).replace(/[^a-z0-9-]/gi, "").toLowerCase() || "server";
-  if (!taken.includes(base)) return base;
-  for (let n = 2; ; n += 1) {
-    if (!taken.includes(`${base}-${n}`)) return `${base}-${n}`;
-  }
 }
 
 function signInValues(auth: OAuthSignIn, clientId = ""): Record<string, string> {
@@ -136,7 +64,6 @@ function discoveredValues(discovered: DiscoveredMcpAuth): Record<string, string>
   };
 }
 
-// Said only when true, so a panel that gave up or never asked does not look busy forever.
 function waitingNote(
   url: string,
   probing: boolean,
@@ -170,8 +97,6 @@ export function ServerPanel({
 }: Props) {
   const existing = (metadata.tools?.mcp ?? []).find((server) => server.name === editing);
   const existingUrl = existing?.transport.type === "http" ? existing.transport.url : "";
-  // This panel only writes http servers; saving a command-based one would rewrite it as a URL and
-  // lose the command, so it is shown read-only.
   const isStdio = existing !== undefined && existing.transport.type === "stdio";
   const existingAuth = existing?.transport.type === "http" ? existing.transport.authentication : undefined;
 
@@ -198,7 +123,6 @@ export function ServerPanel({
   const [directoryQuery, setDirectoryQuery] = useState("");
   const [detail, setDetail] = useState<DirectoryEntry | null>(null);
   const [oauthFormOpen, setOauthFormOpen] = useState(false);
-  // Per field: absent = keep the file's value, "" = cleared, else a new value.
   const [secretEdits, setSecretEdits] = useState<Record<string, string>>({});
   const [keep, setKeep] = useState(false);
 
@@ -209,10 +133,8 @@ export function ServerPanel({
   };
   const hideTip = () => setTip(null);
 
-  const chosen = METHODS.find((m) => m.id === method) ?? METHODS[0]!;
-  // Only the methods above can be written; saving over another method would rewrite its block and
-  // lose what it says.
-  const writesMethod = METHODS.some((option) => option.id === method);
+  const chosen = AUTH_METHODS.find((m) => m.id === method) ?? AUTH_METHODS[0]!;
+  const writesMethod = AUTH_METHODS.some((option) => option.id === method);
 
   const fieldState = (fieldKey: string) => secretFieldState(values[fieldKey] ?? "", secretEdits[fieldKey], knownSecrets);
   const secretStored = (fieldKey: string) => fieldState(fieldKey) === "saved";
@@ -220,8 +142,6 @@ export function ServerPanel({
   const signedIn = method === "oauth2" && (knownSecrets.includes(authorizationCodeRefreshKey(oauthProvider())) || (found !== null && error === null));
   const need = chosen.fields.some((field) => fieldState(field.key) === "missing") ? "missing" : method === "oauth2" && !signedIn ? "signin" : "none";
 
-  // A server already in the file lists its tools there: the ones allowed, and the ones turned off.
-  // Only a server being added, one whose file lists none, or one moved to a new address is asked.
   const listed = existing?.tool_filter?.allow !== undefined;
   const denied = existing?.tool_filter?.deny ?? [];
   const live = editing === null || !listed || url.trim() !== existingUrl;
@@ -230,13 +150,10 @@ export function ServerPanel({
   const taken = (metadata.tools?.mcp ?? []).map((s) => s.name).filter((n) => n !== editing);
   const name = editing ?? nameFromUrl(url, taken);
 
-  // Runs once the address from a Directory pick has landed and `name` is re-derived; probing off
-  // the stale pre-click `url` would ask about nothing.
   useEffect(() => {
     if (!pendingDirectoryProbe) return;
     setPendingDirectoryProbe(false);
     void probe(true);
-    // probe is redefined every render; the flag decides when to run.
   }, [pendingDirectoryProbe]);
 
   async function prepareSignIn(auth: OAuthSignIn, pick: number) {
@@ -282,10 +199,6 @@ export function ServerPanel({
     return { type: method, fields, scopes: scopeList.length > 0 ? scopeList : undefined };
   }
 
-  /**
-   * The same provider identity Sign in and Sign out both use, so signing out reaches the session
-   * signing in created.
-   */
   function oauthProvider(): OAuthProviderRef {
     return {
       authorizeUrl: values.authorize_url ?? "",
@@ -302,16 +215,12 @@ export function ServerPanel({
     setProbing(true);
     setError(null);
 
-    // From "none" only: discover whether the server needs sign-in, never overriding a chosen
-    // method.
     const auth = authBlock();
     if (method === "none") {
       const discovered = await discoverMcpServerAuth(url.trim()).catch(() => null);
       if (discovered !== null) {
         setMethod("oauth2");
         setValues(discoveredValues(discovered));
-        // Don't probe a just-discovered oauth2 config: nobody has signed in, so it would only time
-        // out.
         setProbing(false);
         return;
       }
@@ -322,7 +231,6 @@ export function ServerPanel({
       transport: {
         type: "http" as const,
         url: url.trim(),
-        // Sent exactly as it will be written to the file, so the list is what the agent can reach.
         ...(auth === undefined
           ? {}
           : { authentication: { type: auth.type, ...auth.fields, ...(auth.scopes ? { scopes: auth.scopes } : {}) } }),
@@ -338,7 +246,6 @@ export function ServerPanel({
     const reported = (result.tools ?? []).map((tool) => ({ name: tool.name, description: tool.description }));
     setFound(reported);
     setProbedUrl(url.trim());
-    // Everything the server has, less what the file turned off, so reopening never undoes a choice.
     if (live) setAllowed(reported.map((tool) => tool.name).filter((tool) => !denied.includes(tool)));
   }
 
@@ -348,26 +255,18 @@ export function ServerPanel({
 
   function save() {
     if (name === "") return;
-    let next = editing === null ? content : removeMcpServer(content, editing);
-    // Read after the old block is gone, so re-saving a server can reuse its own name. Names
-    // already held on the device count too, so two agents never end up sharing one captured name.
-    const taken = [...referencedSecretNames(next), ...knownSecrets];
-    const auth = authBlock();
-    const captured =
-      auth === undefined ? undefined : captureAuthSecrets(name, auth.fields, taken);
-    next = addMcpServer(next, {
-      name,
-      url: url.trim(),
-      auth: auth === undefined || captured === undefined ? undefined : { ...auth, fields: captured.fields },
+    const next = prepareServerSave({
+      content,
+      editing,
+      server: { name, url: url.trim(), auth: authBlock() },
+      knownSecrets,
+      tools,
+      allowed,
     });
-    if (tools !== null) {
-      const names = tools.map((tool) => tool.name);
-      next = setServerToolFilter(next, name, names.filter((tool) => allowed.includes(tool)), names.filter((tool) => !allowed.includes(tool)));
-    }
-    for (const secret of captured?.secrets ?? []) {
+    for (const secret of next.secrets) {
       void onStoreSecret(secret.name, secret.value, keep, hostOf(url.trim()));
     }
-    onApply(next);
+    onApply(next.content);
     if (existingUrl !== "" && existingUrl !== url.trim()) onServerDropped(existingUrl);
     onClose();
   }
@@ -443,7 +342,7 @@ export function ServerPanel({
             <div className="u-group">
               <span className="u-label">How it signs in</span>
               <div className="u-pills">
-                {METHODS.map((option) => (
+                {AUTH_METHODS.map((option) => (
                   <button
                     key={option.id}
                     className={`u-pill-btn ${method === option.id ? "on" : ""}`}
@@ -467,8 +366,6 @@ export function ServerPanel({
                     className="u-linkish"
                     onClick={() => {
                       onSignOut(oauthProvider());
-                      // What the last probe found belongs to the ended session; left on screen it
-                      // would read as still connected.
                       setFound(null);
                       setError(null);
                       setProbedUrl("");

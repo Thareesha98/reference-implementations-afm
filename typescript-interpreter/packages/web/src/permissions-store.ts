@@ -41,8 +41,6 @@ export function resetPermissions(entries: PermissionEntry[], agentId?: string): 
   return agentId === undefined ? [] : entries.filter((e) => e.agentId !== agentId);
 }
 
-// A server taken out of the file keeps its grants on record, and they would apply again if the same
-// server were added later. These are the grants to take back.
 export function grantsToRevoke(entries: PermissionEntry[], serverId: string): PermissionEntry[] {
   return entries.filter((entry) => entry.serverId === serverId && entry.rule === "auto-allow");
 }
@@ -55,10 +53,6 @@ function agentKeyFor(content: string): string {
   return `content:${hash}`;
 }
 
-/**
- * Which agent a remembered permission belongs to: the library id when there is one (it survives
- * edits), otherwise the text, for an agent that has never been saved.
- */
 export function permissionScopeFor(agentId: string | null, content: string): string {
   return agentId !== null ? `agent:${agentId}` : agentKeyFor(content);
 }

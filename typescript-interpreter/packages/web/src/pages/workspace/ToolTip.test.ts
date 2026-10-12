@@ -24,7 +24,6 @@ describe("placing the description bubble", () => {
     expect(tipPosition(tipFor("ask_question", "Ask anything.", row)).top).toBe(316);
   });
 
-  // The panel is against the right edge of the window, so the bubble opens to the left.
   it("opens to the left of the row, clear of its edge", () => {
     expect(tipPosition(tipFor("ask_question", "Ask anything.", row)).left).toBe(1228);
   });
@@ -41,8 +40,6 @@ describe("keeping the bubble a bubble", () => {
     expect(shorten("Search the web.")).toBe("Search the web.");
   });
 
-  // context7 puts its whole operating procedure in one description. Shown whole, the bubble
-  // covers the panel it is explaining.
   it("cuts a very long one and says there is more", () => {
     const long = `Resolves a name. ${"and more detail ".repeat(60)}`;
     const out = shorten(long);

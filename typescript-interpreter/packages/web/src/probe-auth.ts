@@ -27,11 +27,6 @@ function hostOf(url: string): string | undefined {
   }
 }
 
-/**
- * The secret uses a probed server declares, scoped to that server alone - never the uses of
- * whichever agent last loaded, or an edit to one server's address could silently reuse an
- * approval the user gave a different server.
- */
 export function probeToolUses(tools: AgentMetadata["tools"]): { name: string; host?: string }[] {
   const uses: { name: string; host?: string }[] = [];
   for (const server of tools?.mcp ?? []) {
@@ -62,11 +57,6 @@ async function resolveValues<T extends Record<string, unknown>>(
   return resolved as T;
 }
 
-/**
- * Turns the `${env:NAME}` references in a server's auth block into their values. A run never needs
- * this (variables resolve before the metadata exists), but a probe receives the panel's own text,
- * and a reference sent as a credential is just a wrong password.
- */
 export async function resolveProbeAuth(
   tools: AgentMetadata["tools"],
   secrets: SecretPort,

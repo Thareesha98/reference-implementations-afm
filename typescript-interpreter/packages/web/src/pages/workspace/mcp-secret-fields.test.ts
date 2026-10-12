@@ -16,7 +16,8 @@
 
 import { describe, it, expect } from "vitest";
 import { captureAuthSecrets, isSecretAuthField, lacksRequiredField, mcpSecretEnvName, secretFieldState } from "./mcp-secret-fields";
-import { addMcpServer, removeMcpServer } from "./agent-source-edit";
+import { addMcpServer } from "./agent-source-edit";
+import { prepareServerSave } from "./server-config";
 import { referencedSecretNames } from "@afm/engine";
 
 describe("isSecretAuthField", () => {
@@ -116,8 +117,6 @@ describe("secretFieldState", () => {
     expect(secretFieldState(ref, undefined, ["HUGGINGFACE_TOKEN"])).toBe("saved");
   });
 
-  // The file names a credential and nothing anywhere has it, which is not the same as the field
-  // being blank.
   it("is missing when the file references a name nobody has", () => {
     expect(secretFieldState(ref, undefined, [])).toBe("missing");
   });
@@ -149,21 +148,20 @@ r
 i
 `;
 
-// What ServerPanel.save() does, in the same order, over the pure pieces it is built from.
 function save(
   content: string,
   server: { name: string; url: string; type: string; fields: Record<string, string> },
   editing: string | null = null,
 ): { content: string; stored: { name: string; value: string }[] } {
-  const base = editing === null ? content : removeMcpServer(content, editing);
-  const taken = referencedSecretNames(base);
-  const captured = captureAuthSecrets(server.name, server.fields, taken);
-  const next = addMcpServer(base, {
-    name: server.name,
-    url: server.url,
-    auth: { type: server.type, fields: captured.fields },
+  const next = prepareServerSave({
+    content,
+    editing,
+    server: { name: server.name, url: server.url, auth: { type: server.type, fields: server.fields } },
+    knownSecrets: [],
+    tools: null,
+    allowed: [],
   });
-  return { content: next, stored: captured.secrets };
+  return { content: next.content, stored: next.secrets };
 }
 
 describe("adding an MCP server that needs a credential", () => {
@@ -211,7 +209,6 @@ describe("adding an MCP server that needs a credential", () => {
       name: "huggingface",
       url: "https://other/mcp",
     });
-    // The first server is still there, so its name is taken and the second steps aside.
     expect(stored[0]?.name).toBe("HUGGINGFACE_TOKEN_2");
     expect(content).toContain("${env:HUGGINGFACE_TOKEN_2}");
   });
@@ -225,7 +222,6 @@ describe("re-saving a server that was already captured", () => {
       type: "bearer",
       fields: { token: "hf_original" },
     });
-    // Reopening shows no value, so an untouched field saves back the reference it already had.
     const again = save(
       first.content,
       { name: "huggingface", url: "https://hf.co/mcp", type: "bearer", fields: { token: "${env:HUGGINGFACE_TOKEN}" } },
@@ -253,7 +249,6 @@ describe("re-saving a server that was already captured", () => {
   });
 });
 
-// An agent written before this existed still has the value sitting in the file.
 describe("a file that still holds a raw credential", () => {
   it("moves it out of the file on the next save", () => {
     const legacy = addMcpServer(FILE, {
@@ -274,10 +269,10 @@ describe("a file that still holds a raw credential", () => {
 });
 
 describe("lacksRequiredField", () => {
-  const token = [{ key: "token", hint: "required" }];
+  const token = [{ key: "token", required: true }];
   const basic = [
-    { key: "username", hint: "required" },
-    { key: "password", hint: "required" },
+    { key: "username", required: true },
+    { key: "password", required: true },
   ];
 
   it("is true while a required field is not in what would be written", () => {
@@ -294,7 +289,7 @@ describe("lacksRequiredField", () => {
   });
 
   it("does not ask for an optional field", () => {
-    expect(lacksRequiredField([{ key: "header_name", hint: "optional" }], { type: "api-key", fields: {} })).toBe(false);
+    expect(lacksRequiredField([{ key: "header_name", required: false }], { type: "api-key", fields: {} })).toBe(false);
   });
 
   it("asks for nothing when the server signs in with no method", () => {

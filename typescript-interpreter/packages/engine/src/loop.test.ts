@@ -260,17 +260,12 @@ describe("runAgentTurn", () => {
     );
 
     expect(calls).toHaveLength(0);
-    // The conversation still comes back on an abort - a turn stopped part-way keeps whatever
-    // it had already established rather than throwing it away.
     expect(events).toEqual([
       { type: "turn-complete", messages: [] },
       { type: "finish", reason: "aborted" },
     ]);
   });
 
-  // Every provider requires one result per tool call the assistant made. The turn's messages
-  // are saved and sent again with the next user message, so a stranded call does not just lose
-  // a turn - it makes every later message in that conversation fail until it is started over.
   describe("Stop part-way through a turn's tool calls", () => {
     function stopAfterFirstToolCall() {
       const controller = new AbortController();
@@ -314,8 +309,6 @@ describe("runAgentTurn", () => {
         runAgentTurn({ system: "S", messages: [], model, tools, permission, signal: controller.signal }),
       );
 
-      // c1 was already allowed when Stop landed, so it runs; c2 is neither executed nor asked
-      // about - which is the whole point of checking the signal per call.
       expect(executed.map((c) => c.id)).toEqual(["c1"]);
       const cancelled = events.flatMap((e) => (e.type === "tool-result" && !e.ok ? [e] : []));
       expect(cancelled).toHaveLength(1);
@@ -425,8 +418,6 @@ describe("runAgentTurn", () => {
     expect(updates[1]).toMatchObject({
       type: "budget-update",
       totalTokens: 65,
-      // Cumulative across both usage events, not just the second one - a per-turn cost
-      // estimate has to add up the whole turn's input and output tokens, not the last delta.
       inputTokens: 40,
       outputTokens: 25,
       iteration: 2,
@@ -445,8 +436,6 @@ describe("runAgentTurn conversation record", () => {
   }
 
   it("hands back the tool call and its result, not just the final answer", async () => {
-    // Without the tool exchange in the record, the next turn has no idea what the tool said
-    // and asks for it again.
     const { port: model } = scriptedModel([
       [
         { type: "text-delta", text: "Let me check. " },
@@ -538,8 +527,6 @@ describe("runAgentTurn conversation record", () => {
   });
 
   it("never leaves a tool call without a matching result", async () => {
-    // A dangling tool_use is rejected outright by the model providers, so the record has to
-    // stay well formed on every exit path - including the ones that stop early.
     const { port: model } = scriptedModel([
       [
         { type: "tool-call", id: "c1", name: "slow", args: {} },
@@ -688,8 +675,6 @@ describe("permission requests carry the owning server", () => {
     expect(seen[0]!.serverId).toBe("https://good.example/mcp");
   });
 
-  // The shadowing case: a hostile server registers a familiar name. The call must not be
-  // presented as if it were the trusted server's tool.
   it("reports the shadowing server, not the name the user recognises", async () => {
     const { broker, seen } = recordingBroker();
     await drain(
@@ -727,7 +712,6 @@ describe("permission requests carry the owning server", () => {
 const RATE_LIMITED = {
   type: "tokens",
   code: "rate_limit_exceeded",
-  // Stating a delay keeps the test fast: the loop honours it instead of its own backoff.
   message: "Rate limit reached on tokens per min (TPM). Please try again in 1ms.",
 };
 
@@ -740,7 +724,6 @@ const noTools: ToolPort = {
   },
 };
 
-/** Fails with `error` for the first `failures` calls, then streams `then`. */
 function flakyModel(failures: number, error: unknown, then: ModelEvent[]): { port: ModelPort; calls: () => number } {
   let calls = 0;
   const port: ModelPort = {
@@ -796,7 +779,7 @@ describe("rate limit retry", () => {
     const { port, calls } = flakyModel(99, RATE_LIMITED, []);
 
     await expect(collectTurn(port)).rejects.toMatchObject({ code: "rate_limit_exceeded" });
-    expect(calls()).toBe(4); // the first attempt plus three retries
+    expect(calls()).toBe(4);
   });
 
   it("does not retry a failure that retrying could never fix", async () => {

@@ -18,20 +18,10 @@ import type { PlanIssue } from "@afm/engine";
 import type { ServerMessage, ToolInfo, ImageAttachment, LoadStep, TurnEndReason } from "./protocol";
 import { attachedFilesOf, attachedFileKey } from "./chat/attachment";
 
-export interface BudgetSnapshot {
-  totalTokens: number;
-  inputTokens: number;
-  outputTokens: number;
-  maxTokens?: number;
-  iteration: number;
-  maxIterations: number;
-  elapsedMs: number;
-  maxWallClockMs?: number;
-}
+export type BudgetSnapshot = Omit<Extract<ServerMessage, { type: "budget-update" }>, "type">;
 
 export interface AttachedFile {
   name: string;
-  /** Key the worker holds the file under; absent on conversations saved by older versions. */
   path?: string;
   chars?: number;
   pages?: number;
@@ -78,7 +68,6 @@ export interface ChatState {
   messages: UiMessage[];
   savedSecrets: string[];
   passkeySecrets: string[];
-  secretsLoaded: boolean;
   pendingPermission: PendingPermission | null;
   error: string | null;
   nextId: number;
@@ -100,7 +89,6 @@ export const initialChatState: ChatState = {
   messages: [],
   savedSecrets: [],
   passkeySecrets: [],
-  secretsLoaded: false,
   pendingPermission: null,
   error: null,
   nextId: 1,
@@ -110,15 +98,10 @@ export const initialChatState: ChatState = {
   draftError: null,
 };
 
-/**
- * Keys usable without asking the user to type one: in memory now, or sealed on disk. `savedSecrets`
- * alone is memory-only, so it is empty after a reload.
- */
 export function usableSecrets(state: ChatState): string[] {
   return [...new Set([...state.savedSecrets, ...state.passkeySecrets])];
 }
 
-/** Sealed on disk and not yet opened in this tab: a passkey tap away, and unreadable until then. */
 export function lockedSecrets(state: ChatState): string[] {
   return state.passkeySecrets.filter((name) => !state.savedSecrets.includes(name));
 }
@@ -130,13 +113,11 @@ export type ChatAction =
   | { type: "draft-dismissed" }
   | { type: "agent-cleared" }
   | { type: "regenerate-start" }
-  | { type: "edit-last" }
   | { type: "rewind"; id: number }
   | { type: "server"; message: ServerMessage }
   | { type: "permission-dismissed" }
   | { type: "files-attached"; files: AttachedFile[] }
-  | { type: "file-detached"; id: number; key: string }
-  | { type: "viewing-different-agent" };
+  | { type: "file-detached"; id: number; key: string };
 
 export function lastUserIndex(messages: UiMessage[]): number {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
@@ -145,10 +126,6 @@ export function lastUserIndex(messages: UiMessage[]): number {
   return -1;
 }
 
-/**
- * What to tell the user about how a turn ended, or null when there is nothing to say. Only "stop"
- * is a clean ending.
- */
 export function turnEndNotice(reason: TurnEndReason, maxIterations?: number): string | null {
   switch (reason) {
     case "stop":
@@ -156,7 +133,6 @@ export function turnEndNotice(reason: TurnEndReason, maxIterations?: number): st
     case "aborted":
       return "Stopped. Any tool calls still queued were cancelled.";
     case "max-iterations": {
-      // The count comes from budget-update, which a model that reports no usage never sends.
       const limit = maxIterations === undefined ? "its limit" : `${maxIterations} steps`;
       return `Stopped after ${limit} - the agent hit its iteration limit, so the answer above may be unfinished. Raise 'max_iterations' in the agent file to let it go further.`;
     }
@@ -165,12 +141,10 @@ export function turnEndNotice(reason: TurnEndReason, maxIterations?: number): st
   }
 }
 
-// The question the user is being asked; a new start-up or a different agent makes it moot.
 const NO_PENDING = { pendingPermission: null } as const;
 
 type WithoutId<T> = T extends unknown ? Omit<T, "id"> : never;
 
-// Appending is the one place an id is handed out, so none can be reused or skipped.
 function withMessage(state: ChatState, { kind, ...rest }: WithoutId<UiMessage>): ChatState {
   return {
     ...state,
@@ -192,8 +166,6 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         ...NO_PENDING,
         status: "connecting",
         agentSource: action.content,
-        // A new start-up reports its own stages; the last run's would show steps as done before
-        // they happen.
         loadSteps: [],
         error: null,
         notReady: null,
@@ -205,24 +177,14 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         ...NO_PENDING,
         status: "connecting",
         agentSource: action.agentSource,
-        // Known from the stored conversation, so the header is right before the worker reports the
-        // agent as loaded.
         agentName: action.agentName ?? state.agentName,
         messages: action.messages,
-        // Past every restored id; after a reload the next message would otherwise reuse one and two
-        // messages would share a React key.
         nextId: Math.max(state.nextId, ...action.messages.map((message) => message.id + 1)),
         error: null,
         notReady: null,
       };
-    case "viewing-different-agent":
-      return { ...state, ...NO_PENDING };
-    // The written file was accepted, rejected or requested again; either way the last answer is
-    // finished with.
     case "draft-dismissed":
       return { ...state, generatedDraft: null, clarifyQuestions: [], draftError: null };
-    // Switching agent or starting a blank one: everything about the agent that was running goes,
-    // since none of it describes the file now open. Saved keys belong to the browser and stay.
     case "agent-cleared":
       return {
         ...initialChatState,
@@ -241,11 +203,6 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       const files = state.messages.slice(index).filter((message) => message.kind === "attachment");
       return { ...state, messages: [...state.messages.slice(0, index), ...files] };
     }
-    case "edit-last": {
-      const index = lastUserIndex(state.messages);
-      if (index === -1) return state;
-      return { ...state, messages: state.messages.slice(0, index) };
-    }
     case "permission-dismissed":
       return { ...state, pendingPermission: null };
     case "files-attached":
@@ -253,8 +210,6 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
     case "file-detached": {
       const messages = state.messages
         .map((message) =>
-          // Rebuilt, not spread, so a row from the old name-only shape is normalised instead of
-          // written back with both shapes.
           message.kind === "attachment" && message.id === action.id
             ? {
                 kind: "attachment" as const,
@@ -281,8 +236,6 @@ function applyServerMessage(state: ChatState, message: ServerMessage): ChatState
         note: message.note,
       };
       const at = state.loadSteps.findIndex((existing) => existing.key === step.key);
-      // Reporting the same key again is the same stage settling: replace it in place to keep the
-      // start order.
       const loadSteps =
         at === -1
           ? [...state.loadSteps, step]
@@ -304,7 +257,7 @@ function applyServerMessage(state: ChatState, message: ServerMessage): ChatState
     case "agent-not-ready":
       return { ...state, status: "not-ready", notReady: message.reason };
     case "secrets-list":
-      return { ...state, savedSecrets: message.names, secretsLoaded: true };
+      return { ...state, savedSecrets: message.names };
     case "passkey-list":
       return { ...state, passkeySecrets: message.names };
     case "text-delta":
@@ -353,7 +306,6 @@ function applyServerMessage(state: ChatState, message: ServerMessage): ChatState
     case "oauth-authorize-url":
     case "oauth-signin-done":
       return state;
-    // Answered by the session, which resolves the waiting panel; nothing on screen depends on it.
     case "probe-result":
       return state;
     case "draft-generated":

@@ -74,8 +74,3 @@ export function removeAgent(id: string): SavedAgent[] {
 export function findAgent(id: string): SavedAgent | null {
   return loadAgents().find((a) => a.id === id) ?? null;
 }
-
-export function clear(): SavedAgent[] {
-  persist([]);
-  return [];
-}

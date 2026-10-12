@@ -23,22 +23,12 @@ interface Props {
   session: ReturnType<typeof useStandaloneSession>;
 }
 
-/**
- * The keys this browser holds, and the theme. Which tools may run without asking is set on each
- * server's own card.
- */
 export function SettingsPanel({ session }: Props) {
   const { setting, setTheme } = useThemeContext();
 
   const canRemember = usePasskeySupport()?.usable === true;
-  // Sealed keys survive a reload, so they show here even when nothing is in memory. Internal OAuth
-  // refresh tokens are managed from each server's card, not shown as keys.
   const keys = usableSecrets(session.state).filter((name) => !name.startsWith("afm.oauth."));
 
-  /**
-   * Forget means gone: the sealed copy and the value held for this tab. Removing a blob that was
-   * never written is a no-op, so one handler covers both kinds of row.
-   */
   function forget(name: string): void {
     session.forgetPasskey(name);
     session.removeSecret(name);
@@ -58,7 +48,6 @@ export function SettingsPanel({ session }: Props) {
               const remembered = session.state.passkeySecrets.includes(name);
               return (
                 <div className="u-row u-key-row" key={name}>
-                  {/* The name gets whatever width is left. */}
                   <span className="u-row-name mono" title={name}>
                     {name}
                   </span>

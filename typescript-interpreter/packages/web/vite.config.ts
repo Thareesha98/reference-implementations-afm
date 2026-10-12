@@ -20,8 +20,6 @@ import { defineConfig, loadEnv } from "vite";
 import type { Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 
-// Directives browsers ignore in a <meta> CSP (frame-ancestors above all). The header keeps them;
-// the meta copy drops them to avoid a console warning.
 const META_INVALID_DIRECTIVES = new Set(["frame-ancestors", "report-uri", "sandbox"]);
 
 export function cspForMetaTag(headerCsp: string): string {
@@ -32,8 +30,6 @@ export function cspForMetaTag(headerCsp: string): string {
     .join("; ");
 }
 
-// The site's own origin and its MCP proxy belong to one deployment, so they come from the build
-// environment and no tracked file names them.
 export function originOf(url: string | undefined): string | null {
   if (url === undefined || url.trim() === "") return null;
   try {
@@ -54,8 +50,6 @@ export function withConnectSource(csp: string, origin: string | null): string {
     .join("; ");
 }
 
-// The Client ID Metadata Document AFM hosts for OAuth sign-in. Its client_id is the URL it is
-// served from.
 export function clientMetadata(clientIdUrl: string) {
   const origin = new URL(clientIdUrl).origin;
   return {
@@ -69,9 +63,6 @@ export function clientMetadata(clientIdUrl: string) {
   };
 }
 
-// A host that does not send the CSP header (staticwebapp.config.json only applies on Azure Static
-// Web Apps) would ship without a CSP. This adds the same policy as a <meta> tag, read from the one
-// place it is defined. Production only: a strict CSP would block Vite's dev scripts and HMR.
 function productionCsp(proxyOrigin: string | null): Plugin {
   return {
     name: "afm-production-csp",
@@ -79,8 +70,6 @@ function productionCsp(proxyOrigin: string | null): Plugin {
       if (ctx.server !== undefined) return html;
       const config = JSON.parse(readFileSync(resolve(__dirname, "public/staticwebapp.config.json"), "utf8"));
       const csp = cspForMetaTag(withConnectSource(config.globalHeaders["Content-Security-Policy"] as string, proxyOrigin));
-      // A meta CSP only governs what loads after it, so it must sit right behind <meta charset>,
-      // ahead of the font preconnects and injected script and stylesheet tags.
       return html.replace(
         '<meta charset="utf-8" />',
         `<meta charset="utf-8" />\n    <meta http-equiv="Content-Security-Policy" content="${csp}" />`,
@@ -89,8 +78,6 @@ function productionCsp(proxyOrigin: string | null): Plugin {
   };
 }
 
-// Writes the two files that name a deployment: the client metadata document, and the CSP header
-// with the proxy's origin allowed to connect.
 function deploymentFiles(clientIdUrl: string | undefined, proxyOrigin: string | null): Plugin {
   let outDir = "";
   return {

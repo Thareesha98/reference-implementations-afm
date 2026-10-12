@@ -39,8 +39,8 @@ import { StageFoot } from "./StageFoot";
 import { useAgentActivity } from "./agent-activity";
 import { StartHere } from "./StartHere";
 import { TrustScreen } from "./TrustScreen";
-import { NOTHING_OPEN, SIDE_TITLE, closePanel, openOver, openPanel, togglePanel } from "./workspace-view";
-import type { SideState, SidePanel } from "./workspace-view";
+import { LEFT_TITLE, NOTHING_OPEN, SIDE_TITLE, closePanel, openOver, openPanel, togglePanel } from "./workspace-view";
+import type { LeftPanel, SideState, SidePanel } from "./workspace-view";
 import { resolveContent } from "../../load-paths";
 import { EMPTY_TEMPLATE, initialContent, identityFor } from "./workspace-content";
 import { useAgentsLibrary } from "../../agents/AgentsLibraryContext";
@@ -58,37 +58,34 @@ export function WorkspacePage() {
   const location = useLocation();
   const draftSource = (location.state as { draftSource?: string } | null)?.draftSource;
   const [content, setContent] = useState(() => initialContent(searchParams, location.hash, draftSource));
-  // What is on disk for this agent; anything else is unsaved.
   const [savedContent, setSavedContent] = useState(() => initialContent(searchParams, location.hash, draftSource));
   const [agentId, setAgentId] = useState<string | null>(() => searchParams.get("agentId"));
   const [saveFailed, setSaveFailed] = useState(false);
   const [fileLoading, setFileLoading] = useState(() => searchParams.get("file") !== null);
   const [fileError, setFileError] = useState<string | null>(null);
-  // What is docked beside the builder, if anything. Closed by default.
-  const [nav, setNav] = useState<SideState>(() => {
-    if (searchParams.get("view") === "chat") return { open: "chat", under: [] };
-    // A truly blank agent opens Start.
-    return identityFor(searchParams, location.hash, draftSource) === "blank" ? { open: "start", under: [] } : NOTHING_OPEN;
-  });
+  const [nav, setNav] = useState<SideState>(() =>
+    searchParams.get("view") === "chat" ? { open: "chat", under: [] } : NOTHING_OPEN,
+  );
+  const [left, setLeft] = useState<LeftPanel | null>(() =>
+    searchParams.get("view") !== "chat" && identityFor(searchParams, location.hash, draftSource) === "blank"
+      ? "start"
+      : null,
+  );
   const side = nav.open;
   const backToSetup = nav.under[nav.under.length - 1] === "setup";
   const [chatFull, setChatFull] = useState(() => searchParams.get("view") === "chat");
-  // A run-only link is someone else's agent about to use your key, so it gets a trust screen first.
   const [trusted, setTrusted] = useState(() => searchParams.get("view") !== "chat");
   const [serverEditing, setServerEditing] = useState<string | null>(null);
-  // Bumped to ask the stage for the raw file, when the problem is in the file.
   const [rawRequest, setRawRequest] = useState(0);
   const permissions = usePermissionsLedger();
   const theme = useThemeContext();
-  // Mirrors of state the session's callbacks read after this render, so they never go stale.
   const agentIdRef = useRef(agentId);
   agentIdRef.current = agentId;
   const contentRef = useRef(content);
   contentRef.current = content;
   const permissionsRef = useRef(permissions);
   permissionsRef.current = permissions;
-  const testSession = useStandaloneSession({
-    agentId: () => agentIdRef.current,
+  const session = useStandaloneSession({
     permissionSeed: () =>
       permissionsRef.current
         .forAgent(permissionScopeFor(agentIdRef.current, contentRef.current))
@@ -103,18 +100,16 @@ export function WorkspacePage() {
         request.serverId,
       ),
   });
-  const activity = useAgentActivity(testSession.state);
+  const activity = useAgentActivity(session.state);
   const library = useAgentsLibrary();
   const history = useHistory();
   const preview = previewAgent(content);
   const loadedIdentityRef = useRef(identityFor(searchParams, location.hash, draftSource));
-  // Read from the settings block alone, so a half-typed Role does not rename the agent, empty its
-  // tools out of the diagram or stop it being saved. Running stays strict below.
   const readable = buildableAgent(content);
   const agentLabel = (readable.ok ? readable.metadata.name : undefined) ?? "Untitled agent";
   const agentIcon = readable.ok ? (readable.metadata.icon_url ?? "") : "";
   const settledContentForRead = useSettled(content);
-  const setup = useSetup(testSession, readable.ok ? readable.metadata : null);
+  const setup = useSetup(session, readable.ok ? readable.metadata : null);
   const reached = reachOf(setup.rows);
 
   useEffect(() => {
@@ -126,27 +121,9 @@ export function WorkspacePage() {
     setContent(next);
     setSavedContent(next);
     setAgentId(nextId);
-    testSession.clearAgent();
+    session.clearAgent();
   }, [searchParams, location.hash, draftSource]);
 
-  // Put a recovered agentId back in the URL, merging so ?code=&state= survive, so a reload after
-  // sign-in reopens this agent rather than saving another copy.
-  useEffect(() => {
-    if (agentId === null || searchParams.get("agentId") === agentId) return;
-    loadedIdentityRef.current = agentId;
-    setSearchParams(
-      (previous) => {
-        const next = new URLSearchParams(previous);
-        next.set("agentId", agentId);
-        return next;
-      },
-      { replace: true },
-    );
-    // Mount only: later id changes are already written by whoever made them.
-  }, []);
-
-  // An "Edit and Run" share carries ?file=<url>; fetch it once so the editor opens on the real
-  // file, not the blank template.
   const fileParam = searchParams.get("file");
   useEffect(() => {
     if (fileParam === null) {
@@ -176,10 +153,8 @@ export function WorkspacePage() {
     };
   }, [fileParam]);
 
-  // The conversation belongs to the agent and is kept until it is deleted. Written on every settled
-  // turn, since unload never fires reliably.
-  const chatMessages = testSession.state.messages;
-  const chatStatus = testSession.state.status;
+  const chatMessages = session.state.messages;
+  const chatStatus = session.state.status;
   useEffect(() => {
     if (agentId === null || chatMessages.length === 0) return;
     if (chatStatus === "streaming" || chatStatus === "connecting") return;
@@ -190,15 +165,12 @@ export function WorkspacePage() {
       agentName: agentLabel,
       agentSource: content,
       messages: chatMessages,
-      tokenCount: testSession.state.budget?.totalTokens ?? 0,
+      tokenCount: session.state.budget?.totalTokens ?? 0,
       startedAt: existing?.startedAt ?? Date.now(),
       updatedAt: Date.now(),
     });
-    // history is not a dependency: it changes identity on every write.
   }, [agentId, chatMessages, chatStatus]);
 
-  // `source` defaults to the editor's text. A caller that just computed the next version passes it,
-  // because setContent has not taken effect yet.
   function persistToLibrary(source: string = content): { id: string | null; persisted: boolean } {
     if (!readable.ok) return { id: null, persisted: false };
     const result = library.save({
@@ -208,8 +180,6 @@ export function WorkspacePage() {
       source,
       origin: "blank",
     });
-    // Only a write that landed makes the file clean; otherwise autosave would believe unsaved work
-    // is stored.
     if (result.persisted) setSavedContent(source);
     setSaveFailed(!result.persisted);
     if (agentId === null) {
@@ -220,10 +190,8 @@ export function WorkspacePage() {
     return { id: result.saved.id, persisted: result.persisted };
   }
 
-  // Run is available when the loaded agent differs from the editor: before the first run, after any
-  // edit, and after a start that failed.
   const running = chatStatus !== "no-agent" && chatStatus !== "not-ready";
-  const startedHere = chatStatus !== "no-agent" && testSession.state.agentSource === content;
+  const startedHere = chatStatus !== "no-agent" && session.state.agentSource === content;
   const failed = startedHere && chatStatus === "not-ready";
   const current = running && startedHere;
   const canRun = preview.ok && preview.plan.runnable && !current;
@@ -231,7 +199,7 @@ export function WorkspacePage() {
   const servers = readable.ok ? (readable.metadata.tools?.mcp ?? []) : [];
   const nameByUrl = serverNameByUrl(servers);
   const chatState = headerStatus(
-    testSession.state.status,
+    session.state.status,
     activity.phase,
     activity.serverId === undefined ? undefined : nameByUrl.get(activity.serverId),
   );
@@ -243,15 +211,13 @@ export function WorkspacePage() {
     instructions: getSection(settledContentForRead, "Instructions"),
     metadata: readinessMetadata,
     issues: collectAfmIssues(settledContentForRead),
-    status: testSession.state.status,
+    status: session.state.status,
     current,
     failed,
     brokenServerIds: activity.brokenServerIds,
     serverNameByUrl: nameByUrl,
   });
 
-  // A server taken out of the file keeps its "always allow" answers on record, and would get them
-  // back if the same server were added again.
   function revokeGrants(serverUrl: string) {
     const scope = permissionScopeFor(agentIdRef.current, contentRef.current);
     for (const entry of grantsToRevoke(permissions.forAgent(scope), serverUrl)) {
@@ -261,13 +227,9 @@ export function WorkspacePage() {
 
   function runAgent() {
     const { id } = persistToLibrary();
-    // An agent keeps one conversation. Running it again resumes the thread; the agent is re-checked
-    // either way, so a stale token or a vanished server is caught before the old messages return.
     const previous = id === null ? undefined : history.entries.find((entry) => entry.agentId === id);
-    // Unless the brief was rewritten: the old replies were written by a different agent, and
-    // handing them over makes the new Role read once and then ignored.
-    const rewritten = running && agentBrief(testSession.state.agentSource) !== agentBrief(content);
-    testSession.loadContent(content, previous?.messages, { carryConversation: !rewritten });
+    const rewritten = running && agentBrief(session.state.agentSource) !== agentBrief(content);
+    session.loadContent(content, previous?.messages, { carryConversation: !rewritten });
     openSide("chat");
   }
 
@@ -278,19 +240,14 @@ export function WorkspacePage() {
 
   function configure(row: SetupRow) {
     if (row.kind === "server") setServerEditing(row.name);
-    show(openOver(nav, row.kind === "model" ? "model" : "tools"));
+    reveal(openOver(nav, row.kind === "model" ? "model" : "tools"));
   }
 
-  // Written once typing stops rather than on a button press. Nothing here is destructive (the
-  // library keeps one row per agent), and a Save button only gave people a way to lose work.
   const settledContent = useSettled(content, 700);
   useEffect(() => {
     if (settledContent === savedContent) return;
-    // A file whose settings cannot be read has no name to file it under; it stays in the editor
-    // until it parses again.
     if (!buildableAgent(settledContent).ok) return;
     persistToLibrary(settledContent);
-    // persistToLibrary is redefined every render; the content decides whether to write.
   }, [settledContent, savedContent]);
 
   function show(next: SideState) {
@@ -298,54 +255,38 @@ export function WorkspacePage() {
     if (next.open !== "chat") setChatFull(false);
   }
 
-  const openSide = (next: SidePanel) => show(openPanel(nav, next));
-  const toggleSide = (next: SidePanel) => show(togglePanel(nav, next));
+  function reveal(next: SideState) {
+    setLeft(null);
+    show(next);
+  }
+
+  const openSide = (next: SidePanel) => reveal(openPanel(nav, next));
+  const toggleSide = (next: SidePanel) => {
+    const toggled = togglePanel(nav, next);
+    if (toggled.open === next) reveal(toggled);
+    else show(toggled);
+  };
   const leavePanel = () => show(closePanel(nav));
   const closeSide = () => show(NOTHING_OPEN);
 
-  // What was on screen right before "New agent" or a template, generated or imported file replaced
-  // it outright. Autosave catches most of it; this is the net under the last few keystrokes.
-  const undoTimerRef = useRef<number | null>(null);
-  const [undoSnapshot, setUndoSnapshot] = useState<{ content: string; savedContent: string; agentId: string | null } | null>(
-    null,
-  );
-
-  function parkUndo() {
-    if (content.trim() === EMPTY_TEMPLATE.trim() && agentId === null) return;
-    if (undoTimerRef.current !== null) window.clearTimeout(undoTimerRef.current);
-    setUndoSnapshot({ content, savedContent, agentId });
-    undoTimerRef.current = window.setTimeout(() => setUndoSnapshot(null), 8000);
-  }
-
-  function undoDestructiveSwitch() {
-    if (undoSnapshot === null) return;
-    if (undoTimerRef.current !== null) window.clearTimeout(undoTimerRef.current);
-    const snapshot = undoSnapshot;
-    setUndoSnapshot(null);
-    setContent(snapshot.content);
-    setSavedContent(snapshot.savedContent);
-    setAgentId(snapshot.agentId);
-    loadedIdentityRef.current = snapshot.agentId ?? "blank";
-    setSearchParams(snapshot.agentId !== null ? { agentId: snapshot.agentId } : {}, { replace: true });
-  }
-
-  useEffect(() => {
-    return () => {
-      if (undoTimerRef.current !== null) window.clearTimeout(undoTimerRef.current);
-    };
-  }, []);
+  const openLeft = (next: LeftPanel) => {
+    setLeft(next);
+    setChatFull(false);
+  };
+  const toggleLeft = (next: LeftPanel) => (left === next ? setLeft(null) : openLeft(next));
+  const closeLeft = () => setLeft(null);
 
   const overPanel = side !== null && side !== "chat" ? side : null;
   const showTrust = !trusted && !fileLoading;
   const reachedServerIds = [
     ...new Set(
-      testSession.state.tools.map((tool) => tool.serverId).filter((id): id is string => id !== undefined),
+      session.state.tools.map((tool) => tool.serverId).filter((id): id is string => id !== undefined),
     ),
   ];
 
   return (
     <div className="workspace-shell">
-      <TurnNotificationWatcher state={testSession.state} />
+      <TurnNotificationWatcher state={session.state} />
       <WorkspaceBar
         agentName={agentLabel}
         saved={content === savedContent}
@@ -356,6 +297,8 @@ export function WorkspacePage() {
         onRun={openSetup}
         open={side}
         onToggle={toggleSide}
+        agentsOpen={left === "agents"}
+        onToggleAgents={() => toggleLeft("agents")}
         onToggleTheme={theme.toggle}
         dark={theme.resolved === "dark"}
       />
@@ -367,17 +310,16 @@ export function WorkspacePage() {
         </div>
       )}
 
-      {}
       <div
-        className={`u-body ${side !== null ? "has-side" : ""} ${chatFull ? "is-chat-full" : ""} ${
-          showTrust ? "is-trust" : ""
-        }`}
+        className={`u-body ${side !== null ? "has-side" : ""} ${left !== null ? "has-left" : ""} ${
+          chatFull ? "is-chat-full" : ""
+        } ${showTrust ? "is-trust" : ""}`}
       >
         {showTrust && readable.ok && (
           <TrustScreen
             metadata={readable.metadata}
             source={content}
-            savedSecrets={usableSecrets(testSession.state)}
+            savedSecrets={usableSecrets(session.state)}
             onRun={() => {
               setTrusted(true);
               openSetup();
@@ -389,6 +331,53 @@ export function WorkspacePage() {
             }}
           />
         )}
+        <aside className="u-side-left" aria-hidden={left === null}>
+          {left !== null && (
+            <SidePane key={left} title={LEFT_TITLE[left]} onClose={closeLeft} flush={left === "agents"}>
+              {left === "agents" && (
+                <AgentPicker
+                  currentId={agentId}
+                  onPick={(saved) => {
+                    closeLeft();
+                    closeSide();
+                    setSearchParams({ agentId: saved.id }, { replace: true });
+                  }}
+                  onNew={() => {
+                    closeSide();
+                    setSearchParams({}, { replace: true });
+                    setContent(EMPTY_TEMPLATE);
+                    setSavedContent(EMPTY_TEMPLATE);
+                    setAgentId(null);
+                    loadedIdentityRef.current = "blank";
+                    session.clearAgent();
+                    openLeft("start");
+                  }}
+                />
+              )}
+              {left === "start" && (
+                <StartHere
+                  state={session.state}
+                  onUseSource={(source) => {
+                    setContent(source);
+                    setSavedContent(source);
+                    setAgentId(null);
+                    setSearchParams({}, { replace: true });
+                    loadedIdentityRef.current = "blank";
+                    session.clearAgent();
+                    closeLeft();
+                    closeSide();
+                  }}
+                  onBlank={closeLeft}
+                  onGenerate={(prompt, model, final) => session.generateDraft(prompt, model, final)}
+                  onSaveKey={session.storeSecret}
+                  onOpenKeys={session.openKeys}
+                  onDismissDraft={session.dismissDraft}
+                />
+              )}
+            </SidePane>
+          )}
+        </aside>
+
         <div className="u-stage">
           <EditorPane
             content={content}
@@ -415,10 +404,8 @@ export function WorkspacePage() {
           />
         </div>
 
-        {}
         <div className="u-float-scrim" onClick={leavePanel} role="presentation" />
 
-        {/* Mounted whether or not open: unmounting the conversation would lose its scroll position and the half-typed message. */}
         <aside className="u-side" aria-hidden={side === null}>
           <SidePane
             title="Chat"
@@ -435,7 +422,7 @@ export function WorkspacePage() {
             flush
           >
             <ChatPane
-              session={testSession}
+              session={session}
               serverNameByUrl={nameByUrl}
               onReplaceKey={() => openSide("model")}
               onRetry={openSetup}
@@ -455,50 +442,9 @@ export function WorkspacePage() {
               onClose={leavePanel}
               flush={overPanel === "model" || overPanel === "tools" || overPanel === "info" || overPanel === "share" || overPanel === "setup"}
             >
-              {overPanel === "agents" && (
-                <AgentPicker
-                  currentId={agentId}
-                  onPick={(saved) => {
-                    closeSide();
-                    setSearchParams({ agentId: saved.id }, { replace: true });
-                  }}
-                  onNew={() => {
-                    parkUndo();
-                    closeSide();
-                    setSearchParams({}, { replace: true });
-                    setContent(EMPTY_TEMPLATE);
-                    setSavedContent(EMPTY_TEMPLATE);
-                    setAgentId(null);
-                    loadedIdentityRef.current = "blank";
-                    testSession.clearAgent();
-                    openSide("start");
-                  }}
-                />
-              )}
-              {overPanel === "start" && (
-                <StartHere
-                  compact
-                  state={testSession.state}
-                  onUseSource={(source) => {
-                    parkUndo();
-                    setContent(source);
-                    setSavedContent(source);
-                    setAgentId(null);
-                    setSearchParams({}, { replace: true });
-                    loadedIdentityRef.current = "blank";
-                    testSession.clearAgent();
-                    closeSide();
-                  }}
-                  onBlank={closeSide}
-                  onGenerate={(prompt, model, final) => testSession.generateDraft(prompt, model, final)}
-                  onSaveKey={testSession.storeSecret}
-                  onOpenKeys={testSession.openKeys}
-                  onDismissDraft={testSession.dismissDraft}
-                />
-              )}
               {overPanel === "share" && <SharePanel agentSource={content} />}
               {overPanel === "settings" && (
-                <SettingsPanel session={testSession} />
+                <SettingsPanel session={session} />
               )}
               {overPanel === "info" && (
                 <InfoPanel
@@ -524,22 +470,20 @@ export function WorkspacePage() {
               {overPanel === "model" && (
                 <ModelPanel
                   content={content}
-                  savedSecrets={usableSecrets(testSession.state)}
-                  passkeySecrets={testSession.state.passkeySecrets}
+                  savedSecrets={usableSecrets(session.state)}
+                  passkeySecrets={session.state.passkeySecrets}
                   issue={setup.issueOf(MODEL_ROW)}
                   onApply={(next) => {
                     setContent(next);
                     setup.changed(MODEL_ROW);
                   }}
-                  onSaveKey={testSession.storeSecret}
+                  onSaveKey={session.storeSecret}
                   onBack={backToSetup ? leavePanel : undefined}
                   onClose={leavePanel}
                 />
               )}
               {overPanel === "tools" && readable.ok && (
                 <ServerPanel
-                  // A fresh instance per server: the key re-runs field initialisers that would
-                  // otherwise keep showing the first server clicked.
                   key={serverEditing ?? "new"}
                   content={content}
                   editing={serverEditing}
@@ -549,12 +493,12 @@ export function WorkspacePage() {
                     if (serverEditing !== null) setup.changed(serverRowId(serverEditing));
                   }}
                   onServerDropped={revokeGrants}
-                  onStoreSecret={testSession.storeSecret}
-                  knownSecrets={usableSecrets(testSession.state)}
+                  onStoreSecret={session.storeSecret}
+                  knownSecrets={usableSecrets(session.state)}
                   issue={serverEditing === null ? null : setup.issueOf(serverRowId(serverEditing))}
-                  onProbe={testSession.probeServer}
-                  onSignIn={testSession.startOAuthSignIn}
-                  onSignOut={testSession.signOutOAuth}
+                  onProbe={session.probeServer}
+                  onSignIn={session.startOAuthSignIn}
+                  onSignOut={session.signOutOAuth}
                   onBack={backToSetup ? leavePanel : undefined}
                   onClose={leavePanel}
                 />
@@ -563,15 +507,6 @@ export function WorkspacePage() {
           )}
         </aside>
       </div>
-
-      {undoSnapshot !== null && (
-        <div className="u-undo-toast" role="status">
-          <span>Replaced what was in the editor.</span>
-          <button className="u-linkish" onClick={undoDestructiveSwitch}>
-            Undo
-          </button>
-        </div>
-      )}
     </div>
   );
 }

@@ -25,9 +25,7 @@ import { SignInRequiredError } from "./failure";
 
 export interface OAuthManagerDeps {
   fetchFn: typeof fetch;
-  // Where the popup lands back with the code: the one URI registered with the provider.
   redirectUri: string;
-  // Backs the refresh token, so a sealed copy and a fresh sign-in reach the session the same way.
   refreshStore: KeyValueStore;
   emitAuthorizeUrl: (id: string, url: string) => void;
   emitSignInResult: (id: string, ok: boolean, error?: string) => void;
@@ -40,9 +38,6 @@ export interface OAuthManager {
   signOut(provider: OAuthProviderRef): void;
 }
 
-// Owns the interactive OAuth sessions inside the worker: code exchange, tokens and refresh all
-// happen here, so nothing sensitive is on the main thread, which only opens the popup and relays
-// the code.
 export function createOAuthManager(deps: OAuthManagerDeps): OAuthManager {
   const sessions = new Map<string, AuthorizationCodeSession>();
   const inFlight = new Map<string, OAuthProviderRef>();
@@ -77,8 +72,6 @@ export function createOAuthManager(deps: OAuthManagerDeps): OAuthManager {
     },
 
     async completeSignIn(id, code, state, iss) {
-      // The provider was captured at startSignIn; the code message carries only code, state and the
-      // issuer, so whatever relays it cannot change the exchange endpoint.
       const provider = inFlight.get(id);
       inFlight.delete(id);
       if (provider === undefined) {

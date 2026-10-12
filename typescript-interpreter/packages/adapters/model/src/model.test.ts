@@ -162,9 +162,6 @@ describe("toToolSet", () => {
   });
 });
 
-// The SDK reports a rejected request as an 'error' part on the stream rather than by rejecting,
-// so the port turns that part back into a thrown error. Without it a turn would end quietly,
-// leaving an empty answer and no way to find out why.
 function rejectingFetch(status: number, body: string): typeof fetch {
   return (async () =>
     new Response(body, { status, headers: { "content-type": "application/json" } })) as unknown as typeof fetch;
@@ -175,12 +172,10 @@ async function surfaceFailure(port: ModelPort): Promise<void> {
     { system: "s", messages: [{ role: "user", content: "hi" }], tools: [] },
     new AbortController().signal,
   )) {
-    // consuming the stream is what surfaces the failure
   }
 }
 
 describe("a provider that rejects the request", () => {
-  // The response behind "CORS requests are not allowed for this Organization".
   it("fails the Anthropic stream with the reason the provider gave", async () => {
     const body = JSON.stringify({
       type: "error",
@@ -196,8 +191,6 @@ describe("a provider that rejects the request", () => {
     await expect(surfaceFailure(port)).rejects.toThrow(/Incorrect API key provided/);
   });
 
-  // A healthy 200 with text already delivered, so the failure arrives mid-stream. The message
-  // still has to reach the caller rather than the half-written answer passing for the whole one.
   it("fails when the provider gives up part-way through a 200 stream", async () => {
     const stream = [
       `event: message_start\ndata: {"type":"message_start","message":{"id":"m1","type":"message","role":"assistant","model":"claude","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":1}}}\n\n`,
@@ -213,8 +206,6 @@ describe("a provider that rejects the request", () => {
   });
 });
 
-// A minimal well-formed stream per provider, so the port can be driven to completion and the
-// request body inspected without reaching a real API.
 const ANTHROPIC_STREAM = [
   `event: message_start\ndata: {"type":"message_start","message":{"id":"m1","type":"message","role":"assistant","model":"claude","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":1}}}\n\n`,
   `event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n\n`,
@@ -238,25 +229,19 @@ function recordingFetch(stream: string) {
   return { fn, bodies };
 }
 
-// What matters here is the request that goes out, so a stream the SDK can't fully parse is not
-// a failure - it just means the assertion runs against the body that was already captured.
 async function drain(port: ModelPort, system: string): Promise<void> {
   try {
     for await (const _event of port.stream(
       { system, messages: [{ role: "user", content: "hi" }], tools: [] },
       new AbortController().signal,
     )) {
-      // consuming the stream is what triggers the request
     }
   } catch {
-    /* response parsing is not under test */
   }
 }
 
 describe("system prompt handling", () => {
   it("omits a blank system prompt on Anthropic instead of sending an empty content block", async () => {
-    // Anthropic answers a `system: ""` request with 400 "system: text content blocks must be
-    // non-empty", which took out Suggest tests and AI drafting for every Anthropic agent.
     const recorder = recordingFetch(ANTHROPIC_STREAM);
     await drain(createAnthropicModel({ apiKey: "k", model: "claude-sonnet-4-5", fetch: recorder.fn }), "");
     expect(recorder.bodies[0]).not.toHaveProperty("system");

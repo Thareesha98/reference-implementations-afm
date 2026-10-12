@@ -16,10 +16,6 @@
 
 import { useState } from "react";
 
-/**
- * Copies text and flashes `copied` for `ms` once the browser accepts it; a refused copy shows
- * nothing rather than a false "Copied".
- */
 export function useCopyFeedback(ms = 1200) {
   const [copied, setCopied] = useState(false);
 

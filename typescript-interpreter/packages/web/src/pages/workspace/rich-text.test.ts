@@ -18,7 +18,6 @@ import { describe, it, expect } from "vitest";
 import { toMarkdown, toHtml } from "./rich-text";
 import type { NodeLike } from "./rich-text";
 
-// Plain objects standing in for DOM nodes, so the reading direction is testable with no browser.
 function text(value: string): NodeLike {
   return { nodeType: 3, nodeName: "#text", textContent: value, childNodes: [] };
 }
@@ -43,7 +42,6 @@ describe("reading the editable box back as Markdown", () => {
     expect(toMarkdown(root(p))).toBe("Answer **clearly** and *briefly*");
   });
 
-  // What a browser produces for the same intent varies; the file must not.
   it("treats B and I the same as STRONG and EM", () => {
     expect(toMarkdown(root(el("P", [el("B", [text("a")]), el("I", [text("b")])])))).toBe("**a***b*");
   });
@@ -93,7 +91,6 @@ describe("reading the editable box back as Markdown", () => {
     expect(toMarkdown(root(el("P", [text("a"), el("BR"), text("b")])))).toBe("a\nb");
   });
 
-  // A browser leaves bare text and stray inline tags at block level all the time.
   it("copes with text that has no block wrapper", () => {
     expect(toMarkdown(root(text("loose"), el("STRONG", [text("bold")])))).toBe("loose\n\n**bold**");
   });
@@ -125,7 +122,6 @@ describe("filling the editable box from Markdown", () => {
     expect(toHtml("- a\n1. b")).toBe("<ul><li>a</li></ul><ol><li>b</li></ol>");
   });
 
-  // Agent files get shared. Their text is content, never markup.
   it("never lets the file's own text become tags", () => {
     expect(toHtml("<script>alert(1)</script>")).toBe("<p>&lt;script&gt;alert(1)&lt;/script&gt;</p>");
   });
@@ -138,8 +134,6 @@ describe("filling the editable box from Markdown", () => {
     expect(toHtml("2 \\* 3")).toBe("<p>2 * 3</p>");
   });
 
-  // Agent files are shared, so a link's destination is exactly as untrusted as its text -
-  // a scheme this runtime never meant to produce must not reach a real href.
   it("renders a javascript: link as plain text, not a live href", () => {
     expect(toHtml("[click me](javascript:alert%281%29)")).toBe("<p>click me</p>");
   });
@@ -152,8 +146,6 @@ describe("filling the editable box from Markdown", () => {
     expect(toHtml("[x](vbscript:msgbox%281%29)")).toBe("<p>x</p>");
   });
 
-  // Browsers drop leading control characters before they read a scheme, so a control character in
-  // front of "javascript:" must not hide it from the check.
   it.each(["\u0001", "\u001f", "\u007f", "\u0000"])("sees through a leading control character (%j) in front of a scheme", (control) => {
     expect(toHtml(`[x](${control}javascript:alert%281%29)`)).toBe("<p>x</p>");
   });
@@ -171,7 +163,6 @@ describe("filling the editable box from Markdown", () => {
 });
 
 describe("the round trip", () => {
-  // Opening a field and closing it without typing must leave the file byte-identical.
   const samples = [
     "Answer clearly.",
     "Answer **clearly** and *briefly*",
@@ -186,7 +177,6 @@ describe("the round trip", () => {
   ];
 
   function reparse(markdown: string): NodeLike {
-    // Stands in for the browser parsing our HTML: only the shapes toHtml actually emits.
     const html = toHtml(markdown);
     const nodes: NodeLike[] = [];
     const block = /<(p|h[1-4]|ul|ol|blockquote)>(.*?)<\/\1>/g;

@@ -18,11 +18,6 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { mergeHistory } from "./history-store";
 import type { HistoryEntry } from "./history-store";
 
-/**
- * The store holds one IndexedDB connection for the life of the module, so a test needs a fresh
- * module as well as a fresh fake database - otherwise the second test reuses the first one's
- * connection and reads its data.
- */
 let db: typeof import("./history-store");
 let fake: ReturnType<typeof fakeIndexedDb>;
 
@@ -48,11 +43,6 @@ function entry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
   };
 }
 
-/**
- * Node has no IndexedDB and the build takes no new dependencies, so this is the smallest stand-in
- * that speaks the shape history-store uses: keyPath stores, getAll, and an upgrade transaction
- * that reports completion. It checks our call sequence, not the browser's implementation.
- */
 function fakeIndexedDb(existing: Record<string, HistoryEntry> = {}) {
   const data = new Map<string, HistoryEntry>(Object.entries(existing));
   const settle = <T,>(result: T) => {
@@ -65,13 +55,10 @@ function fakeIndexedDb(existing: Record<string, HistoryEntry> = {}) {
     put: (value: HistoryEntry) => settle(void (puts.push(value.id), data.set(value.id, value))),
     getAll: () => settle([...data.values()]),
     delete: (key: string) => settle(void data.delete(key)),
-    clear: () => settle(void data.clear()),
   };
   const db = {
     createObjectStore: () => store,
     transaction: () => ({ objectStore: () => store }),
-    // The store subscribes to versionchange/close to drop its cached connection. Nothing here
-    // fires them; this is the real IDBDatabase surface it expects to be able to call.
     addEventListener: () => {},
     close: () => {},
   };
@@ -133,6 +120,16 @@ describe("mergeHistory", () => {
     );
     expect(merged).toEqual([entry({ id: "h1", tokenCount: 99, updatedAt: 200 })]);
   });
+
+  it("does not roll a newer conversation back during Undo", () => {
+    const newer = entry({ updatedAt: 200, tokenCount: 99 });
+    expect(mergeHistory([newer], [entry({ updatedAt: 100 })])).toEqual([newer]);
+  });
+
+  it("takes the imported entry on an equal timestamp", () => {
+    const imported = entry({ tokenCount: 99 });
+    expect(mergeHistory([entry()], [imported])).toEqual([imported]);
+  });
 });
 
 describe("the conversation store", () => {
@@ -159,18 +156,38 @@ describe("the conversation store", () => {
     expect(after[0]?.tokenCount).toBe(2);
   });
 
-  it("removes one, removes every conversation of one agent, and clears the lot", async () => {
+  it("leaves unassociated and other agents' conversations alone when deleting an agent", async () => {
+    const keep = [entry({ id: "unassociated" }), entry({ id: "other", agentId: "B" })];
+    await db.importHistoryEntries([...keep, entry({ id: "drop", agentId: "A" })]);
+    expect(await db.removeHistoryEntriesForAgent("A")).toEqual(keep);
+    expect(await db.removeHistoryEntriesForAgent("missing")).toEqual(keep);
+    expect(await db.loadHistory()).toEqual(keep);
+  });
+
+  it("retains the newest 200 entries on both restore and save", async () => {
+    const imported = Array.from({ length: 201 }, (_, index) => entry({ id: `c${index}`, updatedAt: index }));
+    const restored = await db.importHistoryEntries(imported);
+    expect(restored).toHaveLength(200);
+    expect(restored[0]?.id).toBe("c200");
+    expect(fake.data.has("c0")).toBe(false);
+    const saved = await db.upsertHistoryEntry(entry({ id: "latest", updatedAt: 202 }));
+    expect(saved).toHaveLength(200);
+    expect(saved[0]?.id).toBe("latest");
+    expect(fake.data.has("c1")).toBe(false);
+    expect(await db.loadHistory()).toEqual(saved);
+  });
+
+  it("removes every conversation of one agent and preserves the rest", async () => {
     await db.upsertHistoryEntry(entry({ id: "a1", agentId: "A" }));
     await db.upsertHistoryEntry(entry({ id: "a2", agentId: "A" }));
     await db.upsertHistoryEntry(entry({ id: "b1", agentId: "B" }));
 
-    expect((await db.removeHistoryEntry("a1")).map((e) => e.id).sort()).toEqual(["a2", "b1"]);
     expect((await db.removeHistoryEntriesForAgent("A")).map((e) => e.id)).toEqual(["b1"]);
-    expect(await db.clearHistory()).toEqual([]);
+    expect((await db.loadHistory()).map((e) => e.id)).toEqual(["b1"]);
+    expect(await db.removeHistoryEntriesForAgent("B")).toEqual([]);
     expect(await db.loadHistory()).toEqual([]);
   });
 
-  // An attached image is base64, and a few of them pass what localStorage would hold.
   it("keeps a message's attached image", async () => {
     const withImage = entry({
       id: "c1",
@@ -181,13 +198,6 @@ describe("the conversation store", () => {
     await db.upsertHistoryEntry(withImage);
     const [loaded] = await db.loadHistory();
     expect(loaded?.messages[0]).toMatchObject({ images: [{ name: "shot.png", data: "AAAA" }] });
-  });
-
-  it("branches a conversation under a new id, leaving the original alone", async () => {
-    await db.upsertHistoryEntry(entry({ id: "c1", agentName: "Original" }));
-    const branched = await db.branchFrom(entry({ id: "c1", agentName: "Original" }));
-    expect(branched.id).not.toBe("c1");
-    expect((await db.loadHistory()).map((e) => e.id).sort()).toEqual([branched.id, "c1"].sort());
   });
 
   it("restores deleted conversations without disturbing the ones still there", async () => {
@@ -207,9 +217,9 @@ describe("the conversation store", () => {
   });
 
   it("opens the database once, however many operations run", async () => {
-    await db.upsertHistoryEntry(entry({ id: "a" }));
+    await db.upsertHistoryEntry(entry({ id: "a", agentId: "A" }));
     await db.loadHistory();
-    await db.removeHistoryEntry("a");
+    await db.removeHistoryEntriesForAgent("A");
     await db.loadHistory();
     expect(fake.opened).toBe(1);
   });
@@ -227,8 +237,6 @@ describe("the conversation store", () => {
   });
 });
 
-// Anyone upgrading already has conversations in localStorage. They are carried across inside the
-// upgrade transaction, and the old copy is dropped only once that has committed.
 describe("moving conversations off localStorage", () => {
   const legacy = [entry({ id: "c1", agentName: "Older", updatedAt: 100 })];
 

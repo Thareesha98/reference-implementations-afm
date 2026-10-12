@@ -22,10 +22,6 @@ export type LoadSource =
   | { kind: "agent"; id: string }
   | { kind: "none" };
 
-/**
- * The host of an address, for showing where something is going; returns the input when it is not a
- * URL, so a half-typed address still renders.
- */
 export function hostOf(url: string): string {
   try {
     return new URL(url).host;
@@ -53,8 +49,6 @@ export function decodeInlineAfm(encoded: string): string {
 
 export type AgentFileUrl = { ok: true; url: string } | { ok: false; error: string };
 
-// A ?file= link is fetched directly by the recipient's browser, so it must point at the raw file.
-// GitHub and Gist page URLs return HTML, so they are rewritten to their raw form.
 export function normalizeAgentFileUrl(input: string): AgentFileUrl {
   const trimmed = input.trim();
   if (trimmed === "") {
@@ -88,10 +82,6 @@ export function normalizeAgentFileUrl(input: string): AgentFileUrl {
   return { ok: true, url: url.toString() };
 }
 
-/**
- * The inline agent arrives in the fragment (share links; never sent to a server) or the older query
- * string.
- */
 export function inlineAfmParam(search: URLSearchParams, hash: string): string | null {
   return new URLSearchParams(hash.replace(/^#/, "")).get("afm") ?? search.get("afm");
 }

@@ -81,7 +81,6 @@ export async function assertSafeTarget(
     }
   }
 
-  // The relay forwards credentials, so plain http is for local development only.
   if (url.protocol === "http:" && !allowLoopback) {
     throw new SsrfError("Plain http targets are not allowed; use https", 400);
   }

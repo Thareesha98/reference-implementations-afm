@@ -35,17 +35,10 @@ export function searchDirectory(query: string, entries: readonly DirectoryEntry[
 export interface DiscoveredMcpAuth {
   authorizeUrl: string;
   tokenUrl: string;
-  /** Empty when nothing could obtain one automatically; a person pastes their own. */
   clientId: string;
   scopes?: string[];
 }
 
-/**
- * Finds out whether an MCP server needs sign-in and resolves what is needed to start it: where to
- * send the user and a client_id (a Client ID Metadata Document, falling back to Dynamic Client
- * Registration). Pure: browser values are parameters. Returns `null` when no auth is needed or
- * discovery cannot tell; the caller connects without credentials.
- */
 export async function resolveMcpServerAuth(
   serverUrl: string,
   fetchFn: typeof fetch,
@@ -63,16 +56,11 @@ export async function resolveMcpServerAuth(
     return resolveClientId(asMetadata, scopes, cimdClientId, redirectUri, fetchFn);
   }
 
-  // No Protected Resource Metadata (RFC 9728): some servers act as their own authorization server,
-  // identified by their origin (mcp.atlassian.com serves valid RFC 8414 metadata at its root). A
-  // server needing no auth fails this fallback too, and this still returns null.
   const asMetadata = await discoverAuthorizationServer(new URL(serverUrl).origin, fetchFn);
   if (asMetadata === null) return null;
   return resolveClientId(asMetadata, asMetadata.scopes_supported, cimdClientId, redirectUri, fetchFn);
 }
 
-// Order of preference from the spec: a Client ID Metadata Document, then Dynamic Client
-// Registration; with neither, the client_id stays empty for a person to paste.
 async function resolveClientId(
   asMetadata: Pick<
     AuthorizationServerMetadata,
@@ -93,17 +81,11 @@ async function resolveClientId(
       const registered = await registerClient(asMetadata.registration_endpoint, [redirectUri], fetchFn);
       return { ...base, clientId: registered.clientId };
     } catch {
-      // Registration failed: still return what was learned, so the person fills in only client_id.
     }
   }
   return { ...base, clientId: "" };
 }
 
-/**
- * Everything a directory entry already says about its sign-in is used as written; only the client_id
- * is left to resolve, the same way as for a server found by address. Pure: browser values are
- * parameters.
- */
 export function resolveDirectoryAuth(
   auth: OAuthSignIn,
   fetchFn: typeof fetch,
@@ -120,8 +102,6 @@ export function resolveDirectoryAuth(
 }
 
 function browserClient(): { cimdClientId: string | undefined; redirectUri: string } {
-  // The document AFM hosts (the spec's preferred registration), built with the site; without one
-  // the client registers itself.
   return {
     cimdClientId: import.meta.env.VITE_OAUTH_CLIENT_ID_URL || undefined,
     redirectUri: `${window.location.origin}/`,

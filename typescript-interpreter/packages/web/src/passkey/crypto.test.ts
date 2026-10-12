@@ -19,8 +19,6 @@ import { importPrf, deriveAesKey, encryptString, decryptString, randomSalt } fro
 
 const derive = async (prf: BufferSource, salt: BufferSource) => deriveAesKey(await importPrf(prf), salt);
 
-// A real authenticator returns the SAME bytes every time for a given passkey; that is what lets
-// a value sealed on one visit be opened on the next. These stand in for those bytes.
 const prfOutput = () => crypto.getRandomValues(new Uint8Array(32));
 const SECRET = "sk-proj-abc123-not-a-real-key";
 
@@ -35,7 +33,6 @@ describe("deriveAesKey", () => {
     const prf = prfOutput();
     const salt = randomSalt();
     const sealed = await encryptString(await derive(prf, salt), SECRET);
-    // The next visit: same fingerprint, same stored salt.
     const reopened = await derive(prf, salt);
     expect(await decryptString(reopened, sealed)).toBe(SECRET);
   });
@@ -76,8 +73,6 @@ describe("encryptString / decryptString", () => {
     expect(new TextDecoder().decode(sealed.data)).not.toContain("sk-proj");
   });
 
-  // AES-GCM authenticates as well as encrypts: a tampered blob must fail loudly rather than
-  // decrypt into something the caller would then send somewhere.
   it("refuses a blob whose ciphertext was altered", async () => {
     const key = await derive(prfOutput(), randomSalt());
     const sealed = await encryptString(key, SECRET);

@@ -113,7 +113,6 @@ describe("openUpstream", () => {
       res.end("from the second address");
     });
     const port = await listen(server);
-    // Never accepted - not routed, so the connect attempt just sits there until our own timer cuts it.
     const target: SafeTarget = { url: new URL(`http://x:${port}/`), addresses: ["10.255.255.1", "127.0.0.1"] };
 
     const started = Date.now();
@@ -162,7 +161,6 @@ describe("openUpstream", () => {
 
     const first = await call();
     for await (const _chunk of first.response) {
-      /* drain */
     }
 
     const second = await call();

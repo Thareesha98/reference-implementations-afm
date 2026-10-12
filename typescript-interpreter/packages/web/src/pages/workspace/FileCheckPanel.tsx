@@ -18,7 +18,6 @@ import type { AfmIssue } from "../../agent-validation";
 import { inPlainWords } from "./issue-words";
 import type { IssueTarget } from "./issue-words";
 
-/** What pressing the fix opens. */
 const FIX_LABEL: Record<IssueTarget, string> = {
   role: "Write it",
   instructions: "Write them",
@@ -29,12 +28,7 @@ const FIX_LABEL: Record<IssueTarget, string> = {
 
 interface Props {
   issues: AfmIssue[];
-  /**
-   * Say it in words rather than the file's terms: true in Build, false in Raw where the exact
-   * wording and line matter.
-   */
   plain?: boolean;
-  /** Given a place to go, each problem carries a way to fix it. */
   onFix?: (target: IssueTarget) => void;
 }
 

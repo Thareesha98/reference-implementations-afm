@@ -14,15 +14,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// The passkey this browser enrolled for AFM, so a second saved secret reuses it. A credential id is
-// a public handle, not a secret.
 const CREDENTIAL_KEY = "afm.passkey.credential";
 
 export function rememberCredentialId(id: Uint8Array<ArrayBuffer>): void {
   try {
     localStorage.setItem(CREDENTIAL_KEY, btoa(String.fromCharCode(...id)));
   } catch {
-    // Without this the next save would enrol a second passkey.
   }
 }
 
@@ -40,6 +37,5 @@ export function forgetCredentialId(): void {
   try {
     localStorage.removeItem(CREDENTIAL_KEY);
   } catch {
-    // Nothing to recover: the id is only a hint.
   }
 }
