@@ -9,5 +9,3 @@ dist/
 docs/
 
 deploy/.env.deploy
-packages/mcp-proxy/deploy/
-packages/mcp-proxy/proxy.zip

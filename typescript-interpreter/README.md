@@ -1,6 +1,6 @@
 # AFM TypeScript Runtime
 
-A [Agent-Flavored Markdown (AFM)](https://github.com/wso2/agent-flavored-markdown) interpreter that runs entirely in the browser. There is no server that executes the agent: a `.afm.md` file is loaded into a page, parsed and run inside a Web Worker, and talks directly to the model provider and to the MCP servers the file names. The only server piece is a small, stateless CORS relay (the **MCP proxy**) that lets the page reach MCP servers that send no CORS headers of their own; it stores nothing and logs no requests, but it does carry MCP traffic in transit, including those servers' credentials, tool arguments and results, and OAuth sign-in codes and tokens.
+A [Agent-Flavored Markdown (AFM)](https://github.com/wso2/agent-flavored-markdown) interpreter that runs entirely in the browser. There is no server that executes the agent: a `.afm.md` file is loaded into a page, parsed and run inside a Web Worker, and talks directly to the model provider and to the MCP servers the file names. The only server piece is a small, stateless CORS relay (the **MCP proxy**, a separate Ballerina service that is not part of this repository) that lets the page reach MCP servers that send no CORS headers of their own; it stores nothing and logs no requests, but it does carry MCP traffic in transit, including those servers' credentials, tool arguments and results, and OAuth sign-in codes and tokens.
 
 ## Features
 
@@ -20,16 +20,13 @@ A [Agent-Flavored Markdown (AFM)](https://github.com/wso2/agent-flavored-markdow
 
 ## Quick Start
 
-The app needs two things running side by side: the MCP proxy (a small Node relay) and the web app itself. Any agent that uses an MCP server will fail to connect its tools without the proxy - it is a mandatory relay, not an optional one.
+The app needs two things running side by side: an MCP proxy and the web app itself. Any agent that uses an MCP server will fail to connect its tools without the proxy - it is a mandatory relay, not an optional one. The proxy is a separate Ballerina service that is not part of this repository; start it so that it listens on `http://localhost:8787/` and allows the origin `http://localhost:5173`.
 
 ```bash
 cd typescript-interpreter
 pnpm install
 
-# terminal 1 - the MCP proxy
-AFM_ALLOWED_ORIGIN=http://localhost:5173 pnpm --filter @afm/mcp-proxy start
-
-# terminal 2 - the app, packages/web/.env.local
+# the app, packages/web/.env.local
 echo 'VITE_MCP_PROXY_URL=http://localhost:8787/' > packages/web/.env.local
 pnpm --filter @afm/web dev
 ```
@@ -46,20 +43,6 @@ Open `http://localhost:5173/`. From there you can start from a blank agent, pick
 | `VITE_OAUTH_CLIENT_ID_URL` | No | The public URL of AFM's own OAuth Client ID Metadata Document, if the site hosts one; production builds also write this document to `oauth/client-metadata.json`. Without it, the app registers itself with each MCP server that supports Dynamic Client Registration |
 
 Model API keys and MCP credentials are never set via environment variables - they are entered in the app itself.
-
-### The MCP proxy (`packages/mcp-proxy`, process environment)
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `PORT` | `8787` | Port the proxy listens on |
-| `AFM_ALLOWED_ORIGIN` | `http://localhost:5173` | Comma-separated exact origins the proxy accepts requests from |
-| `AFM_ALLOW_LOOPBACK` | unset | Development only. Set to `1` to let the proxy reach `localhost`/loopback targets and plain `http://` (both are otherwise refused) - never set this in production |
-| `AFM_ALLOWED_TARGET_HOSTS` | unset (any host) | Comma-separated hosts the proxy will relay to; leaving it unset allows any host an agent file names |
-| `AFM_RATE_PER_MINUTE`, `AFM_RATE_BURST` | `120`, `30` | Per-client rate limit |
-| `AFM_GLOBAL_RATE_PER_MINUTE`, `AFM_GLOBAL_BURST` | `1200`, `300` | Rate limit for the relay as a whole |
-| `AFM_MAX_BODY_BYTES`, `AFM_MAX_RESPONSE_BYTES` | `1000000`, `10000000` | Request and response size caps |
-| `AFM_MAX_UPSTREAM_MS` | `120000` | Ceiling on the whole upstream exchange (connect, TLS, headers, streaming) |
-| `AFM_TRUSTED_PROXY_HOPS` | `1` | How many trusted hops sit in front of the proxy, for reading the real client address out of `X-Forwarded-For` |
 
 ## Testing
 
@@ -84,14 +67,13 @@ Connect tools lists the servers written down in `packages/web/src/mcp-directory.
 
 ```bash
 pnpm --filter @afm/web build       # packages/web/dist - static files for any host
-pnpm --filter @afm/mcp-proxy build # packages/mcp-proxy/deploy - a single dependency-free server.mjs
 ```
 
-The web build is a static site (no server-side rendering); the proxy is a small, stateless Node process. `deploy/deploy.sh` is a sample/test deployment script - a manual deploy to Azure Static Web Apps (the site) and Azure App Service (the proxy), both usable on Azure's permanently-free tiers - run it with no arguments to see its commands; it is not a production deployment pipeline. Any other static host plus any place to run a small Node process works equally well; the two pieces only need to agree on `AFM_ALLOWED_ORIGIN` and `VITE_MCP_PROXY_URL`.
+The web build is a static site (no server-side rendering) that works on any static host. The only other piece it needs is an MCP proxy reachable at `VITE_MCP_PROXY_URL`, and that proxy has to allow the site's origin.
 
 ## Project Structure
 
-This is a pnpm workspace of seven packages:
+This is a pnpm workspace of six packages:
 
 ```text
 typescript-interpreter/
@@ -102,9 +84,7 @@ typescript-interpreter/
 │   │   ├── model/           # @afm/adapter-model  - OpenAI and Anthropic model ports
 │   │   ├── secret/          # @afm/adapter-secret - secret resolution port
 │   │   └── tool/            # @afm/adapter-tool   - MCP client, file tools
-│   ├── mcp-proxy/           # @afm/mcp-proxy - the Node relay: CORS + SSRF guard + rate limits
 │   └── web/                 # @afm/web - the browser app (Vite + React), main thread and worker
-├── deploy/                  # deploy.sh and its Azure config example
 ├── scripts/typecheck.mjs    # typechecks every package
 └── pnpm-workspace.yaml
 ```
@@ -115,7 +95,7 @@ The agent's plaintext credentials stay in the Web Worker: the main thread never 
 
 The page's Content-Security-Policy has no `unsafe-eval` and a `connect-src` allowlist of exactly `'self'`, `api.openai.com`, `api.anthropic.com`, `raw.githubusercontent.com`, `gist.githubusercontent.com`, and the configured MCP proxy origin. This policy is sent as an HTTP response header on every file the site serves, not only `index.html`: a `<meta>` CSP would not apply to the worker scripts at all (workers are not governed by the CSP of the page that created them), so the real enforcement has to come from the header, on the worker's own response.
 
-The proxy blocks requests to private/loopback/link-local addresses and plain `http://` targets (SSRF protection, `AFM_ALLOW_LOOPBACK` excepted for local development only), strips hop-by-hop and forwarding headers, and enforces size, rate and time limits on every request - see `packages/mcp-proxy/src` for the specifics.
+The separate MCP proxy is what blocks requests to private/loopback/link-local addresses and plain `http://` targets (SSRF protection, with an opt-out for local development only), strips hop-by-hop and forwarding headers, and enforces size, rate and time limits on every request - see its own documentation for the specifics.
 
 ## Using AFM Safely
 
