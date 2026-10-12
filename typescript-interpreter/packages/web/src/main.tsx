@@ -17,7 +17,7 @@
 import { createRoot } from "react-dom/client";
 import { RouterRoot } from "./app/App";
 import { isFramed } from "./frame-guard";
-import { clearLegacyRefreshTokens, relayOAuthCallbackIfPopup } from "./oauth-signin";
+import { clearLegacyRefreshTokens, relayOAuthCallback } from "./oauth-signin";
 import "@fontsource/instrument-sans/400.css";
 import "@fontsource/instrument-sans/500.css";
 import "@fontsource/instrument-sans/600.css";
@@ -28,7 +28,7 @@ import "@fontsource/ibm-plex-mono/500.css";
 import "@fontsource/ibm-plex-mono/600.css";
 import "./styles/index.css";
 
-if (!isFramed() && !relayOAuthCallbackIfPopup()) {
+if (!isFramed() && !relayOAuthCallback()) {
   clearLegacyRefreshTokens();
 
   const container = document.getElementById("root");

@@ -18,53 +18,54 @@ import { authorizationCodeRefreshKey, type OAuthProviderRef } from "@afm/adapter
 import type { ClientMessage } from "./protocol";
 import { seal } from "./passkey/vault";
 
-export type PopupResult = { code: string; state: string; iss?: string } | { error: string };
+export type PopupResult = { code: string; state: string; iss?: string } | { error: string; state: string };
 
 const POPUP_NAME = "afm-oauth-signin";
+const CALLBACK_CHANNEL = "afm-oauth-callback";
+const SIGN_IN_TIMEOUT_MS = 10 * 60 * 1000;
 
+// Must be called straight from the click, before any await, or the browser blocks the window.
 function openSignInPopup(): Window | null {
   return window.open("about:blank", POPUP_NAME, "width=520,height=680");
 }
 
-export function relayOAuthCallbackIfPopup(): boolean {
-  if (window.name !== POPUP_NAME) return false;
+export function relayOAuthCallback(): boolean {
   const params = new URLSearchParams(window.location.search);
   const code = params.get("code");
   const state = params.get("state");
   const iss = params.get("iss");
   const error = params.get("error");
-  if (error === null && (code === null || state === null)) return false;
-  const result = error !== null ? { error } : { code, state, ...(iss === null ? {} : { iss }) };
-  window.opener?.postMessage({ type: "afm-oauth-callback", ...result }, window.location.origin);
+  if (state === null || (code === null && error === null)) return false;
+  const result = error !== null ? { error, state } : { code, state, ...(iss === null ? {} : { iss }) };
+  const channel = new BroadcastChannel(CALLBACK_CHANNEL);
+  channel.postMessage(result);
+  channel.close();
+  document.body.textContent = "You can close this window.";
   window.close();
   return true;
 }
 
-function awaitPopupResult(popup: Window): Promise<PopupResult> {
+function awaitCallback(stateOf: () => string | undefined): Promise<PopupResult> {
   return new Promise((resolve, reject) => {
-    const poll = window.setInterval(() => {
-      if (popup.closed) settle(() => reject(new Error("Sign-in was cancelled.")));
-    }, 400);
+    const channel = new BroadcastChannel(CALLBACK_CHANNEL);
+    const timer = window.setTimeout(() => settle(() => reject(new Error("Sign-in timed out."))), SIGN_IN_TIMEOUT_MS);
 
     function settle(done: () => void): void {
-      window.clearInterval(poll);
-      window.removeEventListener("message", onMessage);
+      window.clearTimeout(timer);
+      channel.close();
       done();
     }
 
-    function onMessage(event: MessageEvent): void {
-      if (event.origin !== window.location.origin || event.source !== popup) return;
-      const data = event.data as { type?: unknown; code?: unknown; state?: unknown; iss?: unknown; error?: unknown };
-      if (data?.type !== "afm-oauth-callback") return;
+    channel.onmessage = (event: MessageEvent) => {
+      const data = event.data as { code?: unknown; state?: unknown; iss?: unknown; error?: unknown };
+      if (typeof data?.state !== "string" || data.state !== stateOf()) return;
       if (typeof data.error === "string") {
-        settle(() => resolve({ error: data.error as string }));
-      } else if (typeof data.code === "string" && typeof data.state === "string") {
+        settle(() => resolve({ error: data.error as string, state: data.state as string }));
+      } else if (typeof data.code === "string") {
         const iss = typeof data.iss === "string" ? { iss: data.iss } : {};
         settle(() => resolve({ code: data.code as string, state: data.state as string, ...iss }));
       }
-    }
-
-    window.addEventListener("message", onMessage);
+    };
   });
 }
 
@@ -91,6 +92,7 @@ interface Flow {
   popup: Window;
   provider: OAuthProviderRef;
   remember: boolean;
+  state?: string;
   resolve: (ok: boolean) => void;
 }
 
@@ -128,7 +130,7 @@ export function createOAuthSignIns(deps: OAuthSignInDeps): OAuthSignIns {
           resolve(false);
         };
 
-        awaitPopupResult(popup).then(
+        awaitCallback(() => flows.get(id)?.state).then(
           (result) => {
             if ("error" in result) abandon(`Sign-in was declined (${result.error.slice(0, 80)}).`);
             else deps.post({ type: "oauth-signin-code", id, ...result });
@@ -140,7 +142,9 @@ export function createOAuthSignIns(deps: OAuthSignInDeps): OAuthSignIns {
 
     onAuthorizeUrl(id, url) {
       const flow = flows.get(id);
-      if (flow !== undefined && !flow.popup.closed) flow.popup.location.href = url;
+      if (flow === undefined || flow.popup.closed) return;
+      flow.state = new URL(url).searchParams.get("state") ?? undefined;
+      flow.popup.location.href = url;
     },
 
     onDone(id, ok, error) {

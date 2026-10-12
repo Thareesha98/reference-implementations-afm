@@ -15,7 +15,7 @@
 // under the License.
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { clearLegacyRefreshTokens, createOAuthSignIns, relayOAuthCallbackIfPopup } from "./oauth-signin";
+import { clearLegacyRefreshTokens, createOAuthSignIns, relayOAuthCallback } from "./oauth-signin";
 import type { ClientMessage } from "./protocol";
 
 describe("clearLegacyRefreshTokens", () => {
@@ -79,81 +79,108 @@ function fakePopup() {
   return { closed: false, close: vi.fn(function (this: { closed: boolean }) { this.closed = true; }), location: { href: "" } };
 }
 
+class FakeChannel {
+  static all: FakeChannel[] = [];
+  onmessage: ((event: { data: unknown }) => void) | null = null;
+  closed = false;
+  posted: unknown[] = [];
+  constructor(readonly name: string) {
+    FakeChannel.all.push(this);
+  }
+  postMessage(data: unknown) {
+    this.posted.push(data);
+  }
+  close() {
+    this.closed = true;
+  }
+  static deliver(data: unknown) {
+    for (const channel of FakeChannel.all.filter((item) => !item.closed)) channel.onmessage?.({ data });
+  }
+}
+
 function fakeWindow(extra: Record<string, unknown> = {}) {
-  const listeners = new Map<string, ((event: unknown) => void)[]>();
-  const intervals: (() => void)[] = [];
+  const timeouts: (() => void)[] = [];
   return {
-    listeners,
-    intervals,
+    timeouts,
     location: { origin: ORIGIN, search: "" },
     name: "",
     open: vi.fn(),
-    setInterval: (callback: () => void) => intervals.push(callback),
-    clearInterval: () => {},
-    addEventListener: (type: string, listener: (event: unknown) => void) => listeners.set(type, [...(listeners.get(type) ?? []), listener]),
-    removeEventListener: (type: string, listener: (event: unknown) => void) =>
-      listeners.set(type, (listeners.get(type) ?? []).filter((item) => item !== listener)),
-    message(event: unknown) {
-      for (const listener of listeners.get("message") ?? []) listener(event);
-    },
+    setTimeout: (callback: () => void) => timeouts.push(callback),
+    clearTimeout: () => {},
+    close: vi.fn(),
     ...extra,
   };
 }
 
-describe("relayOAuthCallbackIfPopup", () => {
-  beforeEach(() => vi.unstubAllGlobals());
+describe("relayOAuthCallback", () => {
+  beforeEach(() => {
+    vi.unstubAllGlobals();
+    FakeChannel.all = [];
+    vi.stubGlobal("BroadcastChannel", FakeChannel);
+  });
 
-  function popupWindow(search: string) {
-    const opener = { postMessage: vi.fn() };
-    const win = fakeWindow({ name: "afm-oauth-signin", opener, close: vi.fn(), location: { origin: ORIGIN, search } }) as ReturnType<
-      typeof fakeWindow
-    > & { close: ReturnType<typeof vi.fn> };
+  function callbackPage(search: string) {
+    const win = fakeWindow({ location: { origin: ORIGIN, search } });
+    const body = { textContent: "" };
     vi.stubGlobal("window", win);
-    return { win, opener };
+    vi.stubGlobal("document", { body });
+    return { win, body };
   }
 
-  it("hands the code to the opener and closes", () => {
-    const { win, opener } = popupWindow("?code=abc&state=xyz");
-    expect(relayOAuthCallbackIfPopup()).toBe(true);
-    expect(opener.postMessage).toHaveBeenCalledWith({ type: "afm-oauth-callback", code: "abc", state: "xyz" }, ORIGIN);
+  it("hands the code to whoever started the sign-in, and closes", () => {
+    const { win } = callbackPage("?code=abc&state=xyz");
+    expect(relayOAuthCallback()).toBe(true);
+    expect(FakeChannel.all[0]?.name).toBe("afm-oauth-callback");
+    expect(FakeChannel.all[0]?.posted).toEqual([{ code: "abc", state: "xyz" }]);
     expect(win.close).toHaveBeenCalled();
   });
 
   it("passes the issuer along when the answer names one", () => {
-    const { opener } = popupWindow("?code=abc&state=xyz&iss=https%3A%2F%2Fauth.example.com");
-    expect(relayOAuthCallbackIfPopup()).toBe(true);
-    expect(opener.postMessage).toHaveBeenCalledWith(
-      { type: "afm-oauth-callback", code: "abc", state: "xyz", iss: "https://auth.example.com" },
-      ORIGIN,
-    );
+    callbackPage("?code=abc&state=xyz&iss=https%3A%2F%2Fauth.example.com");
+    expect(relayOAuthCallback()).toBe(true);
+    expect(FakeChannel.all[0]?.posted).toEqual([{ code: "abc", state: "xyz", iss: "https://auth.example.com" }]);
   });
 
   it("leaves the issuer out when the answer has none", () => {
-    const { opener } = popupWindow("?code=abc&state=xyz");
-    relayOAuthCallbackIfPopup();
-    expect(opener.postMessage.mock.calls[0]?.[0]).not.toHaveProperty("iss");
+    callbackPage("?code=abc&state=xyz");
+    relayOAuthCallback();
+    expect(FakeChannel.all[0]?.posted[0]).not.toHaveProperty("iss");
   });
 
-  it("hands a refusal to the opener too, instead of opening the whole app in the popup", () => {
-    const { win, opener } = popupWindow("?error=access_denied&state=xyz");
-    expect(relayOAuthCallbackIfPopup()).toBe(true);
-    expect(opener.postMessage).toHaveBeenCalledWith({ type: "afm-oauth-callback", error: "access_denied" }, ORIGIN);
+  it("hands a refusal over too, instead of opening the whole app in the popup", () => {
+    const { win } = callbackPage("?error=access_denied&state=xyz");
+    expect(relayOAuthCallback()).toBe(true);
+    expect(FakeChannel.all[0]?.posted).toEqual([{ error: "access_denied", state: "xyz" }]);
     expect(win.close).toHaveBeenCalled();
   });
 
-  it("leaves an ordinary page load alone", () => {
-    vi.stubGlobal("window", fakeWindow({ name: "", location: { origin: ORIGIN, search: "?code=abc&state=xyz" } }));
-    expect(relayOAuthCallbackIfPopup()).toBe(false);
+  it("says the window can be closed when the browser will not close it", () => {
+    const { body } = callbackPage("?code=abc&state=xyz");
+    relayOAuthCallback();
+    expect(body.textContent).toBe("You can close this window.");
   });
 
-  it("leaves the popup alone when it landed here without a code or a refusal", () => {
-    popupWindow("");
-    expect(relayOAuthCallbackIfPopup()).toBe(false);
+  it("works with no opener and no window name, which is what a provider that isolates its pages leaves", () => {
+    callbackPage("?code=abc&state=xyz");
+    expect(window.name).toBe("");
+    expect(relayOAuthCallback()).toBe(true);
+  });
+
+  it("leaves an ordinary page load alone", () => {
+    callbackPage("");
+    expect(relayOAuthCallback()).toBe(false);
+    expect(FakeChannel.all).toHaveLength(0);
+  });
+
+  it("leaves a page alone when the answer carries no state", () => {
+    callbackPage("?code=abc");
+    expect(relayOAuthCallback()).toBe(false);
   });
 });
 
 describe("createOAuthSignIns", () => {
   const provider = { authorizeUrl: "https://auth.example.com/authorize", tokenUrl: "https://auth.example.com/token", clientId: "c" };
+  const AUTHORIZE = "https://auth.example.com/authorize?state=s";
 
   function setup() {
     const popup = fakePopup();
@@ -165,41 +192,57 @@ describe("createOAuthSignIns", () => {
     const signIns = createOAuthSignIns(deps);
     const result = signIns.start(provider, false);
     const startId = (posted[0] as { id: string }).id;
+    signIns.onAuthorizeUrl(startId, AUTHORIZE);
     return { popup, win, posted, deps, signIns, result, startId };
   }
 
-  beforeEach(() => vi.unstubAllGlobals());
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  beforeEach(() => {
+    vi.unstubAllGlobals();
+    FakeChannel.all = [];
+    vi.stubGlobal("BroadcastChannel", FakeChannel);
+  });
 
   it("sends the popup to the address the worker built, and relays the code back", async () => {
-    const { popup, win, posted, signIns, result, startId } = setup();
-    signIns.onAuthorizeUrl(startId, "https://auth.example.com/authorize?state=s");
-    expect(popup.location.href).toBe("https://auth.example.com/authorize?state=s");
+    const { popup, posted, signIns, result, startId } = setup();
+    expect(popup.location.href).toBe(AUTHORIZE);
 
-    win.message({ origin: ORIGIN, source: popup, data: { type: "afm-oauth-callback", code: "abc", state: "s" } });
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    FakeChannel.deliver({ code: "abc", state: "s" });
+    await settle();
     expect(posted.at(-1)).toEqual({ type: "oauth-signin-code", id: startId, code: "abc", state: "s" });
 
     signIns.onDone(startId, true);
     expect(await result).toBe(true);
   });
 
-  it("relays the issuer to the worker when the popup reports one", async () => {
-    const { popup, win, posted, startId } = setup();
-    win.message({ origin: ORIGIN, source: popup, data: { type: "afm-oauth-callback", code: "abc", state: "s", iss: "https://auth.example.com" } });
-    await new Promise((resolve) => setTimeout(resolve, 0));
+  it("still hears the answer when the provider has cut the popup loose and it reads as closed", async () => {
+    const { popup, posted, signIns, result, startId } = setup();
+    popup.closed = true;
+    FakeChannel.deliver({ code: "abc", state: "s" });
+    await settle();
+    expect(posted.at(-1)).toEqual({ type: "oauth-signin-code", id: startId, code: "abc", state: "s" });
+    signIns.onDone(startId, true);
+    expect(await result).toBe(true);
+  });
+
+  it("relays the issuer to the worker when the callback reports one", async () => {
+    const { posted, startId } = setup();
+    FakeChannel.deliver({ code: "abc", state: "s", iss: "https://auth.example.com" });
+    await settle();
     expect(posted.at(-1)).toEqual({ type: "oauth-signin-code", id: startId, code: "abc", state: "s", iss: "https://auth.example.com" });
   });
 
   it("leaves out an issuer that is not a string", async () => {
-    const { popup, win, posted } = setup();
-    win.message({ origin: ORIGIN, source: popup, data: { type: "afm-oauth-callback", code: "abc", state: "s", iss: 5 } });
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    const { posted } = setup();
+    FakeChannel.deliver({ code: "abc", state: "s", iss: 5 });
+    await settle();
     expect(posted.at(-1)).not.toHaveProperty("iss");
   });
 
   it("closes the popup and says so when the provider refuses", async () => {
-    const { popup, win, posted, deps, result } = setup();
-    win.message({ origin: ORIGIN, source: popup, data: { type: "afm-oauth-callback", error: "access_denied" } });
+    const { popup, posted, deps, result } = setup();
+    FakeChannel.deliver({ error: "access_denied", state: "s" });
     expect(await result).toBe(false);
     expect(popup.close).toHaveBeenCalled();
     expect(deps.onFailure).toHaveBeenCalledWith(expect.stringContaining("access_denied"));
@@ -213,20 +256,28 @@ describe("createOAuthSignIns", () => {
     expect(deps.onFailure).toHaveBeenCalledWith("Sign-in failed: OAuth2 sign-in state mismatch");
   });
 
-  it("treats a popup the user closed as a quiet cancel", async () => {
-    const { popup, win, deps, result } = setup();
-    popup.closed = true;
-    for (const tick of win.intervals) tick();
+  it("gives up quietly when no answer ever comes", async () => {
+    const { win, deps, result } = setup();
+    for (const timeout of win.timeouts) timeout();
     expect(await result).toBe(false);
     expect(deps.onFailure).not.toHaveBeenCalled();
   });
 
-  it("ignores a message that did not come from the popup", async () => {
-    const { popup, win, posted, signIns, result, startId } = setup();
-    win.message({ origin: "https://evil.example", source: popup, data: { type: "afm-oauth-callback", code: "x", state: "y" } });
-    win.message({ origin: ORIGIN, source: {}, data: { type: "afm-oauth-callback", code: "x", state: "y" } });
+  it("ignores an answer that belongs to a different sign-in", async () => {
+    const { posted, signIns, result, startId } = setup();
+    FakeChannel.deliver({ code: "x", state: "someone-else" });
+    FakeChannel.deliver({ code: "x" });
+    FakeChannel.deliver("not an object");
+    await settle();
     expect(posted.filter((message) => message.type === "oauth-signin-code")).toHaveLength(0);
     signIns.onDone(startId, false);
     expect(await result).toBe(false);
+  });
+
+  it("stops listening once the answer has arrived", async () => {
+    setup();
+    FakeChannel.deliver({ code: "abc", state: "s" });
+    await settle();
+    expect(FakeChannel.all.every((channel) => channel.closed)).toBe(true);
   });
 });
