@@ -80,7 +80,6 @@ function streamingModelPort(model: LanguageModel): ModelPort {
       const tools = toToolSet(request.tools);
       const result = streamText({
         model,
-        // A blank system prompt is omitted: OpenAI accepts an empty one, but Anthropic rejects it.
         system: request.system.trim() === "" ? undefined : request.system,
         messages: toModelMessages(request.messages),
         tools: Object.keys(tools).length > 0 ? tools : undefined,

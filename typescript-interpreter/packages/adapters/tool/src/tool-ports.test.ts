@@ -106,8 +106,6 @@ describe("a tool source that fails", () => {
     },
   };
 
-  // One unreachable MCP server must not take the whole routing down with it, or the agent
-  // loses the working servers and the in-page file tools too.
   it("keeps the tools from every source that did work", async () => {
     const working = inPageToolPort([
       { name: "alpha", inputSchema: { type: "object" }, run: () => "a" },
@@ -235,8 +233,6 @@ describe("inPageToolPort", () => {
     });
   });
 
-  // What is advertised and what can be called have to be the same set. They were not: the
-  // shadowed copy was listed to the model, which then got "Unknown tool" for calling it.
   describe("two tools sharing a name", () => {
     const first: InPageTool = { name: "dup", inputSchema: {}, run: () => "first" };
     const second: InPageTool = { name: "dup", inputSchema: {}, run: () => "second" };

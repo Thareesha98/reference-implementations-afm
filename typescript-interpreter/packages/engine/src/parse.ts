@@ -25,16 +25,11 @@ export interface FrontmatterSplit {
 }
 
 type FrontmatterScan =
-  /** The file does not open with '---'; all of it is body. */
   | { kind: "none" }
-  /** It opens with '---' but never closes. */
   | { kind: "unclosed" }
   | { kind: "found"; yamlStart: number; end: number; bodyStart: number };
 
-// The single scan behind both exports below, so the two cannot disagree about where the
-// frontmatter ends.
 function scanFrontmatter(content: string): FrontmatterScan {
-  // Blank lines before the opening fence are ignored.
   const firstStart = content.length - content.trimStart().length;
   const firstBreak = content.indexOf("\n", firstStart);
   const firstEnd = firstBreak === -1 ? content.length : firstBreak;
@@ -64,9 +59,6 @@ function scanFrontmatter(content: string): FrontmatterScan {
   return { kind: "unclosed" };
 }
 
-// Offset where the frontmatter block ends: the start of the closing '---' line.
-// Returns 0 when there is no closed frontmatter, so callers that scope work to the
-// frontmatter fall back to "no frontmatter region" rather than guessing.
 export function frontmatterEndOffset(content: string): number {
   const scan = scanFrontmatter(content);
   return scan.kind === "found" ? scan.end : 0;
@@ -113,7 +105,6 @@ export interface RoleAndInstructions {
   instructions: string;
 }
 
-/** The fence character opening or closing a code block, or null if the line is not a fence. */
 function fenceMarker(line: string): string | null {
   const match = /^(`{3,}|~{3,})/.exec(line.trim());
   return match === null ? null : match[1]![0]!;
@@ -125,8 +116,6 @@ export function extractRoleAndInstructions(body: string): RoleAndInstructions {
   const roleLines: string[] = [];
   const instructionsLines: string[] = [];
   let current: "role" | "instructions" | null = null;
-  // Headings inside a fenced code block are not headings. '# ' opens a comment in bash,
-  // python and yaml, and the spec allows code blocks in the body (section 4.3).
   let fence: string | null = null;
 
   for (const line of lines) {

@@ -32,7 +32,6 @@ export interface LoadedAfm {
 
 export async function loadAfm(content: string, secrets: SecretPort): Promise<LoadedAfm> {
   const parsed = parseAfm(content);
-  // Only the frontmatter is resolved; a placeholder in the body stays literal text.
   const frontmatter = await resolveVariables(parsed.frontmatter, secrets);
   const metadata = validateMetadata(frontmatter);
   const plan = planForBrowser(metadata);

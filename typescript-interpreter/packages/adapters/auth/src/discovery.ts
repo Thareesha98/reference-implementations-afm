@@ -14,12 +14,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-/**
- * OAuth discovery for an MCP server that needs sign-in (MCP Authorization spec): read the 401's
- * WWW-Authenticate header (falling back to the well-known paths), fetch the Protected Resource
- * Metadata (RFC 9728), then the Authorization Server Metadata (RFC 8414 or OpenID Connect). Every
- * call is read-only and takes `fetchFn` from the caller.
- */
 
 export interface ProtectedResourceMetadata {
   resource: string;
@@ -48,16 +42,11 @@ async function tryFetchJson<T>(url: string, fetchFn: typeof fetch): Promise<T | 
   }
 }
 
-/**
- * Pulls `resource_metadata="..."` out of a `WWW-Authenticate: Bearer ...` challenge (RFC 9728
- * §5.1).
- */
 export function parseResourceMetadataUrl(wwwAuthenticate: string): string | null {
   const match = /resource_metadata="([^"]+)"/.exec(wwwAuthenticate);
   return match?.[1] ?? null;
 }
 
-/** Pulls `scope="..."` out of a `WWW-Authenticate: Bearer ...` challenge, when the server sent one. */
 export function parseChallengeScope(wwwAuthenticate: string): string[] | null {
   const match = /(?:^|,)\s*scope="([^"]*)"/.exec(wwwAuthenticate);
   if (match?.[1] === undefined || match[1].trim() === "") return null;
@@ -67,21 +56,14 @@ export function parseChallengeScope(wwwAuthenticate: string): string[] | null {
 function wellKnownProtectedResourceCandidates(serverUrl: string): string[] {
   const { origin, pathname } = new URL(serverUrl);
   const path = pathname === "/" ? "" : pathname;
-  // Server's own path first, then the root, as the spec orders them.
   return path === "" ? [`${origin}/.well-known/oauth-protected-resource`] : [`${origin}/.well-known/oauth-protected-resource${path}`, `${origin}/.well-known/oauth-protected-resource`];
 }
 
 export interface ProtectedResourceDiscovery {
   metadata: ProtectedResourceMetadata;
-  /** The scope the server's 401 asked for, if any; it takes priority over `scopes_supported`. */
   challengeScope: string[] | null;
 }
 
-/**
- * Sends one unauthenticated `initialize` request to see whether the server needs sign-in and where
- * its Protected Resource Metadata is. Returns `null` when it answers without a 401, or when that
- * cannot be told - both mean the same to the caller.
- */
 export async function discoverProtectedResource(serverUrl: string, fetchFn: typeof fetch): Promise<ProtectedResourceDiscovery | null> {
   let probe: Response;
   try {
@@ -122,11 +104,6 @@ function authorizationServerCandidates(issuerUrl: string): string[] {
   ];
 }
 
-/**
- * Resolves an authorization server's endpoints through RFC 8414 or OpenID Connect discovery, in the
- * spec's priority order. A document whose `issuer` differs from the URL asked is rejected (RFC 8414
- * §3.3), and so is one that does not list the PKCE method S256 (MCP Authorization).
- */
 export async function discoverAuthorizationServer(issuerUrl: string, fetchFn: typeof fetch): Promise<AuthorizationServerMetadata | null> {
   for (const candidate of authorizationServerCandidates(issuerUrl)) {
     const metadata = await tryFetchJson<AuthorizationServerMetadata>(candidate, fetchFn);
@@ -142,10 +119,6 @@ export async function discoverAuthorizationServer(issuerUrl: string, fetchFn: ty
   return null;
 }
 
-/**
- * One RFC 7591 registration call. `redirectUris` is the exact URI this app redirects back to; a
- * `localhost` redirect registers as a "native" application, anything else as "web".
- */
 export async function registerClient(
   registrationEndpoint: string,
   redirectUris: string[],

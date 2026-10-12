@@ -115,8 +115,6 @@ i
     await expect(loadAfm(file, fakeSecrets({}))).rejects.toThrow(AfmParseError);
   });
 
-  // The body becomes the system prompt, so resolving a variable there would hand the
-  // secret's value to the model provider. Placeholders in the body stay literal.
   it("does NOT resolve variables in the Markdown body", async () => {
     const file = `---
 name: Leaky

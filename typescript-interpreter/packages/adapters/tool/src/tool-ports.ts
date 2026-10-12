@@ -62,8 +62,6 @@ async function buildRouting(ports: ToolPort[]): Promise<Routing> {
   const owner = new Map<string, ToolPort>();
   const failures: string[] = [];
   for (const port of ports) {
-    // Sequential, so "first registered wins" is deterministic. A source that fails only loses its
-    // own tools.
     let tools: ToolDescriptor[];
     try {
       tools = await port.list();
@@ -83,7 +81,6 @@ async function buildRouting(ports: ToolPort[]): Promise<Routing> {
       descriptors.push(tool);
     }
   }
-  // If every source failed, report why instead of an empty tool list.
   if (descriptors.length === 0 && failures.length > 0) {
     throw new Error(`No tools could be loaded: ${failures.join("; ")}`);
   }
@@ -129,7 +126,6 @@ export interface InPageTool {
 }
 
 export function inPageToolPort(tools: InPageTool[]): ToolPort {
-  // One entry per name, last definition wins; list and execute read the same set.
   const byName = new Map<string, InPageTool>();
   for (const tool of tools) {
     byName.set(tool.name, tool);

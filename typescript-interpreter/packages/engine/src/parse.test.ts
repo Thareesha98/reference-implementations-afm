@@ -108,8 +108,6 @@ do it.
   });
 });
 
-// '# ' opens a comment in bash, python and yaml, so a fenced example must not end the section
-// it sits in and drop everything after it.
 describe("headings inside code fences", () => {
   it("keeps the instructions that follow a shell comment in a fence", () => {
     const text = `# Role
@@ -205,7 +203,6 @@ describe("splitFrontmatter", () => {
     expect(crlf.body.replace(/\r\n/g, "\n")).toBe(lf.body);
   });
 
-  // Both exports run off one scan, and this is the agreement between them.
   it("ends the frontmatter where splitFrontmatter stops reading it", () => {
     const text = "---\nname: x\n---\n# Role\nr\n";
     expect(text.slice(frontmatterEndOffset(text))).toBe("---\n# Role\nr\n");

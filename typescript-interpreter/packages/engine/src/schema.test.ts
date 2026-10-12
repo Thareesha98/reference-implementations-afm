@@ -314,7 +314,6 @@ describe("validateMetadata", () => {
     });
   });
 
-  // The scheme is the part worth rejecting: transport.url is what the proxy is asked to fetch.
   describe("URL fields", () => {
     const withTransport = (url: string) => () =>
       validateMetadata({ tools: { mcp: [{ name: "s", transport: { type: "http", url } }] } });
@@ -330,8 +329,6 @@ describe("validateMetadata", () => {
       expect(withTransport("data:text/plain,x")).toThrow(/transport.url/);
     });
 
-    // The editor validates a file before its variables are resolved, so this is the normal
-    // state of a URL that reads its host from the environment - not an error.
     it("leaves an unresolved variable alone", () => {
       expect(withTransport("${env:MCP_URL}")).not.toThrow();
       expect(withTransport("https://${env:REGION}.example.com/mcp")).not.toThrow();

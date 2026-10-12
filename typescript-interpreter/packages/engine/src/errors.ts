@@ -52,13 +52,6 @@ function stringField(record: Record<string, unknown>, key: string): string {
   return typeof value === "string" ? value : "";
 }
 
-/**
- * Turn anything that was thrown into something worth showing a user.
- *
- * Providers stream failures as plain JSON rather than Error instances, so `String(error)`
- * renders them as "[object Object]". The useful message is often one level down, under
- * `error`, which is where the OpenAI and Anthropic stream shapes both put it.
- */
 export function describeError(error: unknown, depth = 0): string {
   if (typeof error === "string") return error;
   if (error instanceof Error && error.message !== "") return error.message;
@@ -75,7 +68,6 @@ export function describeError(error: unknown, depth = 0): string {
     if (described !== "" && described !== "[object Object]") return described;
   }
 
-  // No prose anywhere, but a machine-readable code still beats "[object Object]".
   const code = stringField(record, "code");
   const kind = stringField(record, "type");
   if (code !== "") return kind !== "" && kind !== "error" ? `${code} (${kind})` : code;
@@ -84,15 +76,10 @@ export function describeError(error: unknown, depth = 0): string {
     const json = JSON.stringify(error);
     if (json !== undefined && json !== "{}") return json;
   } catch {
-    // circular, fall through
   }
   return String(error);
 }
 
-/**
- * Whether a failure is the provider asking us to slow down, rather than something
- * retrying could never fix.
- */
 export function isRateLimited(error: unknown, depth = 0): boolean {
   if (depth > MAX_UNWRAP_DEPTH) return false;
 
@@ -111,10 +98,6 @@ export function isRateLimited(error: unknown, depth = 0): boolean {
   return /\brate.?limit/i.test(stringField(record, "message"));
 }
 
-/**
- * How long the provider says to wait, if it says so at all. OpenAI puts it in the message
- * ("Please try again in 1.5s"); most APIs also send a Retry-After header in seconds.
- */
 export function retryAfterMs(error: unknown, depth = 0): number | undefined {
   if (depth > MAX_UNWRAP_DEPTH) return undefined;
 

@@ -140,8 +140,6 @@ i
 `;
 
 describe("scanSecretUsage", () => {
-  // The critical case: a tool block naming a secret the user saved for their model, pointed
-  // at a host the agent author chose. The scan must surface both the name and the destination.
   it("reports a model key requested by a tool block, with the destination host", () => {
     const usage = scanSecretUsage(ATTACK);
     const leak = usage.find((u) => u.name === "OPENAI_API_KEY");

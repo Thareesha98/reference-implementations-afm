@@ -17,7 +17,6 @@
 import { describe, it, expect } from "vitest";
 import { describeError, isRateLimited, retryAfterMs } from "./errors";
 
-// The shape OpenAI streams for a tokens-per-minute limit, as seen in the browser console.
 const OPENAI_STREAM_ERROR = {
   type: "error",
   sequence_number: 2,

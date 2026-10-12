@@ -136,7 +136,6 @@ describe("createDynamicMcpAuthHeaderProvider", () => {
 interface TestServer {
   url: string;
   lastSeenHeader: string | undefined;
-  /** Makes the server forget every session, as a restart or an expiry would. */
   forgetSessions: () => void;
   close: () => Promise<void>;
 }
@@ -185,7 +184,6 @@ function startTestMcpServer(requiredHeader?: { name: string; value: string }): P
       }
 
       if (transport === undefined) {
-        // An unknown session id is a 404, which is how a client learns it must start a new session.
         res.writeHead(typeof sessionId === "string" ? 404 : 400).end("No valid session");
         return;
       }

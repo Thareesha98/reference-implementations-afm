@@ -68,10 +68,6 @@ export interface McpDynamicAuthDeps {
   onInteractiveAuthRejected?: (provider: OAuthProviderRef) => void;
 }
 
-/**
- * `resource` is the MCP server's own URL, passed only for the interactive grant, where it binds the
- * token to that server (RFC 8707).
- */
 export function createDynamicMcpAuthHeaderProvider(
   auth: ClientAuthentication,
   deps: McpDynamicAuthDeps = {},
@@ -110,17 +106,11 @@ export interface McpHttpOptions {
   headers?: Record<string, string>;
   authHeaderProvider?: McpAuthHeaderProvider;
   onAuthRejected?: () => void;
-  /**
-   * Cap on the handshake and on listing tools, so a server that never answers fails in seconds
-   * rather than after the SDK's 60s per request. Tool calls keep the SDK's timeout.
-   */
   setupTimeoutMs?: number;
 }
 
 export function effectiveUrl(options: McpHttpOptions): URL {
   if (options.proxyUrl !== undefined && options.proxyUrl !== "") {
-    // Built with searchParams so a proxy address that already has a query does not gain a second
-    // "?".
     const url = new URL(options.proxyUrl);
     url.searchParams.set("target", options.serverUrl);
     return url;
@@ -157,8 +147,6 @@ interface McpContentBlock {
   resource?: McpResourceContents;
 }
 
-// Text and structuredContent go to the model as `content`; images and audio go in `media`, which
-// only the tool card reads.
 export function toToolResult(result: {
   content?: unknown;
   structuredContent?: unknown;
@@ -217,7 +205,6 @@ export function mcpToolPort(options: McpHttpOptions): ToolPort {
   function getClient(): Promise<Client> {
     if (clientPromise === null) {
       const pending = connect(options, setupTimeout);
-      // A failed connection is not cached, so retrying after a sign-in or a server restart works.
       pending.catch(() => {
         if (clientPromise === pending) clientPromise = null;
       });
@@ -233,12 +220,9 @@ export function mcpToolPort(options: McpHttpOptions): ToolPort {
     try {
       await (await pending).close();
     } catch {
-      // Already gone, or never connected; nothing to close.
     }
   }
 
-  // A server that restarted or expired the session answers 404, and the MCP spec's remedy is a new
-  // session. The request that met the 404 was not processed, so it is safe to send again.
   async function withClient<T>(work: (client: Client) => Promise<T>): Promise<T> {
     try {
       return await work(await getClient());
@@ -283,8 +267,6 @@ async function connect(options: McpHttpOptions, setupTimeout: number): Promise<C
 
   const client = new Client(
     { name: "afm-runtime", version: "0.0.0" },
-    // The SDK's default validator (Ajv) compiles schemas with `new Function`, which a CSP without
-    // 'unsafe-eval' forbids. This one interprets schemas instead.
     { jsonSchemaValidator: new CfWorkerJsonSchemaValidator() },
   );
   await client.connect(transport, { timeout: setupTimeout });
