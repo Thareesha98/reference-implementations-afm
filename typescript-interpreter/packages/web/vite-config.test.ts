@@ -76,6 +76,15 @@ describe("index.html", () => {
     const html = readFileSync(fileURLToPath(new URL("./index.html", import.meta.url)), "utf8");
     expect(html).toContain('<meta name="referrer" content="no-referrer" />');
   });
+
+  it("names an icon in each format, and every one of them is shipped", () => {
+    const html = readFileSync(fileURLToPath(new URL("./index.html", import.meta.url)), "utf8");
+    const icons = [...html.matchAll(/<link rel="(?:icon|apple-touch-icon)"[^>]*href="\/([^"]+)"/g)].map((match) => match[1]);
+    expect(icons).toEqual(["favicon.ico", "favicon.svg", "apple-touch-icon.png"]);
+    for (const icon of icons) {
+      expect(existsSync(fileURLToPath(new URL(`./public/${icon}`, import.meta.url)))).toBe(true);
+    }
+  });
 });
 
 describe("values that belong to one deployment", () => {
