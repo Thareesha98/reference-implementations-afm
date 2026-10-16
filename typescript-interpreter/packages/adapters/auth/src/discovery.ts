@@ -29,6 +29,7 @@ export interface AuthorizationServerMetadata {
   registration_endpoint?: string;
   client_id_metadata_document_supported?: boolean;
   code_challenge_methods_supported?: string[];
+  authorization_response_iss_parameter_supported?: boolean;
   scopes_supported?: string[];
 }
 
@@ -59,6 +60,29 @@ function wellKnownProtectedResourceCandidates(serverUrl: string): string[] {
   return path === "" ? [`${origin}/.well-known/oauth-protected-resource`] : [`${origin}/.well-known/oauth-protected-resource${path}`, `${origin}/.well-known/oauth-protected-resource`];
 }
 
+function namesServer(resource: string, serverUrl: string): boolean {
+  try {
+    const named = new URL(resource);
+    const server = new URL(serverUrl);
+    const parent = named.pathname.endsWith("/") ? named.pathname : `${named.pathname}/`;
+    return (
+      named.origin === server.origin &&
+      named.search === "" &&
+      named.hash === "" &&
+      (server.pathname === named.pathname || server.pathname.startsWith(parent))
+    );
+  } catch {
+    return false;
+  }
+}
+
+export class SignInRefusedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SignInRefusedError";
+  }
+}
+
 export interface ProtectedResourceDiscovery {
   metadata: ProtectedResourceMetadata;
   challengeScope: string[] | null;
@@ -82,13 +106,18 @@ export async function discoverProtectedResource(serverUrl: string, fetchFn: type
   const fromHeader = challenge !== null ? parseResourceMetadataUrl(challenge) : null;
   const candidates = fromHeader !== null ? [fromHeader] : wellKnownProtectedResourceCandidates(serverUrl);
 
+  let foundForOther = false;
   for (const candidate of candidates) {
     const metadata = await tryFetchJson<ProtectedResourceMetadata>(candidate, fetchFn);
-    if (metadata !== null && Array.isArray(metadata.authorization_servers) && metadata.authorization_servers.length > 0) {
-      return { metadata, challengeScope };
-    }
+    if (metadata === null || !Array.isArray(metadata.authorization_servers) || metadata.authorization_servers.length === 0) continue;
+    if (namesServer(metadata.resource, serverUrl)) return { metadata, challengeScope };
+    foundForOther = true;
   }
-  return null;
+  throw new SignInRefusedError(
+    foundForOther
+      ? "This server's sign-in metadata does not name this server, so it was not used."
+      : "This server publishes no sign-in metadata. If this is an old address, use the server's current one.",
+  );
 }
 
 function authorizationServerCandidates(issuerUrl: string): string[] {
@@ -105,7 +134,13 @@ function authorizationServerCandidates(issuerUrl: string): string[] {
 }
 
 export async function discoverAuthorizationServer(issuerUrl: string, fetchFn: typeof fetch): Promise<AuthorizationServerMetadata | null> {
-  for (const candidate of authorizationServerCandidates(issuerUrl)) {
+  let candidates: string[];
+  try {
+    candidates = authorizationServerCandidates(issuerUrl);
+  } catch {
+    return null;
+  }
+  for (const candidate of candidates) {
     const metadata = await tryFetchJson<AuthorizationServerMetadata>(candidate, fetchFn);
     if (
       metadata !== null &&
@@ -117,6 +152,25 @@ export async function discoverAuthorizationServer(issuerUrl: string, fetchFn: ty
     }
   }
   return null;
+}
+
+export interface SignInDiscovery {
+  metadata: AuthorizationServerMetadata;
+  scopes: string[] | undefined;
+  resource: string;
+}
+
+export async function discoverSignIn(serverUrl: string, fetchFn: typeof fetch): Promise<SignInDiscovery | null> {
+  const resource = await discoverProtectedResource(serverUrl, fetchFn);
+  if (resource === null) return null;
+  const issuer = resource.metadata.authorization_servers[0];
+  const metadata = issuer === undefined ? null : await discoverAuthorizationServer(issuer, fetchFn);
+  if (metadata === null) {
+    throw new SignInRefusedError(
+      "This server's authorization server publishes no metadata that passes the checks (a matching issuer and PKCE S256), so it was not used.",
+    );
+  }
+  return { metadata, scopes: resource.challengeScope ?? resource.metadata.scopes_supported, resource: resource.metadata.resource };
 }
 
 export async function registerClient(
@@ -145,4 +199,19 @@ export async function registerClient(
     throw new Error("Dynamic Client Registration response had no client_id");
   }
   return { clientId: body.client_id };
+}
+
+export async function resolveClientId(
+  metadata: Pick<AuthorizationServerMetadata, "registration_endpoint" | "client_id_metadata_document_supported">,
+  cimdClientId: string | undefined,
+  redirectUri: string,
+  fetchFn: typeof fetch,
+): Promise<string> {
+  if (cimdClientId !== undefined && metadata.client_id_metadata_document_supported === true) return cimdClientId;
+  if (metadata.registration_endpoint === undefined || metadata.registration_endpoint === "") return "";
+  try {
+    return (await registerClient(metadata.registration_endpoint, [redirectUri], fetchFn)).clientId;
+  } catch {
+    return "";
+  }
 }

@@ -21,6 +21,7 @@ export interface ToolDescriptor {
   description?: string;
   inputSchema: JsonSchema;
   serverId?: string;
+  serverName?: string;
 }
 
 export interface ToolCall {

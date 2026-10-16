@@ -20,15 +20,14 @@ import { modelFromMetadata, checkModelFromMetadata } from "./model-factory";
 import { mcpServerPort, toolsFromMetadata, defaultMcpProxyConfig, proxyAwareFetch } from "./tool-factory";
 import { createOAuthManager } from "./oauth-manager";
 import type { OAuthProviderRef } from "@afm/adapter-auth";
-import { authorizationCodeRefreshKey } from "@afm/adapter-auth";
 import { createWorkerSecretStore } from "./worker-secret-store";
 import type { ClientMessage, ServerMessage } from "./protocol";
 import { permissionKey } from "./protocol";
 import { FILE_TOOL_NAMES, filesToolPort, listFilesText } from "@afm/adapter-tool";
 import type { FileInfo } from "@afm/adapter-tool";
 import type { AgentMetadata, PermissionBroker, ModelPort, SecretPort, ToolPort } from "@afm/engine";
-import { scanSecretUsage, describeError } from "@afm/engine";
-import { destinationGatedVault } from "./secret-gate";
+import { describeError } from "@afm/engine";
+import { destinationGatedVault, gatedUses } from "./secret-gate";
 import type { SecretUse } from "./secret-gate";
 import { resolveProbeAuth, probeToolUses } from "./probe-auth";
 import { failureOf, failureFromStatus, MissingCredentialError } from "./failure";
@@ -43,28 +42,22 @@ const scope = globalThis as unknown as {
 
 const store = createWorkerSecretStore((message) => scope.postMessage(message));
 
-let toolSecretUses: SecretUse[] = [];
+let secretUses: SecretUse[] = [];
 
-function gatedVault(toolUses: () => SecretUse[] = () => toolSecretUses): SecretPort {
-  return destinationGatedVault(store.memoryPort, { toolUses, approvedFor: store.approvedFor });
+function gatedVault(uses: () => SecretUse[] = () => secretUses): SecretPort {
+  return destinationGatedVault(store.memoryPort, { uses, approvedFor: store.approvedFor });
 }
 
 const secrets = gatedVault();
 
-function signOutOAuth(provider: OAuthProviderRef): void {
-  oauth.signOut(provider);
-  store.forgetSealed(authorizationCodeRefreshKey(provider));
-}
-
 const oauthDeps = {
   getInteractiveToken: (provider: OAuthProviderRef) => oauth.getAccessToken(provider),
-  onInteractiveAuthRejected: signOutOAuth,
+  onInteractiveAuthRejected: (provider: OAuthProviderRef) => oauth.signOut(provider),
 };
 
 async function probeServer(probeId: string, server: AgentMetadata["tools"]): Promise<void> {
   let port: ToolPort | null = null;
   try {
-    await store.opened();
     const resolved = await resolveProbeAuth(server, gatedVault(() => probeToolUses(server)));
     const entry = resolved?.mcp?.[0];
     port = entry === undefined ? null : mcpServerPort(entry, defaultMcpProxyConfig, oauthDeps, { setupTimeoutMs: PROBE_TIMEOUT_MS });
@@ -95,7 +88,6 @@ async function probeModel(probeId: string, model: AgentMetadata["model"]): Promi
 }
 
 async function withResolvedKey(model: AgentMetadata["model"]): Promise<AgentMetadata["model"]> {
-  await store.opened();
   const rawKey = model?.authentication?.api_key;
   const placeholder = typeof rawKey === "string" ? /^\$\{(?:env:)?([^}]+)\}$/.exec(rawKey) : null;
   if (placeholder === null) return model;
@@ -145,8 +137,10 @@ const OAUTH_REDIRECT_URI = `${self.location.origin}/`;
 const oauth = createOAuthManager({
   fetchFn: (input, init) => proxyAwareFetch()(input, init),
   redirectUri: OAUTH_REDIRECT_URI,
+  cimdClientId: import.meta.env.VITE_OAUTH_CLIENT_ID_URL || undefined,
   refreshStore: store.refreshStore,
   emitAuthorizeUrl: (id, url) => scope.postMessage({ type: "oauth-authorize-url", id, url }),
+  emitSignInConfirm: (id, host) => scope.postMessage({ type: "oauth-signin-confirm", id, host }),
   emitSignInResult: (id, ok, error) => scope.postMessage({ type: "oauth-signin-done", id, ok, error }),
 });
 
@@ -164,14 +158,12 @@ scope.addEventListener("message", (event) => {
   const message = event.data;
   switch (message.type) {
     case "load":
-      toolSecretUses = scanSecretUsage(message.content)
-        .filter((usage) => usage.scope === "tool")
-        .map((usage) => ({ name: usage.name, host: usage.host }));
+      secretUses = gatedUses(message.content);
       alwaysAllow.clear();
       for (const name of message.permissionSeed ?? []) alwaysAllow.add(name);
       for (const name of FILE_TOOL_NAMES) alwaysAllow.add(permissionKey(undefined, name));
       attachedFiles.clear();
-      void store.opened().then(() => session.load(message.content, message.seedHistory));
+      void session.load(message.content, message.seedHistory);
       break;
     case "attach-files":
       for (const file of message.files) {
@@ -193,23 +185,8 @@ scope.addEventListener("message", (event) => {
     case "cancel":
       session.cancel();
       break;
-    case "unlock-secret":
-      store.acceptUnlock(message.name, message.key);
-      break;
     case "set-secret":
-      store.set(message.name, message.value, message.host);
-      break;
-    case "passkey-remember":
-      store.seal(message.name, message.key, message.credentialId, message.salt);
-      break;
-    case "passkey-reseal":
-      store.reseal(message.name, message.from, message.to, message.credentialId, message.salt);
-      break;
-    case "passkey-forget":
-      store.forgetSealed(message.name);
-      break;
-    case "list-passkeys":
-      store.postSealedNames();
+      store.set(message.name, message.value, message.address);
       break;
     case "list-secrets":
       store.postNames();
@@ -224,13 +201,16 @@ scope.addEventListener("message", (event) => {
       });
       break;
     case "oauth-signin-start":
-      void oauth.startSignIn(message.id, message.provider);
+      void oauth.startSignIn(message.id, message.provider, { listed: message.listed, confirmedHost: message.confirmedHost });
       break;
     case "oauth-signin-code":
       void oauth.completeSignIn(message.id, message.code, message.state, message.iss);
       break;
+    case "oauth-signin-error":
+      oauth.declineSignIn(message.id, message.error, message.state, message.iss);
+      break;
     case "oauth-sign-out":
-      signOutOAuth(message.provider);
+      oauth.signOut(message.provider);
       break;
     case "probe-server":
       void probeServer(message.id, message.server);

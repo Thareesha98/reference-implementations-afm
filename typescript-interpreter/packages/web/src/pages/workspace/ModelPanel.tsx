@@ -18,35 +18,31 @@ import { useState } from "react";
 import { MODEL_PROVIDERS, findProvider } from "./model-catalog";
 import type { ProviderOption } from "./model-catalog";
 import { getModelField, setModelField, setModelApiKey, getModelApiKey, envSecretName } from "./agent-source-edit";
-import { KeepOnDevice } from "./KeepOnDevice";
 import type { Issue } from "./setup-check";
 
 interface Props {
   content: string;
   savedSecrets: string[];
-  passkeySecrets: string[];
   onApply: (content: string) => void;
   issue: Issue | null;
-  onSaveKey: (name: string, value: string, keep: boolean) => Promise<boolean>;
+  onSaveKey: (name: string, value: string) => void;
   onBack?: () => void;
   onClose: () => void;
 }
 
-export function ModelPanel({ content, savedSecrets, passkeySecrets, issue, onApply, onSaveKey, onBack, onClose }: Props) {
+export function ModelPanel({ content, savedSecrets, issue, onApply, onSaveKey, onBack, onClose }: Props) {
   const fileProvider = getModelField(content, "provider");
 
   const [provider, setProvider] = useState(findProvider(fileProvider) !== undefined ? fileProvider : "");
 
   const [model, setModel] = useState(getModelField(content, "name"));
   const [key, setKey] = useState("");
-  const [keep, setKeep] = useState(false);
 
   const known = findProvider(provider);
   const fileSecretName = envSecretName(getModelApiKey(content));
   const secretName =
     provider === fileProvider && fileSecretName !== "" ? fileSecretName : (known?.secretName ?? "");
   const saved = savedSecrets.includes(secretName);
-  const sealed = passkeySecrets.includes(secretName);
   const rejected = saved && issue?.kind === "rejected";
 
   function pickProvider(option: ProviderOption) {
@@ -62,7 +58,7 @@ export function ModelPanel({ content, savedSecrets, passkeySecrets, issue, onApp
     let next = setModelField(content, "provider", provider);
     next = setModelField(next, "name", model.trim());
     next = setModelApiKey(next, `\${env:${secretName}}`);
-    if (key.trim() !== "") void onSaveKey(secretName, key.trim(), keep);
+    if (key.trim() !== "") onSaveKey(secretName, key.trim());
     onApply(next);
     onClose();
   }
@@ -123,7 +119,7 @@ export function ModelPanel({ content, savedSecrets, passkeySecrets, issue, onApp
                 <span className="u-label">API key</span>
                 <span className={`u-chip ${rejected ? "bad" : saved ? "ok" : "warn"}`}>
                   <span className="u-dot" aria-hidden="true" />
-                  {rejected ? "not accepted" : sealed ? "saved on this device" : saved ? "entered this session" : "not entered yet"}
+                  {rejected ? "not accepted" : saved ? "entered this session" : "not entered yet"}
                 </span>
               </div>
               <input
@@ -133,7 +129,6 @@ export function ModelPanel({ content, savedSecrets, passkeySecrets, issue, onApp
                 placeholder={saved ? "•••••••••••••••••••••" : `paste your ${known.label} key`}
                 onChange={(event) => setKey(event.target.value)}
               />
-              {(!saved || key.trim() !== "") && <KeepOnDevice keep={keep} onChange={setKeep} />}
               {issue !== null && !rejected && <p className="u-hint u-warn-note">{issue.text}</p>}
             </div>
           </>

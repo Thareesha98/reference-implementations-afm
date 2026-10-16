@@ -14,28 +14,21 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { secretDestination } from "@afm/engine";
 import type { AgentMetadata, SecretPort } from "@afm/engine";
 import { MissingCredentialError } from "./failure";
 
 const ENV_REFERENCE = /^\$\{env:([^}]+)\}$/;
 
-function hostOf(url: string): string | undefined {
-  try {
-    return new URL(url).host;
-  } catch {
-    return undefined;
-  }
-}
-
-export function probeToolUses(tools: AgentMetadata["tools"]): { name: string; host?: string }[] {
-  const uses: { name: string; host?: string }[] = [];
+export function probeToolUses(tools: AgentMetadata["tools"]): { name: string; address?: string }[] {
+  const uses: { name: string; address?: string }[] = [];
   for (const server of tools?.mcp ?? []) {
     if (server.transport.type !== "http" || server.transport.authentication === undefined) continue;
-    const host = hostOf(server.transport.url);
+    const address = secretDestination(server.transport.url, server.transport.authentication);
     for (const value of Object.values(server.transport.authentication)) {
       if (typeof value !== "string") continue;
       const name = ENV_REFERENCE.exec(value.trim())?.[1]?.trim();
-      if (name !== undefined && name !== "") uses.push({ name, host });
+      if (name !== undefined && name !== "") uses.push({ name, address });
     }
   }
   return uses;

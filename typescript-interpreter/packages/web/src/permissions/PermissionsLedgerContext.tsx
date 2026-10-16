@@ -22,7 +22,7 @@ import type { PermissionEntry, PermissionRule } from "../permissions-store";
 interface PermissionsLedgerValue {
   entries: PermissionEntry[];
   forAgent: (agentId: string) => PermissionEntry[];
-  set: (agentId: string, toolName: string, rule: PermissionRule, risk: "read" | "write", serverId?: string) => void;
+  set: (agentId: string, toolName: string, rule: PermissionRule, serverId?: string) => void;
   reset: (agentId?: string) => void;
 }
 
@@ -34,8 +34,7 @@ export function PermissionsLedgerProvider({ children }: { children: ReactNode })
   const value: PermissionsLedgerValue = {
     entries,
     forAgent: (agentId) => entries.filter((e) => e.agentId === agentId),
-    set: (agentId, toolName, rule, risk, serverId) =>
-      setEntries((current) => setPermission(current, agentId, toolName, rule, risk, serverId)),
+    set: (agentId, toolName, rule, serverId) => setEntries((current) => setPermission(current, agentId, toolName, rule, serverId)),
     reset: (agentId) => setEntries((current) => resetPermissions(current, agentId)),
   };
 

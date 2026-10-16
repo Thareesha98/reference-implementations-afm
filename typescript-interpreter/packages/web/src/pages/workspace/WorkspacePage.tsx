@@ -14,7 +14,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { usableSecrets } from "../../chat-state";
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useSearchParams } from "react-router-dom";
 import { EditorPane } from "./EditorPane";
@@ -42,16 +41,16 @@ import { TrustScreen } from "./TrustScreen";
 import { LEFT_TITLE, NOTHING_OPEN, SIDE_TITLE, closePanel, openOver, openPanel, togglePanel } from "./workspace-view";
 import type { LeftPanel, SideState, SidePanel } from "./workspace-view";
 import { resolveContent } from "../../load-paths";
-import { EMPTY_TEMPLATE, initialContent, identityFor } from "./workspace-content";
+import { agentFileFetch } from "../../tool-factory";
+import { EMPTY_TEMPLATE, initialContent, identityFor, openedFromLink } from "./workspace-content";
 import { useAgentsLibrary } from "../../agents/AgentsLibraryContext";
 import { useHistory } from "../../history/HistoryContext";
-import { permissionScopeFor, classifyToolRisk, grantsToRevoke } from "../../permissions-store";
+import { permissionScopeFor, grantsToRevoke } from "../../permissions-store";
 import { permissionKey } from "../../protocol";
 import { usePermissionsLedger } from "../../permissions/PermissionsLedgerContext";
 import { agentBrief, getSection } from "./agent-source-edit";
 import { useSettled } from "./use-settled";
 import { useThemeContext } from "../../app/ThemeContext";
-import { TurnNotificationWatcher } from "../../app/NotificationsContext";
 
 export function WorkspacePage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -74,7 +73,8 @@ export function WorkspacePage() {
   const side = nav.open;
   const backToSetup = nav.under[nav.under.length - 1] === "setup";
   const [chatFull, setChatFull] = useState(() => searchParams.get("view") === "chat");
-  const [trusted, setTrusted] = useState(() => searchParams.get("view") !== "chat");
+  const [trusted, setTrusted] = useState(() => !openedFromLink(searchParams, location.hash, draftSource));
+  const [linkedFile, setLinkedFile] = useState<string | null>(null);
   const [serverEditing, setServerEditing] = useState<string | null>(null);
   const [rawRequest, setRawRequest] = useState(0);
   const permissions = usePermissionsLedger();
@@ -96,7 +96,6 @@ export function WorkspacePage() {
         permissionScopeFor(agentIdRef.current, contentRef.current),
         request.name,
         allow ? "auto-allow" : "always-ask",
-        classifyToolRisk(request.name, undefined),
         request.serverId,
       ),
   });
@@ -116,6 +115,8 @@ export function WorkspacePage() {
     const nextIdentity = identityFor(searchParams, location.hash, draftSource);
     if (nextIdentity === loadedIdentityRef.current) return;
     loadedIdentityRef.current = nextIdentity;
+    setTrusted(!openedFromLink(searchParams, location.hash, draftSource));
+    setLinkedFile(null);
     const next = initialContent(searchParams, location.hash, draftSource);
     const nextId = searchParams.get("agentId");
     setContent(next);
@@ -134,12 +135,13 @@ export function WorkspacePage() {
     let cancelled = false;
     setFileLoading(true);
     setFileError(null);
-    void resolveContent({ kind: "remote", url: fileParam }, fetch)
+    void resolveContent({ kind: "remote", url: fileParam }, agentFileFetch())
       .then((text) => {
         if (cancelled || text === null) return;
         setContent(text);
         setSavedContent(text);
         setAgentId(null);
+        setLinkedFile(fileParam);
       })
       .catch((error: unknown) => {
         if (cancelled) return;
@@ -221,7 +223,7 @@ export function WorkspacePage() {
   function revokeGrants(serverUrl: string) {
     const scope = permissionScopeFor(agentIdRef.current, contentRef.current);
     for (const entry of grantsToRevoke(permissions.forAgent(scope), serverUrl)) {
-      permissions.set(scope, entry.toolName, "always-ask", entry.risk, serverUrl);
+      permissions.set(scope, entry.toolName, "always-ask", serverUrl);
     }
   }
 
@@ -286,7 +288,6 @@ export function WorkspacePage() {
 
   return (
     <div className="workspace-shell">
-      <TurnNotificationWatcher state={session.state} />
       <WorkspaceBar
         agentName={agentLabel}
         saved={content === savedContent}
@@ -319,7 +320,8 @@ export function WorkspacePage() {
           <TrustScreen
             metadata={readable.metadata}
             source={content}
-            savedSecrets={usableSecrets(session.state)}
+            savedSecrets={session.state.savedSecrets}
+            fileUrl={linkedFile}
             onRun={() => {
               setTrusted(true);
               openSetup();
@@ -370,7 +372,6 @@ export function WorkspacePage() {
                   onBlank={closeLeft}
                   onGenerate={(prompt, model, final) => session.generateDraft(prompt, model, final)}
                   onSaveKey={session.storeSecret}
-                  onOpenKeys={session.openKeys}
                   onDismissDraft={session.dismissDraft}
                 />
               )}
@@ -458,20 +459,17 @@ export function WorkspacePage() {
               {overPanel === "setup" && (
                 <SetupPane
                   rows={setup.rows}
-                  keys={setup.keys}
                   provider={readable.ok ? (readable.metadata.model?.provider ?? "") : ""}
                   ready={setup.ready}
                   onConfigure={configure}
                   onCheckAgain={setup.recheck}
-                  onRetryKeys={setup.retryKeys}
                   onRun={runAgent}
                 />
               )}
               {overPanel === "model" && (
                 <ModelPanel
                   content={content}
-                  savedSecrets={usableSecrets(session.state)}
-                  passkeySecrets={session.state.passkeySecrets}
+                  savedSecrets={session.state.savedSecrets}
                   issue={setup.issueOf(MODEL_ROW)}
                   onApply={(next) => {
                     setContent(next);
@@ -494,7 +492,7 @@ export function WorkspacePage() {
                   }}
                   onServerDropped={revokeGrants}
                   onStoreSecret={session.storeSecret}
-                  knownSecrets={usableSecrets(session.state)}
+                  knownSecrets={session.state.savedSecrets}
                   issue={serverEditing === null ? null : setup.issueOf(serverRowId(serverEditing))}
                   onProbe={session.probeServer}
                   onSignIn={session.startOAuthSignIn}

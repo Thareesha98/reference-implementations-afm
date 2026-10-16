@@ -105,6 +105,11 @@ const OAUTH2_GRANTS: Record<string, OAuth2GrantSpec> = {
   authorization_code: { required: ["authorize_url", "token_url", "client_id"], optional: ["scopes"] },
 };
 
+export function postsSecretsToTokenUrl(grantType: unknown): boolean {
+  const grant = typeof grantType === "string" ? grantType.toLowerCase() : "";
+  return grant !== "authorization_code" && Object.hasOwn(OAUTH2_GRANTS, grant);
+}
+
 const clientAuthentication = z
   .object({
     type: z.string(),
@@ -139,7 +144,7 @@ const clientAuthentication = z
     if (!RECOGNIZED_AUTH_TYPES.includes(type)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: `unknown authentication type '${auth.type}'. Supported types: ${RECOGNIZED_AUTH_TYPES.join(", ")}`,
+        message: `unknown authentication type. Supported types: ${RECOGNIZED_AUTH_TYPES.join(", ")}`,
       });
       return;
     }
@@ -176,7 +181,7 @@ function validateJwtAlgorithm(algorithm: string, ctx: z.RefinementCtx): void {
   if (!JWT_ALGORITHMS.has(algorithm)) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
-      message: `jwt 'algorithm' '${algorithm}' is not supported. Supported algorithms: ${[...JWT_ALGORITHMS].sort().join(", ")}`,
+      message: `jwt 'algorithm' is not supported. Supported algorithms: ${[...JWT_ALGORITHMS].sort().join(", ")}`,
     });
   }
 }
@@ -192,7 +197,7 @@ function validateOAuth2Fields(auth: { grant_type?: string; credential_bearer?: s
   if (spec === undefined) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
-      message: `oauth2 grant_type '${auth.grant_type}' is not supported. Supported grant types: ${Object.keys(OAUTH2_GRANTS).join(", ")}`,
+      message: `oauth2 'grant_type' is not supported. Supported grant types: ${Object.keys(OAUTH2_GRANTS).join(", ")}`,
     });
     return;
   }
@@ -211,7 +216,7 @@ function validateOAuth2Fields(auth: { grant_type?: string; credential_bearer?: s
   if (auth.credential_bearer !== undefined && !OAUTH2_CREDENTIAL_BEARERS.has(auth.credential_bearer)) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
-      message: `oauth2 'credential_bearer' '${auth.credential_bearer}' is not supported. Supported values: ${[...OAUTH2_CREDENTIAL_BEARERS].sort().join(", ")}`,
+      message: `oauth2 'credential_bearer' is not supported. Supported values: ${[...OAUTH2_CREDENTIAL_BEARERS].sort().join(", ")}`,
     });
   }
 }

@@ -15,6 +15,7 @@
 // under the License.
 
 import { useEffect, useRef, useState } from "react";
+import { displayToolName } from "@afm/adapter-tool";
 import type { UiMessage } from "../chat-state";
 
 type ToolMessage = Extract<UiMessage, { kind: "tool" }>;
@@ -46,7 +47,7 @@ export function ToolFootnote({ tool, server }: { tool: ToolMessage; server?: str
     <span className={`xc-tool ${open ? "is-open" : ""}`}>
       <button type="button" className={`xc-used ${failed ? "is-bad" : ""}`} aria-expanded={open} onClick={() => setOpen(!open)}>
         <span className="d" aria-hidden="true" />
-        <span className="xc-used-name">{server === undefined ? tool.name : `${server} · ${tool.name}`}</span>
+        <span className="xc-used-name">{server === undefined ? displayToolName(tool.name) : `${server} · ${displayToolName(tool.name)}`}</span>
         <span className="xc-meta">{failed ? "failed" : elapsed !== null ? `${(elapsed / 1000).toFixed(1)}s` : ""}</span>
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"
           strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

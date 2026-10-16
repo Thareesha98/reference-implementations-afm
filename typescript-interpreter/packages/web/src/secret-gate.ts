@@ -14,31 +14,38 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { scanSecretUsage } from "@afm/engine";
 import type { SecretPort } from "@afm/engine";
 
 export interface SecretUse {
   name: string;
-  host?: string;
+  address?: string;
 }
 
 export interface SecretGateDeps {
-  toolUses: () => SecretUse[];
-  approvedFor: (name: string, host: string | undefined) => boolean;
+  uses: () => SecretUse[];
+  approvedFor: (name: string, address: string | undefined) => boolean;
+}
+
+export function gatedUses(content: string): SecretUse[] {
+  return scanSecretUsage(content)
+    .filter((usage) => usage.scope !== "model")
+    .map((usage) => ({ name: usage.name, address: usage.address }));
 }
 
 export function destinationGatedVault(inner: SecretPort, deps: SecretGateDeps): SecretPort {
   return {
     async resolve(ref) {
-      const unapproved = deps.toolUses().filter((use) => use.name === ref.name && !deps.approvedFor(use.name, use.host));
+      const unapproved = deps.uses().filter((use) => use.name === ref.name && !deps.approvedFor(use.name, use.address));
       if (unapproved.length === 0) return inner.resolve(ref);
       return {
         status: "unresolved",
-        reason: `'${ref.name}' was not entered for ${describeHosts(unapproved.map((use) => use.host))}.`,
+        reason: `'${ref.name}' was not entered for ${describeAddresses(unapproved.map((use) => use.address))}.`,
       };
     },
   };
 }
 
-export function describeHosts(hosts: (string | undefined)[]): string {
-  return [...new Set(hosts.map((host) => host ?? "an undeclared host"))].join(", ");
+export function describeAddresses(addresses: (string | undefined)[]): string {
+  return [...new Set(addresses.map((address) => address ?? "an undeclared address"))].join(", ");
 }

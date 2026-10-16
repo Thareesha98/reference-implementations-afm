@@ -69,7 +69,15 @@ describe("resolveContent", () => {
       statusText: "Not Found",
       text: async () => "",
     })) as unknown as typeof fetch;
-    await expect(resolveContent({ kind: "remote", url: "x" }, badFetch)).rejects.toThrow(/404/);
+    await expect(resolveContent({ kind: "remote", url: "https://h/f" }, badFetch)).rejects.toThrow(/404/);
+  });
+
+  it("refuses a link that is not https, without fetching it", async () => {
+    const fetchFn = vi.fn(okFetch);
+    for (const url of ["http://h/f", "ftp://h/f", "javascript:alert(1)", "x"]) {
+      await expect(resolveContent({ kind: "remote", url }, fetchFn)).rejects.toThrow(/must start with https:\/\//);
+    }
+    expect(fetchFn).not.toHaveBeenCalled();
   });
 
   it("returns null for none", async () => {
@@ -134,8 +142,9 @@ describe("normalizeAgentFileUrl", () => {
     expect(out.ok).toBe(false);
   });
 
-  it("rejects a non-http scheme", () => {
+  it("rejects a scheme other than https", () => {
     expect(normalizeAgentFileUrl("javascript:alert(1)").ok).toBe(false);
     expect(normalizeAgentFileUrl("file:///etc/passwd").ok).toBe(false);
+    expect(normalizeAgentFileUrl("http://example.com/a.afm.md").ok).toBe(false);
   });
 });

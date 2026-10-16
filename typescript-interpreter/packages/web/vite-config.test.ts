@@ -48,6 +48,10 @@ describe("the shipped Content-Security-Policy", () => {
     expect(values).not.toContain("'unsafe-eval'");
   });
 
+  it("starts workers only from blob: URLs, so a worker runs under this policy", () => {
+    expect(directive("worker-src")).toEqual(["blob:"]);
+  });
+
   it("still locks down object-src, base-uri and form-action", () => {
     expect(directive("object-src")).toEqual(["'none'"]);
     expect(directive("base-uri")).toEqual(["'none'"]);

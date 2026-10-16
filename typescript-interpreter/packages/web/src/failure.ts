@@ -15,7 +15,7 @@
 // under the License.
 import { describeError } from "@afm/engine";
 
-export type FailureKind = "missing" | "signin" | "rejected" | "slow" | "busy" | "unreachable" | "other";
+export type FailureKind = "missing" | "signin" | "rejected" | "slow" | "busy" | "unreachable" | "redirected" | "other";
 
 export interface Failure {
   kind: FailureKind;
@@ -50,6 +50,7 @@ const BY_STATUS: Record<number, FailureKind> = {
 };
 
 const NETWORK_FAILURE = /failed to fetch|networkerror|load failed/i;
+const PROXY_REDIRECT_REFUSAL = /target answered with a redirect/i;
 
 function statusOf(error: unknown): number | undefined {
   if (typeof error !== "object" || error === null) return undefined;
@@ -67,5 +68,6 @@ export function failureOf(error: unknown): Failure {
   if (error instanceof SignInRequiredError) return { kind: "signin", message };
   if (error instanceof TypeError && NETWORK_FAILURE.test(message)) return { kind: "unreachable", message };
   const status = statusOf(error);
+  if (status === 502 && PROXY_REDIRECT_REFUSAL.test(message)) return { kind: "redirected", message };
   return { kind: status === undefined ? "other" : failureFromStatus(status), message };
 }

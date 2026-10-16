@@ -55,7 +55,7 @@ export function attachmentBadge(name: string): string {
 
 export function describeAttachment(file: AttachedFile): string {
   const label = TYPE_LABELS[fileExtension(file.name)] ?? "File";
-  if (file.pages !== undefined) return `${label} · ${file.pages} page${file.pages === 1 ? "" : "s"}`;
+  if (file.pages !== undefined) return `${label} · ${file.pages} page${file.pages === 1 ? "" : "s"}${file.note === undefined ? "" : ` · ${file.note}`}`;
   if (file.chars !== undefined) {
     return file.chars < 1024 ? `${label} · ${file.chars} characters` : `${label} · ${Math.round(file.chars / 1024)} KB`;
   }

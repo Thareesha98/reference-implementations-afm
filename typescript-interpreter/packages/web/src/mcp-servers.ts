@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { discoverProtectedResource, discoverAuthorizationServer, registerClient } from "@afm/adapter-auth";
+import { discoverSignIn, resolveClientId } from "@afm/adapter-auth";
 import type { AuthorizationServerMetadata } from "@afm/adapter-auth";
 import { proxyAwareFetch } from "./tool-factory";
 import { DIRECTORY_ENTRIES } from "./mcp-directory";
@@ -32,6 +32,10 @@ export function searchDirectory(query: string, entries: readonly DirectoryEntry[
     .sort((a, b) => Number(inTitle(b)) - Number(inTitle(a)) || a.title.localeCompare(b.title, undefined, { sensitivity: "base" }));
 }
 
+export function isListedServer(url: string): boolean {
+  return DIRECTORY_ENTRIES.some((entry) => entry.url === url);
+}
+
 export interface DiscoveredMcpAuth {
   authorizeUrl: string;
   tokenUrl: string;
@@ -45,23 +49,11 @@ export async function resolveMcpServerAuth(
   cimdClientId: string | undefined,
   redirectUri: string,
 ): Promise<DiscoveredMcpAuth | null> {
-  const resource = await discoverProtectedResource(serverUrl, fetchFn);
-
-  if (resource !== null) {
-    const issuer = resource.metadata.authorization_servers[0];
-    if (issuer === undefined) return null;
-    const asMetadata = await discoverAuthorizationServer(issuer, fetchFn);
-    if (asMetadata === null) return null;
-    const scopes = resource.challengeScope ?? resource.metadata.scopes_supported;
-    return resolveClientId(asMetadata, scopes, cimdClientId, redirectUri, fetchFn);
-  }
-
-  const asMetadata = await discoverAuthorizationServer(new URL(serverUrl).origin, fetchFn);
-  if (asMetadata === null) return null;
-  return resolveClientId(asMetadata, asMetadata.scopes_supported, cimdClientId, redirectUri, fetchFn);
+  const found = await discoverSignIn(serverUrl, fetchFn);
+  return found === null ? null : discoveredAuth(found.metadata, found.scopes, cimdClientId, redirectUri, fetchFn);
 }
 
-async function resolveClientId(
+async function discoveredAuth(
   asMetadata: Pick<
     AuthorizationServerMetadata,
     "authorization_endpoint" | "token_endpoint" | "registration_endpoint" | "client_id_metadata_document_supported"
@@ -71,19 +63,12 @@ async function resolveClientId(
   redirectUri: string,
   fetchFn: typeof fetch,
 ): Promise<DiscoveredMcpAuth> {
-  const base = { authorizeUrl: asMetadata.authorization_endpoint, tokenUrl: asMetadata.token_endpoint, scopes };
-
-  if (cimdClientId !== undefined && asMetadata.client_id_metadata_document_supported === true) {
-    return { ...base, clientId: cimdClientId };
-  }
-  if (asMetadata.registration_endpoint !== undefined && asMetadata.registration_endpoint !== "") {
-    try {
-      const registered = await registerClient(asMetadata.registration_endpoint, [redirectUri], fetchFn);
-      return { ...base, clientId: registered.clientId };
-    } catch {
-    }
-  }
-  return { ...base, clientId: "" };
+  return {
+    authorizeUrl: asMetadata.authorization_endpoint,
+    tokenUrl: asMetadata.token_endpoint,
+    scopes,
+    clientId: await resolveClientId(asMetadata, cimdClientId, redirectUri, fetchFn),
+  };
 }
 
 export function resolveDirectoryAuth(
@@ -98,7 +83,7 @@ export function resolveDirectoryAuth(
     registration_endpoint: auth.registrationUrl,
     client_id_metadata_document_supported: auth.clientIdMetadata,
   };
-  return resolveClientId(endpoints, auth.scopes, cimdClientId, redirectUri, fetchFn);
+  return discoveredAuth(endpoints, auth.scopes, cimdClientId, redirectUri, fetchFn);
 }
 
 function browserClient(): { cimdClientId: string | undefined; redirectUri: string } {

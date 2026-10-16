@@ -25,6 +25,7 @@ export interface AttachedFile {
   path?: string;
   chars?: number;
   pages?: number;
+  note?: string;
 }
 
 export type UiMessage =
@@ -67,7 +68,6 @@ export interface ChatState {
   notReady: string | null;
   messages: UiMessage[];
   savedSecrets: string[];
-  passkeySecrets: string[];
   pendingPermission: PendingPermission | null;
   error: string | null;
   nextId: number;
@@ -88,7 +88,6 @@ export const initialChatState: ChatState = {
   notReady: null,
   messages: [],
   savedSecrets: [],
-  passkeySecrets: [],
   pendingPermission: null,
   error: null,
   nextId: 1,
@@ -97,14 +96,6 @@ export const initialChatState: ChatState = {
   clarifyQuestions: [],
   draftError: null,
 };
-
-export function usableSecrets(state: ChatState): string[] {
-  return [...new Set([...state.savedSecrets, ...state.passkeySecrets])];
-}
-
-export function lockedSecrets(state: ChatState): string[] {
-  return state.passkeySecrets.filter((name) => !state.savedSecrets.includes(name));
-}
 
 export type ChatAction =
   | { type: "user-message"; text: string; images?: ImageAttachment[] }
@@ -189,7 +180,6 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       return {
         ...initialChatState,
         savedSecrets: state.savedSecrets,
-        passkeySecrets: state.passkeySecrets,
         nextId: state.nextId,
       };
     case "regenerate-start": {
@@ -258,8 +248,6 @@ function applyServerMessage(state: ChatState, message: ServerMessage): ChatState
       return { ...state, status: "not-ready", notReady: message.reason };
     case "secrets-list":
       return { ...state, savedSecrets: message.names };
-    case "passkey-list":
-      return { ...state, passkeySecrets: message.names };
     case "text-delta":
       return appendToAssistant(state, message.text);
     case "tool-call":
@@ -304,6 +292,7 @@ function applyServerMessage(state: ChatState, message: ServerMessage): ChatState
         },
       };
     case "oauth-authorize-url":
+    case "oauth-signin-confirm":
     case "oauth-signin-done":
       return state;
     case "probe-result":

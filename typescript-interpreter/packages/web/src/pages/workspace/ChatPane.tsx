@@ -96,7 +96,6 @@ export function ChatPane({
       {pendingPermission !== null && (
         <PermissionRequestModal
           request={pendingPermission}
-          description={state.tools.find((tool) => tool.name === pendingPermission.name)?.description}
           onDecide={(allow, remember) => submitPermission(pendingPermission.id, allow, remember)}
         />
       )}

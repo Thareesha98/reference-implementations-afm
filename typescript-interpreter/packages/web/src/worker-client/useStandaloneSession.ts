@@ -17,15 +17,17 @@
 import { useEffect, useReducer, useRef } from "react";
 import { chatReducer, initialChatState } from "../chat-state";
 import type { OAuthProviderRef } from "@afm/adapter-auth";
-import type { ClientMessage, ServerMessage, AgentModelRef, ImageAttachment, ToolInfo } from "../protocol";
+import type { ClientMessage, ServerMessage, AgentModelRef, ImageAttachment, SignInVetting, ToolInfo } from "../protocol";
 import type { AgentMetadata } from "@afm/engine";
-import { extractFiles } from "../attachments";
+import { MAX_TOTAL_BYTES, extractFiles } from "../attachments";
+import { startBlobWorker } from "../blob-worker";
+import agentWorkerUrl from "../worker.ts?worker&url";
+import { describeError } from "@afm/engine";
 import type { CollectedFile } from "../attachments";
 import { toSeededConversation } from "../session-store";
 import type { UiMessage, PendingPermission } from "../chat-state";
 import type { Failure } from "../failure";
-import { seal, unlockAll } from "../passkey/vault";
-import { createOAuthSignIns, type OAuthSignIns } from "../oauth-signin";
+import { createOAuthSignIns, type OAuthSignIns, type SignInOutcome } from "../oauth-signin";
 
 export interface SessionHooks {
   permissionSeed?: () => string[];
@@ -63,23 +65,24 @@ export function useStandaloneSession(hooks: SessionHooks = {}) {
   const outboxRef = useRef<ClientMessage[]>([]);
 
   const probeWaitersRef = useRef<Map<string, (result: ProbeResult) => void>>(new Map());
+  const attachedBytesRef = useRef<Map<string, number>>(new Map());
   const oauthRef = useRef<OAuthSignIns | null>(null);
-  oauthRef.current ??= createOAuthSignIns({
-    post,
-    onPopupBlocked: () => dispatch({ type: "server", message: { type: "notice", text: "Allow pop-ups for this site to sign in." } }),
-    onFailure: (text) => dispatch({ type: "server", message: { type: "notice", text } }),
-  });
+  oauthRef.current ??= createOAuthSignIns({ post });
   const oauth = oauthRef.current;
 
   useEffect(() => {
-    const worker = new Worker(new URL("../worker.ts", import.meta.url), { type: "module" });
-    workerRef.current = worker;
+    let worker: Worker | null = null;
+    let live = true;
 
     const onMessage = (event: MessageEvent<ServerMessage>) => {
       const message = event.data;
 
       if (message.type === "oauth-authorize-url") {
         oauth.onAuthorizeUrl(message.id, message.url);
+        return;
+      }
+      if (message.type === "oauth-signin-confirm") {
+        oauth.onConfirm(message.id, message.host);
         return;
       }
       if (message.type === "oauth-signin-done") {
@@ -93,14 +96,27 @@ export function useStandaloneSession(hooks: SessionHooks = {}) {
       }
       dispatch({ type: "server", message });
     };
-    worker.addEventListener("message", onMessage);
-    for (const queued of outboxRef.current.splice(0)) worker.postMessage(queued);
-    worker.postMessage({ type: "list-secrets" } satisfies ClientMessage);
-    worker.postMessage({ type: "list-passkeys" } satisfies ClientMessage);
+    startBlobWorker(agentWorkerUrl).then(
+      (started) => {
+        if (!live) {
+          started.terminate();
+          return;
+        }
+        worker = started;
+        workerRef.current = started;
+        started.addEventListener("message", onMessage);
+        for (const queued of outboxRef.current.splice(0)) started.postMessage(queued);
+        started.postMessage({ type: "list-secrets" } satisfies ClientMessage);
+      },
+      (error: unknown) => {
+        if (live) dispatch({ type: "server", message: { type: "error", message: `The agent could not be started: ${describeError(error)}` } });
+      },
+    );
 
     return () => {
-      worker.removeEventListener("message", onMessage);
-      worker.terminate();
+      live = false;
+      worker?.removeEventListener("message", onMessage);
+      worker?.terminate();
       workerRef.current = null;
       outboxRef.current.length = 0;
     };
@@ -116,6 +132,7 @@ export function useStandaloneSession(hooks: SessionHooks = {}) {
   }
 
   function loadContent(content: string, resume?: UiMessage[], options: LoadOptions = {}): void {
+    attachedBytesRef.current.clear();
     const permissionSeed = hooksRef.current.permissionSeed?.() ?? [];
     dispatch({ type: "agent-loading", content, keepMessages: false });
     if (resume !== undefined && resume.length > 0) {
@@ -146,18 +163,22 @@ export function useStandaloneSession(hooks: SessionHooks = {}) {
   }
 
   async function attachFiles(collected: CollectedFile[]) {
-    const { attached, skipped } = await extractFiles(collected);
+    const attachedBytes = attachedBytesRef.current;
+    const remaining = MAX_TOTAL_BYTES - [...attachedBytes.values()].reduce((sum, bytes) => sum + bytes, 0);
+    const { attached, skipped, sizes } = await extractFiles(collected, remaining);
+    for (const [path, bytes] of sizes) attachedBytes.set(path, bytes);
     if (attached.length > 0) {
       dispatch({
         type: "files-attached",
-        files: attached.map((f) => ({ name: f.name, path: f.path, chars: f.text.length, pages: f.pages })),
+        files: attached.map((f) => ({ name: f.name, path: f.path, chars: f.text.length, pages: f.pages, note: f.note })),
       });
       post({ type: "attach-files", files: attached });
     }
-    return { attached: attached.map((f) => f.name), skipped };
+    return { attached: attached.map((f) => (f.note === undefined ? f.name : `${f.name} (${f.note})`)), skipped };
   }
 
   function detachFile(messageId: number, key: string): void {
+    attachedBytesRef.current.delete(key);
     dispatch({ type: "file-detached", id: messageId, key });
     post({ type: "detach-file", path: key });
   }
@@ -185,25 +206,12 @@ export function useStandaloneSession(hooks: SessionHooks = {}) {
     post({ type: "remove-secret", name });
   }
 
-  async function storeSecret(name: string, value: string, keep: boolean, host?: string): Promise<boolean> {
-    post({ type: "set-secret", name, value, host });
-    return keep ? rememberWithPasskey(name) : false;
+  function storeSecret(name: string, value: string, address?: string): void {
+    post({ type: "set-secret", name, value, address });
   }
 
-  function rememberWithPasskey(name: string): Promise<boolean> {
-    return seal(post, name);
-  }
-
-  function forgetPasskey(name: string): void {
-    post({ type: "passkey-forget", name });
-  }
-
-  function openKeys(): Promise<boolean> {
-    return unlockAll(post);
-  }
-
-  function startOAuthSignIn(provider: OAuthProviderRef, remember = false): Promise<boolean> {
-    return oauth.start(provider, remember);
+  function startOAuthSignIn(provider: OAuthProviderRef, vetting: SignInVetting): Promise<SignInOutcome> {
+    return oauth.start(provider, vetting);
   }
 
   function signOutOAuth(provider: OAuthProviderRef): void {
@@ -262,7 +270,6 @@ export function useStandaloneSession(hooks: SessionHooks = {}) {
     regenerate,
     editMessage,
     storeSecret,
-    openKeys,
     removeSecret,
     startOAuthSignIn,
     signOutOAuth,
@@ -271,7 +278,5 @@ export function useStandaloneSession(hooks: SessionHooks = {}) {
     dismissDraft,
     probeServer,
     probeModel,
-    rememberWithPasskey,
-    forgetPasskey,
   };
 }

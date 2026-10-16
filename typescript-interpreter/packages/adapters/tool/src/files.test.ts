@@ -38,6 +38,11 @@ describe("listFilesText", () => {
     expect(text).toContain("report.pdf (100 characters, 3 pages)");
   });
 
+  it("says next to a file's name when only part of it was read, so the model knows the text is incomplete", () => {
+    const files = filesMap([{ name: "big.pdf", path: "big.pdf", text: "a".repeat(100), pages: 812, note: "stopped after page 500 of 812" }]);
+    expect(listFilesText(files)).toContain("big.pdf (100 characters, 812 pages, stopped after page 500 of 812)");
+  });
+
   it("singularizes a single page", () => {
     const files = filesMap([{ name: "a.pdf", path: "a.pdf", text: "x", pages: 1 }]);
     expect(listFilesText(files)).toContain("1 page)");

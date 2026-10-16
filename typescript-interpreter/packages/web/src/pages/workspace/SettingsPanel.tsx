@@ -14,10 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { usePasskeySupport } from "../../passkey/usePasskeySupport";
 import { useThemeContext } from "../../app/ThemeContext";
 import type { useStandaloneSession } from "../../worker-client/useStandaloneSession";
-import { usableSecrets } from "../../chat-state";
 
 interface Props {
   session: ReturnType<typeof useStandaloneSession>;
@@ -26,13 +24,7 @@ interface Props {
 export function SettingsPanel({ session }: Props) {
   const { setting, setTheme } = useThemeContext();
 
-  const canRemember = usePasskeySupport()?.usable === true;
-  const keys = usableSecrets(session.state).filter((name) => !name.startsWith("afm.oauth."));
-
-  function forget(name: string): void {
-    session.forgetPasskey(name);
-    session.removeSecret(name);
-  }
+  const keys = session.state.savedSecrets.filter((name) => !name.startsWith("afm.oauth."));
 
   return (
     <div className="u-panel-body">
@@ -44,27 +36,16 @@ export function SettingsPanel({ session }: Props) {
           </p>
         ) : (
           <div className="u-rows">
-            {keys.map((name) => {
-              const remembered = session.state.passkeySecrets.includes(name);
-              return (
-                <div className="u-row u-key-row" key={name}>
-                  <span className="u-row-name mono" title={name}>
-                    {name}
-                  </span>
-                  {!remembered && canRemember && (
-                    <button
-                      className="u-btn quiet sm"
-                      onClick={() => void session.rememberWithPasskey(name)}
-                    >
-                      Remember
-                    </button>
-                  )}
-                  <button className="u-btn quiet sm" onClick={() => forget(name)}>
-                    Forget
-                  </button>
-                </div>
-              );
-            })}
+            {keys.map((name) => (
+              <div className="u-row u-key-row" key={name}>
+                <span className="u-row-name mono" title={name}>
+                  {name}
+                </span>
+                <button className="u-btn quiet sm" onClick={() => session.removeSecret(name)}>
+                  Forget
+                </button>
+              </div>
+            ))}
           </div>
         )}
       </div>

@@ -14,14 +14,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useState } from "react";
 import type { ReactNode } from "react";
-import {
-  loadHistory,
-  upsertHistoryEntry,
-  removeHistoryEntriesForAgent,
-  importHistoryEntries,
-} from "../history-store";
+import { withHistoryEntry, withImportedHistory, withoutAgentHistory } from "../history-store";
 import type { HistoryEntry } from "../history-store";
 
 interface HistoryValue {
@@ -36,21 +31,11 @@ const HistoryContext = createContext<HistoryValue | null>(null);
 export function HistoryProvider({ children }: { children: ReactNode }) {
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
 
-  useEffect(() => {
-    let live = true;
-    void loadHistory().then((loaded) => {
-      if (live) setEntries(loaded);
-    });
-    return () => {
-      live = false;
-    };
-  }, []);
-
   const value: HistoryValue = {
     entries,
-    upsert: (entry) => void upsertHistoryEntry(entry).then(setEntries),
-    removeForAgent: (agentId) => void removeHistoryEntriesForAgent(agentId).then(setEntries),
-    restore: (imported) => void importHistoryEntries(imported).then(setEntries),
+    upsert: (entry) => setEntries((current) => withHistoryEntry(current, entry)),
+    removeForAgent: (agentId) => setEntries((current) => withoutAgentHistory(current, agentId)),
+    restore: (imported) => setEntries((current) => withImportedHistory(current, imported)),
   };
 
   return <HistoryContext.Provider value={value}>{children}</HistoryContext.Provider>;

@@ -18,7 +18,6 @@ import type { ReactNode } from "react";
 import { BrowserRouter, Outlet, Routes, Route, Navigate } from "react-router-dom";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { ThemeProvider } from "./ThemeContext";
-import { NotificationsProvider } from "./NotificationsContext";
 import { AgentsLibraryProvider } from "../agents/AgentsLibraryContext";
 import { HistoryProvider } from "../history/HistoryContext";
 import { PermissionsLedgerProvider } from "../permissions/PermissionsLedgerContext";
@@ -50,15 +49,11 @@ function AppRoutes() {
 function Providers({ children }: { children: ReactNode }) {
   return (
     <ThemeProvider>
-      <NotificationsProvider>
-        <AgentsLibraryProvider>
-          <HistoryProvider>
-            <PermissionsLedgerProvider>
-              {children}
-            </PermissionsLedgerProvider>
-          </HistoryProvider>
-        </AgentsLibraryProvider>
-      </NotificationsProvider>
+      <AgentsLibraryProvider>
+        <HistoryProvider>
+          <PermissionsLedgerProvider>{children}</PermissionsLedgerProvider>
+        </HistoryProvider>
+      </AgentsLibraryProvider>
     </ThemeProvider>
   );
 }

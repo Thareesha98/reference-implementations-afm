@@ -15,7 +15,6 @@
 // under the License.
 
 import type { UiMessage } from "./chat-state";
-import { requestInStore, sharedConnection } from "./idb-request";
 
 export interface HistoryEntry {
   id: string;
@@ -28,102 +27,16 @@ export interface HistoryEntry {
   updatedAt: number;
 }
 
-const DB_NAME = "afm-history";
-const STORE = "conversations";
 const HISTORY_MAX = 200;
-const LEGACY_KEY = "afm.history.v1";
-
-function legacyEntries(): HistoryEntry[] {
-  try {
-    const raw = localStorage.getItem(LEGACY_KEY);
-    if (raw === null) return [];
-    const parsed = JSON.parse(raw) as HistoryEntry[];
-    return Array.isArray(parsed) ? parsed.filter((entry) => typeof entry?.id === "string") : [];
-  } catch {
-    return [];
-  }
-}
-
-const openDb = sharedConnection(connect);
-
-function connect(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 1);
-    request.onupgradeneeded = () => {
-      const store = request.result.createObjectStore(STORE, { keyPath: "id" });
-      const legacy = legacyEntries();
-      for (const entry of legacy) store.put(entry);
-      if (legacy.length > 0) {
-        request.transaction?.addEventListener("complete", () => {
-          try {
-            localStorage.removeItem(LEGACY_KEY);
-          } catch {
-          }
-        });
-      }
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
-
-function run<T>(
-  db: IDBDatabase,
-  mode: IDBTransactionMode,
-  op: (store: IDBObjectStore) => IDBRequest,
-): Promise<T> {
-  return requestInStore<T>(db, STORE, mode, op);
-}
+const STORED_DATABASE = "afm-history";
+const STORED_KEY = "afm.history.v1";
 
 function byRecency(entries: HistoryEntry[]): HistoryEntry[] {
   return [...entries].sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
-async function readAll(db: IDBDatabase): Promise<HistoryEntry[]> {
-  return byRecency(await run<HistoryEntry[]>(db, "readonly", (store) => store.getAll()));
-}
-
-export async function loadHistory(): Promise<HistoryEntry[]> {
-  try {
-    return await readAll(await openDb());
-  } catch {
-    return [];
-  }
-}
-
-async function pruneHistory(db: IDBDatabase, entries: HistoryEntry[]): Promise<HistoryEntry[]> {
-  const ordered = byRecency(entries);
-  const keep = ordered.slice(0, HISTORY_MAX);
-  const kept = new Set(keep.map((entry) => entry.id));
-  await Promise.all(
-    ordered
-      .filter((entry) => !kept.has(entry.id))
-      .map((entry) => run(db, "readwrite", (store) => store.delete(entry.id))),
-  );
-  return keep;
-}
-
-async function changeHistory(change: (db: IDBDatabase) => Promise<HistoryEntry[]>): Promise<HistoryEntry[]> {
-  try {
-    return await change(await openDb());
-  } catch {
-    return loadHistory();
-  }
-}
-
-export function upsertHistoryEntry(entry: HistoryEntry): Promise<HistoryEntry[]> {
-  return changeHistory(async (db) => {
-    await run(db, "readwrite", (store) => store.put(entry));
-    return pruneHistory(db, await readAll(db));
-  });
-}
-
-export function removeHistoryEntriesForAgent(agentId: string): Promise<HistoryEntry[]> {
-  return changeHistory(async (db) => {
-    const doomed = (await readAll(db)).filter((entry) => entry.agentId === agentId);
-    await Promise.all(doomed.map((entry) => run(db, "readwrite", (store) => store.delete(entry.id))));
-    return readAll(db);
-  });
+function newest(entries: HistoryEntry[]): HistoryEntry[] {
+  return byRecency(entries).slice(0, HISTORY_MAX);
 }
 
 export function mergeHistory(existing: HistoryEntry[], imported: HistoryEntry[]): HistoryEntry[] {
@@ -138,13 +51,23 @@ export function mergeHistory(existing: HistoryEntry[], imported: HistoryEntry[])
   return byRecency([...byId.values()]);
 }
 
-export function importHistoryEntries(imported: HistoryEntry[]): Promise<HistoryEntry[]> {
-  return changeHistory(async (db) => {
-    const existing = await readAll(db);
-    const merged = mergeHistory(existing, imported);
-    const unchanged = new Map(existing.map((entry) => [entry.id, entry]));
-    const changed = merged.filter((entry) => unchanged.get(entry.id) !== entry);
-    await Promise.all(changed.map((entry) => run(db, "readwrite", (store) => store.put(entry))));
-    return pruneHistory(db, merged);
-  });
+export function withHistoryEntry(entries: HistoryEntry[], entry: HistoryEntry): HistoryEntry[] {
+  return newest([...entries.filter((item) => item.id !== entry.id), entry]);
+}
+
+export function withoutAgentHistory(entries: HistoryEntry[], agentId: string): HistoryEntry[] {
+  return entries.filter((entry) => entry.agentId !== agentId);
+}
+
+export function withImportedHistory(entries: HistoryEntry[], imported: HistoryEntry[]): HistoryEntry[] {
+  return newest(mergeHistory(entries, imported));
+}
+
+export function clearStoredHistory(): void {
+  try {
+    indexedDB.deleteDatabase(STORED_DATABASE);
+    localStorage.removeItem(STORED_KEY);
+  } catch {
+    return;
+  }
 }

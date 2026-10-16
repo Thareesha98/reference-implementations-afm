@@ -113,7 +113,7 @@ describe("captureAuthSecrets", () => {
 describe("secretFieldState", () => {
   const ref = "${env:HUGGINGFACE_TOKEN}";
 
-  it("is saved once the worker can answer for the name, sealed or not", () => {
+  it("is saved once the worker can answer for the name", () => {
     expect(secretFieldState(ref, undefined, ["HUGGINGFACE_TOKEN"])).toBe("saved");
   });
 

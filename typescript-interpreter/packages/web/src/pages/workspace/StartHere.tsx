@@ -21,8 +21,7 @@ import { MODEL_PROVIDERS, findProvider } from "./model-catalog";
 import type { AgentModelRef } from "../../protocol";
 import type { ChatState } from "../../chat-state";
 import { resolveContent, normalizeAgentFileUrl } from "../../load-paths";
-import { usableSecrets } from "../../chat-state";
-import { KeepOnDevice } from "./KeepOnDevice";
+import { agentFileFetch } from "../../tool-factory";
 
 function SetupColumn({ children, slide = false }: { children: ReactNode; slide?: boolean }) {
   return (
@@ -71,8 +70,7 @@ interface Props {
   onUseSource: (source: string) => void;
   onGenerate: (prompt: string, model: AgentModelRef, final?: boolean) => void;
   onDismissDraft: () => void;
-  onSaveKey: (name: string, value: string, keep: boolean) => Promise<boolean>;
-  onOpenKeys: () => Promise<boolean>;
+  onSaveKey: (name: string, value: string) => void;
   onBlank: () => void;
 }
 
@@ -82,7 +80,6 @@ export function StartHere({
   onGenerate,
   onSaveKey,
   onDismissDraft,
-  onOpenKeys,
   onBlank,
 }: Props) {
   const [view, setView] = useState<View>("menu");
@@ -90,7 +87,6 @@ export function StartHere({
   const [providerId, setProviderId] = useState(MODEL_PROVIDERS[0]!.id);
   const [modelId, setModelId] = useState(MODEL_PROVIDERS[0]!.models[0]!.id);
   const [key, setKey] = useState("");
-  const [keep, setKeep] = useState(false);
   const [answers, setAnswers] = useState("");
   const [link, setLink] = useState("");
   const [dropping, setDropping] = useState(false);
@@ -100,8 +96,7 @@ export function StartHere({
   const fileInput = useRef<HTMLInputElement>(null);
 
   const provider = findProvider(providerId) ?? MODEL_PROVIDERS[0]!;
-  const keySaved = usableSecrets(state).includes(provider.secretName);
-  const keyClosed = keySaved && !state.savedSecrets.includes(provider.secretName);
+  const keySaved = state.savedSecrets.includes(provider.secretName);
 
   const answered =
     state.generatedDraft !== null || state.clarifyQuestions.length > 0 || state.draftError !== null;
@@ -115,11 +110,10 @@ export function StartHere({
     authentication: { type: "api-key", api_key: `\${env:${provider.secretName}}` },
   } as AgentModelRef;
 
-  async function writeFile(final = false, request = prompt.trim()) {
+  function writeFile(final = false, request = prompt.trim()) {
     if (request === "") return;
     setWriting(true);
-    if (keyClosed) await onOpenKeys();
-    else if (!keySaved && key.trim() !== "") void onSaveKey(provider.secretName, key.trim(), keep);
+    if (!keySaved && key.trim() !== "") onSaveKey(provider.secretName, key.trim());
     onGenerate(request, authoringModel, final);
   }
 
@@ -137,7 +131,7 @@ export function StartHere({
     setFetching(true);
     setImportError(null);
     try {
-      const text = await resolveContent({ kind: "remote", url: normalized.url }, fetch);
+      const text = await resolveContent({ kind: "remote", url: normalized.url }, agentFileFetch());
       if (text === null) {
         setImportError("Nothing came back from that address.");
         return;
@@ -285,7 +279,7 @@ export function StartHere({
           onSubmit={(event) => {
             event.preventDefault();
             if (answers.trim() === "") return;
-            void writeFile(true, `${prompt.trim()}\n\nAnswers to your questions:\n${answers.trim()}`);
+            writeFile(true, `${prompt.trim()}\n\nAnswers to your questions:\n${answers.trim()}`);
             setAnswers("");
           }}
         >
@@ -303,7 +297,7 @@ export function StartHere({
               type="button"
               disabled={writing}
               onClick={() => {
-                void writeFile(true, prompt.trim());
+                writeFile(true, prompt.trim());
                 setAnswers("");
               }}
             >
@@ -331,7 +325,7 @@ export function StartHere({
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            void writeFile();
+            writeFile();
           }}
           className="u-group"
         >
@@ -377,20 +371,17 @@ export function StartHere({
           </div>
 
           {!keySaved && (
-            <>
-              <label className="u-group">
-                <span className="u-label">{provider.secretName}</span>
-                <input
-                  className="u-input"
-                  type="password"
-                  value={key}
-                  onChange={(event) => setKey(event.target.value)}
-                  placeholder={provider.secretName}
-                  autoComplete="off"
-                />
-              </label>
-              <KeepOnDevice keep={keep} onChange={setKeep} />
-            </>
+            <label className="u-group">
+              <span className="u-label">{provider.secretName}</span>
+              <input
+                className="u-input"
+                type="password"
+                value={key}
+                onChange={(event) => setKey(event.target.value)}
+                placeholder={provider.secretName}
+                autoComplete="off"
+              />
+            </label>
           )}
 
           <p className="u-usage-note">

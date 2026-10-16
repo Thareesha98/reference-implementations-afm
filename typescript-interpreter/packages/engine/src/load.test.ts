@@ -244,6 +244,45 @@ describe.each(["${env:KEY}", '"${env:KEY}"', "'${env:KEY}'"])("a secret written 
   });
 });
 
+describe("a key's value in an error message", () => {
+  const SECRET = "SECRET-VALUE-123";
+  const FIELDS = [
+    "type", "token", "username", "password", "api_key", "header_name", "issuer", "audience", "signing_key", "algorithm", "key_id",
+    "subject", "expiry_seconds", "grant_type", "authorize_url", "token_url", "client_id", "client_secret", "refresh_token", "assertion",
+    "scopes", "credential_bearer",
+  ];
+  const BLOCKS = [
+    ["type: bearer", "token: t"],
+    ["type: oauth2", "grant_type: client_credentials", "token_url: https://a.example/t", "client_id: i", "client_secret: s"],
+    ["type: jwt", "issuer: i", "signing_key: k", "algorithm: HS256"],
+  ];
+
+  const indent = (lines: string[], spaces: number) => lines.map((line) => " ".repeat(spaces) + line);
+
+  function fileWith(where: "the model" | "a tool server", block: string[], field: string): string {
+    const authentication = block.filter((line) => !line.startsWith(`${field}:`)).concat(`${field}: \${env:KEY}`);
+    const lines =
+      where === "the model"
+        ? ["model:", "  provider: openai", "  authentication:", ...indent(authentication, 4)]
+        : ["model:", "  provider: openai", "tools:", "  mcp:", "    - name: s", "      transport:", "        type: http", "        url: https://s.example/mcp", "        authentication:", ...indent(authentication, 10)];
+    return ["---", ...lines, "---", "", "# Role", "r", "", "# Instructions", "i", ""].join("\n");
+  }
+
+  it.each(["the model", "a tool server"] as const)("is never quoted, whichever authentication field of %s holds the reference", async (where) => {
+    const quoted: string[] = [];
+    for (const block of BLOCKS) {
+      for (const field of FIELDS) {
+        const message = await loadAfm(fileWith(where, block, field), fakeSecrets({ KEY: SECRET })).then(
+          () => "",
+          (error: Error) => error.message,
+        );
+        if (message.includes(SECRET)) quoted.push(`${field}: ${message}`);
+      }
+    }
+    expect(quoted).toEqual([]);
+  });
+});
+
 describe("buildSystemPrompt", () => {
   it("formats Role and Instructions like the reference runtimes", () => {
     expect(buildSystemPrompt("You are X.", "Do Y.")).toBe(

@@ -25,7 +25,7 @@ import type {
   ChatMessage,
   ContentPart,
 } from "@afm/engine";
-import { compositeToolPort } from "@afm/adapter-tool";
+import { ToolNameError, compositeToolPort, namespacedToolName } from "@afm/adapter-tool";
 import type { ServerMessage, ImageAttachment } from "./protocol";
 import { permissionKey, serverMessageFromLoopEvent } from "./protocol";
 import { userContent } from "./message-content";
@@ -52,7 +52,7 @@ function listedAsAllowed(metadata: AgentMetadata): Set<string> {
   const keys = new Set<string>();
   for (const server of metadata.tools?.mcp ?? []) {
     if (server.transport.type !== "http") continue;
-    for (const name of server.tool_filter?.allow ?? []) keys.add(permissionKey(server.transport.url, name));
+    for (const name of server.tool_filter?.allow ?? []) keys.add(permissionKey(server.transport.url, namespacedToolName(server.name, name)));
   }
   return keys;
 }
@@ -128,20 +128,24 @@ export class AgentSession {
       });
     } catch (error) {
       if (!current()) return;
-      const reason = describeError(error);
-      this.loaded = null;
-      this.allowed = new Set();
-      this.model = null;
-      const staleTools = this.tools;
-      this.tools = null;
-      if (staleTools !== null) void staleTools.dispose?.().catch(() => {});
-      this.step(stage, STAGE_LABELS[stage] ?? "Starting the agent", "failed", reason);
-      this.deps.emit({ type: "agent-not-ready", reason });
+      this.refuse(stage, error);
       return;
     }
     if (this.tools !== null) {
       await this.reportTools(this.tools, current);
     }
+  }
+
+  private refuse(stage: string, error: unknown): void {
+    const reason = describeError(error);
+    this.loaded = null;
+    this.allowed = new Set();
+    this.model = null;
+    const staleTools = this.tools;
+    this.tools = null;
+    if (staleTools !== null) void staleTools.dispose?.().catch(() => {});
+    this.step(stage, STAGE_LABELS[stage] ?? "Starting the agent", "failed", reason);
+    this.deps.emit({ type: "agent-not-ready", reason });
   }
 
   private async reportTools(tools: ToolPort, current: () => boolean): Promise<void> {
@@ -152,7 +156,8 @@ export class AgentSession {
         type: "tools-listed",
         tools: descriptors.map((d) => ({ name: d.name, description: d.description, serverId: d.serverId })),
       });
-    } catch {
+    } catch (error) {
+      if (error instanceof ToolNameError && current()) this.refuse("tools", error);
     }
   }
 

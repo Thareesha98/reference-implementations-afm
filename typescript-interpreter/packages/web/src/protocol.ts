@@ -36,39 +36,27 @@ export type ClientMessage =
       permissionSeed?: string[];
     }
   | { type: "send"; text: string; images?: ImageAttachment[]; keep?: number }
-  | { type: "attach-files"; files: { name: string; path: string; text: string; pages?: number }[] }
+  | { type: "attach-files"; files: { name: string; path: string; text: string; pages?: number; note?: string }[] }
   | { type: "detach-file"; path: string }
   | { type: "cancel" }
   | { type: "regenerate" }
   | { type: "reset-chat" }
-  | { type: "set-secret"; name: string; value: string; host?: string }
-  | { type: "unlock-secret"; name: string; key: CryptoKey }
-  | {
-      type: "passkey-remember";
-      name: string;
-      key: CryptoKey;
-      credentialId: Uint8Array<ArrayBuffer>;
-      salt: Uint8Array<ArrayBuffer>;
-    }
-  | {
-      type: "passkey-reseal";
-      name: string;
-      from: CryptoKey;
-      to: CryptoKey;
-      credentialId: Uint8Array<ArrayBuffer>;
-      salt: Uint8Array<ArrayBuffer>;
-    }
-  | { type: "passkey-forget"; name: string }
+  | { type: "set-secret"; name: string; value: string; address?: string }
   | { type: "list-secrets" }
-  | { type: "list-passkeys" }
   | { type: "remove-secret"; name: string }
   | { type: "permission-response"; id: string; decision: "allow" | "deny"; remember: boolean }
-  | { type: "oauth-signin-start"; id: string; provider: OAuthProviderRef }
+  | ({ type: "oauth-signin-start"; id: string; provider: OAuthProviderRef } & SignInVetting)
   | { type: "oauth-signin-code"; id: string; code: string; state: string; iss?: string }
+  | { type: "oauth-signin-error"; id: string; error: string; state: string; iss?: string }
   | { type: "oauth-sign-out"; provider: OAuthProviderRef }
   | { type: "generate-draft"; prompt: string; model: AgentModelRef; final?: boolean }
   | { type: "probe-server"; id: string; server: AgentMetadata["tools"] }
   | { type: "probe-model"; id: string; model: AgentModelRef };
+
+export interface SignInVetting {
+  listed: boolean;
+  confirmedHost?: string;
+}
 
 export interface ToolInfo {
   name: string;
@@ -94,7 +82,6 @@ export type ServerMessage =
   | { type: "tools-listed"; tools: ToolInfo[] }
   | { type: "agent-not-ready"; reason: string }
   | { type: "secrets-list"; names: string[] }
-  | { type: "passkey-list"; names: string[] }
   | { type: "text-delta"; text: string }
   | { type: "tool-call"; id: string; name: string; args: unknown }
   | { type: "tool-result"; id: string; name: string; ok: boolean; content: string }
@@ -102,6 +89,7 @@ export type ServerMessage =
   | { type: "notice"; text: string }
   | { type: "permission-request"; id: string; name: string; args: unknown; serverId?: string }
   | { type: "oauth-authorize-url"; id: string; url: string }
+  | { type: "oauth-signin-confirm"; id: string; host: string }
   | { type: "oauth-signin-done"; id: string; ok: boolean; error?: string }
   | {
       type: "budget-update";

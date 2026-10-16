@@ -17,13 +17,13 @@
 
 import { describe, expect, it } from "vitest";
 import type { AgentMetadata } from "@afm/engine";
-import { toolSummary } from "./TrustScreen";
+import { linkedFileHost, serverTools } from "./TrustScreen";
 
 const withServers = (mcp: unknown[]) => ({ name: "A", tools: { mcp } }) as AgentMetadata;
 
-describe("toolSummary", () => {
-  it("says none when the file names no servers", () => {
-    expect(toolSummary({ name: "A" } as AgentMetadata)).toBe("None");
+describe("serverTools", () => {
+  it("is empty when the file names no servers", () => {
+    expect(serverTools({ name: "A" } as AgentMetadata)).toEqual([]);
   });
 
   it("names each server with the host it talks to", () => {
@@ -31,19 +31,46 @@ describe("toolSummary", () => {
       { name: "notes", transport: { type: "http", url: "https://mcp.example.com/mcp" } },
       { name: "stock", transport: { type: "http", url: "https://sheets.example.org/v1" } },
     ]);
-    expect(toolSummary(metadata)).toBe("notes (mcp.example.com), stock (sheets.example.org)");
+    expect(serverTools(metadata).map(({ name, host }) => [name, host])).toEqual([
+      ["notes", "mcp.example.com"],
+      ["stock", "sheets.example.org"],
+    ]);
   });
 
-  it("adds how many tools the file allows", () => {
+  it("lists every tool the file allows to run without asking", () => {
     const metadata = withServers([
       { name: "notes", transport: { type: "http", url: "https://mcp.example.com/mcp" }, tool_filter: { allow: ["a", "b"] } },
-      { name: "stock", transport: { type: "http", url: "https://sheets.example.org/v1" }, tool_filter: { allow: ["c"] } },
+      { name: "stock", transport: { type: "http", url: "https://sheets.example.org/v1" }, tool_filter: { allow: ["c"], deny: ["d"] } },
     ]);
-    expect(toolSummary(metadata)).toBe("notes (mcp.example.com) · 2 tools, stock (sheets.example.org) · 1 tool");
+    expect(serverTools(metadata).map(({ tools }) => tools)).toEqual([["a", "b"], ["c"]]);
   });
 
-  it("leaves out a host for a server that is not reached over http", () => {
+  it("lists no tools for a server whose file allows none", () => {
+    const metadata = withServers([
+      { name: "notes", transport: { type: "http", url: "https://mcp.example.com/mcp" } },
+      { name: "stock", transport: { type: "http", url: "https://sheets.example.org/v1" }, tool_filter: { deny: ["d"] } },
+    ]);
+    expect(serverTools(metadata).map(({ tools }) => tools)).toEqual([[], []]);
+  });
+
+  it("has no host for a server that is not reached over http", () => {
     const metadata = withServers([{ name: "local", transport: { type: "stdio", command: "run" } }]);
-    expect(toolSummary(metadata)).toBe("local");
+    expect(serverTools(metadata)).toEqual([{ name: "local", host: null, tools: [] }]);
+  });
+});
+
+describe("linkedFileHost", () => {
+  it("is the host a ?file= link points at, with its port", () => {
+    expect(linkedFileHost("https://files.example.com/a/b.afm.md")).toBe("files.example.com");
+    expect(linkedFileHost("https://files.example.com:8443/a.afm.md")).toBe("files.example.com:8443");
+  });
+
+  it("is nothing when the agent did not come from a ?file= link", () => {
+    expect(linkedFileHost(null)).toBeNull();
+  });
+
+  it("is nothing for a link that is not an https address", () => {
+    expect(linkedFileHost("http://files.example.com/a.afm.md")).toBeNull();
+    expect(linkedFileHost("not a url")).toBeNull();
   });
 });

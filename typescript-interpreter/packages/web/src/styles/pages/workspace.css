@@ -1418,6 +1418,18 @@ label.u-group {
 .repair .u-btn {
   flex: none;
 }
+.repair.warn {
+  flex-wrap: wrap;
+  border-color: var(--warn);
+  background: var(--warn-soft);
+}
+.repair.warn .repair-what {
+  flex-basis: 100%;
+  color: var(--warn);
+}
+.u-signin-row + .repair {
+  margin-top: 10px;
+}
 
 .draft-banner {
   flex: none;

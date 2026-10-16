@@ -15,7 +15,7 @@
 // under the License.
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { EMPTY_TEMPLATE, identityFor, initialContent } from "./workspace-content";
+import { EMPTY_TEMPLATE, identityFor, initialContent, openedFromLink } from "./workspace-content";
 import { encodeInlineAfm } from "../../load-paths";
 import { previewAgent } from "../../agent-validation";
 
@@ -101,6 +101,28 @@ describe("EMPTY_TEMPLATE", () => {
     const preview = previewAgent(EMPTY_TEMPLATE);
     expect(preview.ok).toBe(false);
     expect(preview.ok ? "" : preview.error).toMatch(/Role/);
+  });
+});
+
+describe("openedFromLink", () => {
+  it("is true for a share link, in its fragment or the older query form, and for a ?file= link", () => {
+    expect(openedFromLink(params(""), "#afm=zzz", undefined)).toBe(true);
+    expect(openedFromLink(params("afm=zzz"), "", undefined)).toBe(true);
+    expect(openedFromLink(params("file=https://x/y.afm.md"), "", undefined)).toBe(true);
+  });
+
+  it("is false for the library, a blank start and a draft", () => {
+    expect(openedFromLink(params("agentId=a1"), "", undefined)).toBe(false);
+    expect(openedFromLink(params(""), "", undefined)).toBe(false);
+    expect(openedFromLink(params("file=https://x/y.afm.md"), "#afm=zzz", "draft text")).toBe(false);
+  });
+
+  it("stays true when a link also names a saved agent, since the agent may be missing and the link's file is what opens", () => {
+    expect(openedFromLink(params("agentId=a1"), "#afm=zzz", undefined)).toBe(true);
+  });
+
+  it("ignores callback parameters", () => {
+    expect(openedFromLink(params("code=fixture&state=fixture"), "", undefined)).toBe(false);
   });
 });
 

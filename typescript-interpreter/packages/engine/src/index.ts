@@ -37,7 +37,7 @@ export type { ParsedAfm, FrontmatterSplit, RoleAndInstructions } from "./parse";
 export { validateMetadata, agentMetadataSchema } from "./schema";
 export type { AgentMetadata, ClientAuthentication, JsonSchemaData } from "./schema";
 
-export { resolveVariables, scanSecretUsage, referencedSecretNames, secretUseKey } from "./variables";
+export { resolveVariables, scanSecretUsage, referencedSecretNames, secretUseKey, serverAddress, secretDestination } from "./variables";
 export type { SecretUsage, SecretScope } from "./variables";
 
 export { planForBrowser } from "./plan";

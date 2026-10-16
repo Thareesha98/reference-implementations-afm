@@ -104,6 +104,10 @@ describe("resultOf", () => {
     expect([note("slow"), note("busy"), note("unreachable")]).toEqual(["Did not answer in time", "Busy right now", "Can't be reached"]);
   });
 
+  it("says a server that redirects is not a server that is down", () => {
+    expect(resultOf({ failure: { kind: "redirected", message: "" } }, context)).toMatchObject({ state: "failed", note: "Redirects elsewhere", failure: "redirected" });
+  });
+
   it("keeps the server's own words for anything it cannot place", () => {
     expect(resultOf({ failure: { kind: "other", message: "Odd reply" } }, context)).toMatchObject({ state: "failed", note: "Odd reply" });
   });
@@ -124,6 +128,7 @@ describe("issueSentence", () => {
     expect(issueSentence("rejected", "Notion", "signin")).toBe("Notion's sign-in has ended. Sign in to carry on.");
     expect(issueSentence("rejected", "api.openai.com", "key")).toBe("api.openai.com did not accept this key. Paste a new one.");
     expect(issueSentence("missing", "Notion", "signin")).toBe("Notion needs you to sign in.");
+    expect(issueSentence("redirected", "Notion", "token")).toBe("Notion answered with a redirect, which AFM does not follow. Use the address it redirects to.");
     expect(issueSentence("other", "Notion", "signin", "Odd reply")).toBe("Odd reply");
   });
 });
@@ -150,26 +155,21 @@ describe("the whole list", () => {
 describe("summaryOf", () => {
   const row = (state: SetupRow["state"], name = "notion"): SetupRow => ({ id: name, kind: "server", name, state, note: "" });
 
-  it("says nothing was opened when the device did not confirm", () => {
-    expect(summaryOf([row("waiting")], "declined").chip).toBe("Waiting");
-  });
-
-  it("reads Checking while the saved keys open or any row is still asked", () => {
-    expect(summaryOf([row("waiting")], "opening").chip).toBe("Checking");
-    expect(summaryOf([row("ready"), row("checking", "linear")], "none").chip).toBe("Checking");
+  it("reads Checking while any row is still asked", () => {
+    expect(summaryOf([row("ready"), row("checking", "linear")]).chip).toBe("Checking");
   });
 
   it("counts the rows that need the user, and says the rest is ready", () => {
-    expect(summaryOf([row("ready"), row("failed", "linear"), row("needs", "hf")], "none")).toEqual({
+    expect(summaryOf([row("ready"), row("failed", "linear"), row("needs", "hf")])).toEqual({
       tone: "warn",
       chip: "2 need attention",
       text: "The rest is ready. Fix these, then check again.",
     });
-    expect(summaryOf([row("failed")], "none").chip).toBe("1 needs attention");
+    expect(summaryOf([row("failed")]).chip).toBe("1 needs attention");
   });
 
   it("names what was changed", () => {
-    expect(summaryOf([row("ready", "arxiv"), row("changed")], "none")).toEqual({
+    expect(summaryOf([row("ready", "arxiv"), row("changed")])).toEqual({
       tone: "neutral",
       chip: "Changed",
       text: "You updated notion. Check again to confirm it.",
@@ -177,12 +177,12 @@ describe("summaryOf", () => {
   });
 
   it("reads Ready only when every row answered", () => {
-    expect(summaryOf([row("ready"), row("ready", "linear")], "opened").chip).toBe("Ready");
-    expect(summaryOf([row("ready"), row("waiting", "linear")], "none").chip).toBe("Waiting");
+    expect(summaryOf([row("ready"), row("ready", "linear")]).chip).toBe("Ready");
+    expect(summaryOf([row("ready"), row("waiting", "linear")]).chip).toBe("Waiting");
   });
 
   it("only says to press Run once everything is ready", () => {
-    expect(summaryOf([row("ready"), row("ready", "linear")], "opened").text).toBe("Press Run to start.");
+    expect(summaryOf([row("ready"), row("ready", "linear")]).text).toBe("Press Run to start.");
   });
 });
 

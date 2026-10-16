@@ -14,13 +14,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { displayToolName } from "@afm/adapter-tool";
 import type { PendingPermission } from "../chat-state";
 import { hostOf } from "../load-paths";
-import { classifyToolRisk } from "../permissions-store";
 
 interface Props {
   request: PendingPermission;
-  description?: string;
   onDecide: (allow: boolean, remember: boolean) => void;
 }
 
@@ -28,8 +27,7 @@ function destinationOf(serverId: string | undefined): string | null {
   return serverId === undefined || serverId === "" ? null : hostOf(serverId);
 }
 
-export function PermissionRequestModal({ request, description, onDecide }: Props) {
-  const risk = classifyToolRisk(request.name, description);
+export function PermissionRequestModal({ request, onDecide }: Props) {
   const destination = destinationOf(request.serverId);
 
   return (
@@ -37,8 +35,7 @@ export function PermissionRequestModal({ request, description, onDecide }: Props
       <div className="modal permission-modal">
         <h3>Allow tool call?</h3>
         <p>
-          The agent wants to run <code>{request.name}</code>
-          <span className={`risk-badge risk-${risk}`}>{risk === "read" ? "Looks read-only" : "May make changes"}</span>
+          The agent wants to run <code>{displayToolName(request.name)}</code>
         </p>
         <p className="permission-destination">
           {destination !== null ? (

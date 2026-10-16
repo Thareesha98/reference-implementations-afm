@@ -179,10 +179,7 @@ code{font-family:"IBM Plex Mono",monospace;font-size:.86em;background:var(--sunk
 
 .u-setup{display:flex;flex-direction:column;align-items:center;justify-content:center;flex:1;padding:0 4px}
 .u-run-sum{display:flex;flex-direction:column;gap:6px;align-items:flex-start;margin-bottom:14px;font-size:12.5px;color:var(--muted);line-height:1.5}
-.u-run-keys,.u-run-row{display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:12px;padding:9px 10px}
-.u-run-keys{background:var(--sunk);margin-bottom:14px}
-.u-run-keys.is-bad{border-color:var(--bad);background:var(--bad-soft)}.u-run-keys.is-bad .u-run-name{color:var(--bad)}
-.u-run-ico{width:28px;height:28px;border-radius:8px;background:var(--surface);box-shadow:0 0 0 1px var(--line);display:grid;place-items:center;flex:none;color:var(--ink)}
+.u-run-row{display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:12px;padding:9px 10px}
 .u-run-row{margin-bottom:7px;background:var(--surface)}
 .u-run-row.is-bad{border-color:var(--bad)}.u-run-row.is-bad .u-run-note{color:var(--bad)}
 .u-run-row.is-need{border-color:color-mix(in srgb,var(--warn) 55%,var(--line))}.u-run-row.is-need .u-run-note{color:var(--warn)}
@@ -194,8 +191,6 @@ code{font-family:"IBM Plex Mono",monospace;font-size:.86em;background:var(--sunk
 .u-run-st.ok{color:var(--ok)}
 .u-run-st.wait i{width:12px;height:12px;border-radius:99px;border:1.5px solid var(--line-strong);display:inline-block}
 .u-run-gap{margin-top:14px}
-.u-checkline{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--ink2);margin:10px 0 12px}
-.u-checkline + .u-hint{margin-top:-6px}
 
 .u-rawwrap{display:flex;flex-direction:column;height:100%;width:100%}
 .u-raw{flex:1;background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden;font-family:"IBM Plex Mono",monospace;font-size:12.5px;line-height:1.8;padding:10px 0}
@@ -329,6 +324,10 @@ code{font-family:"IBM Plex Mono",monospace;font-size:.86em;background:var(--sunk
 .u-declare-row{display:flex;gap:12px;align-items:center;padding:10px 13px;font-size:13px;color:var(--ink2)}
 .u-declare-row + .u-declare-row{border-top:1px solid var(--line-2)}
 .u-declare-k{color:var(--muted);width:104px;flex:none;font-size:12px}
+.u-declare-row.top{align-items:flex-start}
+.u-declare-servers{display:flex;flex-direction:column;gap:12px;min-width:0;flex:1}
+.u-declare-tools{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}
+.u-declare-tools .tag{font-weight:500}
 
 
 @media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}

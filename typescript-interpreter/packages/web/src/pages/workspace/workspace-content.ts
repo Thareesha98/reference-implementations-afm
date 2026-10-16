@@ -51,6 +51,10 @@ export function initialContent(searchParams: URLSearchParams, hash: string, draf
   return EMPTY_TEMPLATE;
 }
 
+export function openedFromLink(searchParams: URLSearchParams, hash: string, draftSource: string | undefined): boolean {
+  return draftSource === undefined && (searchParams.get("file") !== null || inlineAfmParam(searchParams, hash) !== null);
+}
+
 export function identityFor(searchParams: URLSearchParams, hash: string, draftSource: string | undefined): string {
   if (draftSource !== undefined) return `draft:${draftSource}`;
   const file = searchParams.get("file");

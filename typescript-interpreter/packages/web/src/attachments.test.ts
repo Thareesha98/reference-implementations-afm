@@ -14,11 +14,13 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { describe, it, expect, beforeAll } from "vitest";
-import { collectFromFileList, collectFromDataTransfer, supportsDirectoryDrop, extractFile, extractFiles, pickImages, isSupportedImageFile, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE } from "./attachments";
+import { describe, it, expect, beforeAll, vi } from "vitest";
+import { collectFromFileList, collectFromDataTransfer, supportsDirectoryDrop, extractFile, extractFiles, pickImages, isSupportedImageFile, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, MAX_TOTAL_BYTES } from "./attachments";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
+
+vi.mock("./pdf-worker", () => ({ ensurePdfWorker: async () => {} }));
 
 function fileWithRelativePath(name: string, relativePath?: string): File {
   const file = new File(["content"], name);
@@ -242,6 +244,7 @@ describe("extractFile - real PDF (via headless-Chrome-generated fixture)", () =>
     expect(result.file.text).toContain("Revenue grew by twelve percent");
     expect(result.file.text).toContain("Appendix");
     expect(result.file.text).toContain("supporting");
+    expect(result.file.note).toBeUndefined();
   });
 });
 
@@ -260,6 +263,55 @@ describe("extractFiles - batch, partitioning attached vs. skipped", () => {
     const result = await extractFiles([{ file: textFile("a.txt", "x"), path: "a.txt" }]);
     expect(result.attached.length).toBe(1);
     expect(result.skipped).toEqual([]);
+  });
+});
+
+describe("extractFiles - the total size of a conversation's files", () => {
+  const sized = (name: string, bytes: number) => ({ file: new File([new Uint8Array(bytes)], name, { type: "text/plain" }), path: name });
+
+  it("is 100 MB", async () => {
+    expect(MAX_TOTAL_BYTES).toBe(100 * 1024 * 1024);
+  });
+
+  it("skips a file that would take the conversation past the total, and says why", async () => {
+    const result = await extractFiles([sized("big.txt", 20)], 10);
+    expect(result.attached).toEqual([]);
+    expect(result.skipped).toEqual([{ name: "big.txt", reason: "would take this conversation past 100 MB of files" }]);
+  });
+
+  it("counts each file it attaches against the total as it goes", async () => {
+    const result = await extractFiles([sized("a.txt", 6), sized("b.txt", 6), sized("c.txt", 4)], 10);
+    expect(result.attached.map((file) => file.path)).toEqual(["a.txt", "c.txt"]);
+    expect(result.skipped.map((file) => file.name)).toEqual(["b.txt"]);
+  });
+
+  it("lets a file of exactly what is left through", async () => {
+    expect((await extractFiles([sized("a.txt", 10)], 10)).attached).toHaveLength(1);
+  });
+
+  it("reports the size of every file it attached, by path", async () => {
+    const result = await extractFiles([sized("a.txt", 6), sized("sub/b.txt", 4)]);
+    expect([...result.sizes]).toEqual([["a.txt", 6], ["sub/b.txt", 4]]);
+  });
+
+  it("reads files one at a time", async () => {
+    let open = 0;
+    let most = 0;
+    const slow = (name: string) => {
+      const file = new File(["x"], name, { type: "text/plain" });
+      Object.defineProperty(file, "text", {
+        value: async () => {
+          open += 1;
+          most = Math.max(most, open);
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          open -= 1;
+          return "x";
+        },
+      });
+      return { file, path: name };
+    };
+    await extractFiles([slow("a.txt"), slow("b.txt"), slow("c.txt")]);
+    expect(most).toBe(1);
   });
 });
 

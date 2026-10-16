@@ -14,11 +14,15 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { authorizationCodeRefreshKey, type OAuthProviderRef } from "@afm/adapter-auth";
-import type { ClientMessage } from "./protocol";
-import { seal } from "./passkey/vault";
+import type { OAuthProviderRef } from "@afm/adapter-auth";
+import type { ClientMessage, SignInVetting } from "./protocol";
 
-export type PopupResult = { code: string; state: string; iss?: string } | { error: string; state: string };
+export type PopupResult = { code: string; state: string; iss?: string } | { error: string; state: string; iss?: string };
+
+export type SignInOutcome =
+  | { status: "signed-in" }
+  | { status: "failed"; reason?: string }
+  | { status: "confirm"; host: string };
 
 const POPUP_NAME = "afm-oauth-signin";
 const CALLBACK_CHANNEL = "afm-oauth-callback";
@@ -36,7 +40,8 @@ export function relayOAuthCallback(): boolean {
   const iss = params.get("iss");
   const error = params.get("error");
   if (state === null || (code === null && error === null)) return false;
-  const result = error !== null ? { error, state } : { code, state, ...(iss === null ? {} : { iss }) };
+  const issuer = iss === null ? {} : { iss };
+  const result = error !== null ? { error, state, ...issuer } : { code, state, ...issuer };
   const channel = new BroadcastChannel(CALLBACK_CHANNEL);
   channel.postMessage(result);
   channel.close();
@@ -59,10 +64,10 @@ function awaitCallback(stateOf: () => string | undefined): Promise<PopupResult> 
     channel.onmessage = (event: MessageEvent) => {
       const data = event.data as { code?: unknown; state?: unknown; iss?: unknown; error?: unknown };
       if (typeof data?.state !== "string" || data.state !== stateOf()) return;
+      const iss = typeof data.iss === "string" ? { iss: data.iss } : {};
       if (typeof data.error === "string") {
-        settle(() => resolve({ error: data.error as string, state: data.state as string }));
+        settle(() => resolve({ error: data.error as string, state: data.state as string, ...iss }));
       } else if (typeof data.code === "string") {
-        const iss = typeof data.iss === "string" ? { iss: data.iss } : {};
         settle(() => resolve({ code: data.code as string, state: data.state as string, ...iss }));
       }
     };
@@ -91,20 +96,18 @@ export function clearLegacyRefreshTokens(): void {
 interface Flow {
   popup: Window;
   provider: OAuthProviderRef;
-  remember: boolean;
   state?: string;
-  resolve: (ok: boolean) => void;
+  resolve: (outcome: SignInOutcome) => void;
 }
 
 export interface OAuthSignInDeps {
   post: (message: ClientMessage) => void;
-  onPopupBlocked: () => void;
-  onFailure: (reason: string) => void;
 }
 
 export interface OAuthSignIns {
-  start(provider: OAuthProviderRef, remember: boolean): Promise<boolean>;
+  start(provider: OAuthProviderRef, vetting: SignInVetting): Promise<SignInOutcome>;
   onAuthorizeUrl(id: string, url: string): void;
+  onConfirm(id: string, host: string): void;
   onDone(id: string, ok: boolean, error?: string): void;
 }
 
@@ -112,30 +115,23 @@ export function createOAuthSignIns(deps: OAuthSignInDeps): OAuthSignIns {
   const flows = new Map<string, Flow>();
 
   return {
-    start(provider, remember) {
+    start(provider, vetting) {
       const popup = openSignInPopup();
       if (popup === null) {
-        deps.onPopupBlocked();
-        return Promise.resolve(false);
+        return Promise.resolve<SignInOutcome>({ status: "failed", reason: "Allow pop-ups for this site to sign in." });
       }
       const id = crypto.randomUUID();
-      return new Promise<boolean>((resolve) => {
-        flows.set(id, { popup, provider, remember, resolve });
-        deps.post({ type: "oauth-signin-start", id, provider });
-
-        const abandon = (reason?: string): void => {
-          flows.delete(id);
-          if (!popup.closed) popup.close();
-          if (reason !== undefined) deps.onFailure(reason);
-          resolve(false);
-        };
+      return new Promise<SignInOutcome>((resolve) => {
+        flows.set(id, { popup, provider, resolve });
+        deps.post({ type: "oauth-signin-start", id, provider, ...vetting });
 
         awaitCallback(() => flows.get(id)?.state).then(
-          (result) => {
-            if ("error" in result) abandon(`Sign-in was declined (${result.error.slice(0, 80)}).`);
-            else deps.post({ type: "oauth-signin-code", id, ...result });
+          (result) => deps.post("error" in result ? { type: "oauth-signin-error", id, ...result } : { type: "oauth-signin-code", id, ...result }),
+          () => {
+            flows.delete(id);
+            if (!popup.closed) popup.close();
+            resolve({ status: "failed" });
           },
-          () => abandon(),
         );
       });
     },
@@ -147,14 +143,20 @@ export function createOAuthSignIns(deps: OAuthSignInDeps): OAuthSignIns {
       flow.popup.location.href = url;
     },
 
+    onConfirm(id, host) {
+      const flow = flows.get(id);
+      flows.delete(id);
+      if (flow === undefined) return;
+      if (!flow.popup.closed) flow.popup.close();
+      flow.resolve({ status: "confirm", host });
+    },
+
     onDone(id, ok, error) {
       const flow = flows.get(id);
       flows.delete(id);
       if (flow === undefined) return;
       if (!flow.popup.closed) flow.popup.close();
-      if (!ok && error !== undefined) deps.onFailure(`Sign-in failed: ${error}`);
-      if (ok && flow.remember) void seal(deps.post, authorizationCodeRefreshKey(flow.provider));
-      flow.resolve(ok);
+      flow.resolve(ok ? { status: "signed-in" } : { status: "failed", reason: error === undefined ? undefined : `Sign-in failed: ${error}` });
     },
   };
 }

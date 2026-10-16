@@ -14,20 +14,24 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { compositeToolPort, mcpToolPort, mcpAuthHeaders, isDynamicAuthType, createDynamicMcpAuthHeaderProvider, filteredToolPort, effectiveUrl } from "@afm/adapter-tool";
+import { compositeToolPort, mcpToolPort, mcpAuthHeaders, isDynamicAuthType, createDynamicMcpAuthHeaderProvider, filteredToolPort, effectiveUrl, namespacedToolPort } from "@afm/adapter-tool";
 import type { McpDynamicAuthDeps } from "@afm/adapter-tool";
 import { isInteractiveOAuth, oauthProviderFrom } from "@afm/adapter-auth";
 import type { AgentMetadata, ToolPort } from "@afm/engine";
+import { proxySessionFetch, requestUrl } from "./proxy-session";
+import { MAX_AGENT_FILE_BYTES, limitBodies, limitResponses } from "./response-limit";
 
 interface McpProxyConfig {
   url: string;
 }
 
-export function createProxiedFetch(proxy: McpProxyConfig): typeof fetch {
-  return (input, init) => {
-    const targetUrl = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-    return fetch(effectiveUrl({ serverUrl: targetUrl, proxyUrl: proxy.url }), init);
-  };
+function proxyFetch(proxy: McpProxyConfig): typeof fetch {
+  return limitResponses(proxySessionFetch(proxy.url));
+}
+
+export function createProxiedFetch(proxy: McpProxyConfig, maxBytes?: number): typeof fetch {
+  const send = limitBodies(proxySessionFetch(proxy.url), maxBytes);
+  return (input, init) => send(effectiveUrl({ serverUrl: requestUrl(input), proxyUrl: proxy.url }), init);
 }
 
 const BUILD_TIME_PROXY_URL = import.meta.env.VITE_MCP_PROXY_URL;
@@ -37,6 +41,11 @@ export const defaultMcpProxyConfig: McpProxyConfig | null =
 
 export function proxyAwareFetch(): typeof fetch {
   return defaultMcpProxyConfig !== null ? createProxiedFetch(defaultMcpProxyConfig) : fetch;
+}
+
+export function agentFileFetch(): typeof fetch {
+  const proxy = defaultMcpProxyConfig;
+  return proxy === null ? () => Promise.reject(new McpProxyRequiredError()) : createProxiedFetch(proxy, MAX_AGENT_FILE_BYTES);
 }
 
 export class McpProxyRequiredError extends Error {
@@ -80,6 +89,7 @@ export function mcpServerPort(
         ? () => effectiveAuthDeps.onInteractiveAuthRejected?.(oauthProviderFrom(auth, transport.url))
         : undefined,
     proxyUrl: proxy.url,
+    fetchFn: proxyFetch(proxy),
     setupTimeoutMs,
   });
   if (server.tool_filter !== undefined) {
@@ -95,5 +105,10 @@ export function toolsFromMetadata(
   options: ToolSetupOptions = {},
 ): ToolPort {
   const servers = metadata.tools?.mcp ?? [];
-  return compositeToolPort(servers.flatMap((server) => mcpServerPort(server, proxy, authDeps, options) ?? []));
+  return compositeToolPort(
+    servers.flatMap((server) => {
+      const port = mcpServerPort(server, proxy, authDeps, options);
+      return port === null ? [] : [namespacedToolPort(port, server.name)];
+    }),
+  );
 }

@@ -17,6 +17,7 @@
 import type { SecretPort } from "./types";
 import { VariableResolutionError } from "./errors";
 import { splitFrontmatter } from "./parse";
+import { postsSecretsToTokenUrl } from "./schema";
 
 const VARIABLE = /\$\{([^}]+)\}/g;
 
@@ -94,7 +95,7 @@ export type SecretScope = "model" | "tool" | "other";
 export interface SecretUsage {
   name: string;
   scope: SecretScope;
-  host?: string;
+  address?: string;
   serverName?: string;
 }
 
@@ -113,7 +114,7 @@ export function scanSecretUsage(content: string): SecretUsage[] {
   const seen = new Set<string>();
 
   function record(usage: SecretUsage): void {
-    const key = `${usage.name}\u0000${usage.scope}\u0000${usage.host ?? ""}`;
+    const key = `${usage.name}\u0000${usage.scope}\u0000${usage.address ?? ""}`;
     if (seen.has(key)) return;
     seen.add(key);
     found.push(usage);
@@ -130,23 +131,28 @@ export function scanSecretUsage(content: string): SecretUsage[] {
     return names;
   }
 
-  function walk(value: unknown, visit: (name: string) => void): void {
+  function walk(value: unknown, visit: (name: string) => void, skipped?: Set<unknown>): void {
     if (typeof value === "string") {
       for (const name of namesIn(value)) visit(name);
       return;
     }
+    if (skipped?.has(value)) return;
     if (Array.isArray(value)) {
-      for (const item of value) walk(item, visit);
+      for (const item of value) walk(item, visit, skipped);
       return;
     }
     if (typeof value === "object" && value !== null) {
-      for (const item of Object.values(value)) walk(item, visit);
+      for (const item of Object.values(value)) walk(item, visit, skipped);
     }
   }
 
+  const credentialBlocks = new Set<unknown>();
+
   const model = frontmatter.model;
   if (typeof model === "object" && model !== null) {
-    walk((model as Record<string, unknown>).authentication, (name) => record({ name, scope: "model" }));
+    const authentication = (model as Record<string, unknown>).authentication;
+    credentialBlocks.add(authentication);
+    walk(authentication, (name) => record({ name, scope: "model" }));
   }
 
   const tools = frontmatter.tools;
@@ -162,33 +168,37 @@ export function scanSecretUsage(content: string): SecretUsage[] {
       ? (entry.transport as Record<string, unknown>)
       : {};
     const serverName = typeof entry.name === "string" ? entry.name : undefined;
-    const host = hostOf(transport.url);
+    const address = secretDestination(transport.url, transport.authentication);
 
-    walk(transport.authentication, (name) => record({ name, scope: "tool", host, serverName }));
+    credentialBlocks.add(transport.authentication);
+    walk(transport.authentication, (name) => record({ name, scope: "tool", address, serverName }));
   }
 
-  const credentialNames = new Set(found.map((usage) => usage.name));
-  walk(frontmatter, (name) => {
-    if (credentialNames.has(name)) return;
-    record({ name, scope: "other" });
-  });
+  walk(frontmatter, (name) => record({ name, scope: "other" }), credentialBlocks);
 
   return found;
 }
 
-function hostOf(url: unknown): string | undefined {
+export function serverAddress(url: unknown): string | undefined {
   if (typeof url !== "string") return undefined;
   try {
-    return new URL(url).host;
+    const { origin, pathname, search } = new URL(url);
+    return origin === "null" ? undefined : `${origin}${pathname}${search}`;
   } catch {
     return undefined;
   }
+}
+
+export function secretDestination(serverUrl: unknown, authentication: unknown): string | undefined {
+  const auth = typeof authentication === "object" && authentication !== null ? (authentication as Record<string, unknown>) : {};
+  const sentToTokenUrl = typeof auth.type === "string" && auth.type.toLowerCase() === "oauth2" && postsSecretsToTokenUrl(auth.grant_type);
+  return serverAddress(sentToTokenUrl ? auth.token_url : serverUrl);
 }
 
 export function referencedSecretNames(content: string): string[] {
   return [...new Set(scanSecretUsage(content).map((usage) => usage.name))];
 }
 
-export function secretUseKey(name: string, host: string | undefined): string {
-  return `${name}@${host ?? "unknown"}`;
+export function secretUseKey(name: string, address: string | undefined): string {
+  return `${name}@${address ?? "unknown"}`;
 }

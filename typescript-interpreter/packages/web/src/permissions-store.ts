@@ -21,7 +21,6 @@ export interface PermissionEntry {
   toolName: string;
   serverId?: string;
   rule: PermissionRule;
-  risk: "read" | "write";
   updatedAt: number;
 }
 
@@ -30,11 +29,10 @@ export function setPermission(
   agentId: string,
   toolName: string,
   rule: PermissionRule,
-  risk: "read" | "write",
   serverId?: string,
 ): PermissionEntry[] {
   const rest = entries.filter((e) => !(e.agentId === agentId && e.toolName === toolName && e.serverId === serverId));
-  return [...rest, { agentId, toolName, serverId, rule, risk, updatedAt: Date.now() }];
+  return [...rest, { agentId, toolName, serverId, rule, updatedAt: Date.now() }];
 }
 
 export function resetPermissions(entries: PermissionEntry[], agentId?: string): PermissionEntry[] {
@@ -55,39 +53,4 @@ function agentKeyFor(content: string): string {
 
 export function permissionScopeFor(agentId: string | null, content: string): string {
   return agentId !== null ? `agent:${agentId}` : agentKeyFor(content);
-}
-
-export type ToolRisk = "read" | "write";
-
-const READ_WORDS = ["get", "list", "read", "fetch", "search", "query", "describe", "show", "view", "find", "lookup"];
-const WRITE_WORDS = [
-  "write",
-  "delete",
-  "remove",
-  "create",
-  "update",
-  "modify",
-  "send",
-  "post",
-  "put",
-  "patch",
-  "execute",
-  "run",
-  "insert",
-  "drop",
-  "set",
-  "edit",
-  "publish",
-  "deploy",
-];
-
-function matchesAny(text: string, words: string[]): boolean {
-  return words.some((word) => text.includes(word));
-}
-
-export function classifyToolRisk(name: string, description?: string): ToolRisk {
-  const text = `${name} ${description ?? ""}`.toLowerCase();
-  if (matchesAny(text, WRITE_WORDS)) return "write";
-  if (matchesAny(text, READ_WORDS)) return "read";
-  return "write";
 }

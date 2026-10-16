@@ -19,9 +19,17 @@ export {
   authorizationCodeProviderKey,
   authorizationCodeRefreshKey,
   createAuthorizationCodeSession,
+  discoverSignInServer,
   isInteractiveOAuth,
   oauthProviderFrom,
 } from "./oauth";
-export type { AuthorizationCodeSession, KeyValueStore, OAuthProviderRef } from "./oauth";
-export { discoverProtectedResource, discoverAuthorizationServer, registerClient } from "./discovery";
+export type { AuthorizationCodeSession, KeyValueStore, OAuthProviderRef, SignInServer } from "./oauth";
+export {
+  SignInRefusedError,
+  discoverProtectedResource,
+  discoverAuthorizationServer,
+  discoverSignIn,
+  registerClient,
+  resolveClientId,
+} from "./discovery";
 export type { AuthorizationServerMetadata } from "./discovery";

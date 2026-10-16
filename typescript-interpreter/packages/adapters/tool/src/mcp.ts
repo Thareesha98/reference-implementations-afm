@@ -103,6 +103,7 @@ export function createDynamicMcpAuthHeaderProvider(
 export interface McpHttpOptions {
   serverUrl: string;
   proxyUrl?: string;
+  fetchFn?: typeof fetch;
   headers?: Record<string, string>;
   authHeaderProvider?: McpAuthHeaderProvider;
   onAuthRejected?: () => void;
@@ -223,25 +224,29 @@ export function mcpToolPort(options: McpHttpOptions): ToolPort {
     }
   }
 
-  async function withClient<T>(work: (client: Client) => Promise<T>): Promise<T> {
+  async function withClient<T>(work: (client: Client) => Promise<T>, repeatable: boolean): Promise<T> {
     try {
       return await work(await getClient());
     } catch (error) {
       if (!(error instanceof StreamableHTTPError && error.code === 404)) throw error;
       await dispose();
+      if (!repeatable) {
+        throw new Error("The server's session had ended (HTTP 404). The call was not repeated; the next call starts a new session.");
+      }
       return work(await getClient());
     }
   }
 
   return {
     async list(): Promise<ToolDescriptor[]> {
-      const result = await withClient((client) => client.listTools(undefined, { timeout: setupTimeout }));
+      const result = await withClient((client) => client.listTools(undefined, { timeout: setupTimeout }), true);
       return result.tools.map((tool) => toToolDescriptor(tool, options.serverUrl));
     },
 
     async execute(call: ToolCall, signal: AbortSignal): Promise<ToolResult> {
-      const result = await withClient((client) =>
-        client.callTool({ name: call.name, arguments: (call.args ?? {}) as Record<string, unknown> }, undefined, { signal }),
+      const result = await withClient(
+        (client) => client.callTool({ name: call.name, arguments: (call.args ?? {}) as Record<string, unknown> }, undefined, { signal }),
+        false,
       );
       return toToolResult({
         content: result.content,
@@ -258,11 +263,12 @@ async function connect(options: McpHttpOptions, setupTimeout: number): Promise<C
   const staticHeaders: Record<string, string> = { ...options.headers };
 
   const url = effectiveUrl(options);
+  const fetchFn = options.fetchFn ?? fetch;
   const transport =
     options.authHeaderProvider === undefined
-      ? new StreamableHTTPClientTransport(url, { requestInit: { headers: staticHeaders } })
+      ? new StreamableHTTPClientTransport(url, { requestInit: { headers: staticHeaders }, fetch: fetchFn })
       : new StreamableHTTPClientTransport(url, {
-          fetch: dynamicAuthFetch(staticHeaders, options.authHeaderProvider, options.onAuthRejected),
+          fetch: dynamicAuthFetch(fetchFn, staticHeaders, options.authHeaderProvider, options.onAuthRejected),
         });
 
   const client = new Client(
@@ -274,6 +280,7 @@ async function connect(options: McpHttpOptions, setupTimeout: number): Promise<C
 }
 
 function dynamicAuthFetch(
+  fetchFn: typeof fetch,
   staticHeaders: Record<string, string>,
   authHeaderProvider: McpAuthHeaderProvider,
   onAuthRejected?: () => void,
@@ -283,7 +290,7 @@ function dynamicAuthFetch(
     const headers = new Headers(init?.headers);
     for (const [name, value] of Object.entries(staticHeaders)) headers.set(name, value);
     for (const [name, value] of Object.entries(dynamicHeaders)) headers.set(name, value);
-    const response = await fetch(url, { ...init, headers });
+    const response = await fetchFn(url, { ...init, headers });
     if (response.status === 401) {
       onAuthRejected?.();
     }

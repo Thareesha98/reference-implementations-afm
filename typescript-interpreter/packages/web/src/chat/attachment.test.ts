@@ -43,6 +43,10 @@ describe("attachment helpers", () => {
     expect(describeAttachment({ name: "unknown.bin" })).toBe("File");
   });
 
+  it("says where a PDF that was only partly read stopped", () => {
+    expect(describeAttachment({ name: "big.pdf", pages: 812, note: "stopped after page 500 of 812" })).toBe("PDF · 812 pages · stopped after page 500 of 812");
+  });
+
   it("reads the current attachment shape", () => {
     const message: AttachmentMessage = {
       kind: "attachment",

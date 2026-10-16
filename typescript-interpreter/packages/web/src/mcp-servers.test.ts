@@ -15,7 +15,7 @@
 // under the License.
 
 import { describe, it, expect } from "vitest";
-import { searchDirectory, resolveMcpServerAuth, resolveDirectoryAuth } from "./mcp-servers";
+import { isListedServer, searchDirectory, resolveMcpServerAuth, resolveDirectoryAuth } from "./mcp-servers";
 import { DIRECTORY_ENTRIES } from "./mcp-directory";
 import type { DirectoryEntry, OAuthSignIn } from "./mcp-directory";
 
@@ -181,7 +181,7 @@ describe("resolveMcpServerAuth", () => {
   it.each([
     ["does not list PKCE methods", undefined],
     ["lists only plain", ["plain"]],
-  ])("returns null when the authorization server %s", async (_label, methods) => {
+  ])("refuses a server whose authorization server %s", async (_label, methods) => {
     const { fn } = routedFetch({
       "https://mcp.linear.app/mcp": { status: 401, headers: { "www-authenticate": LINEAR_CHALLENGE } },
       "https://mcp.linear.app/.well-known/oauth-protected-resource/mcp": { status: 200, json: LINEAR_PRM },
@@ -190,7 +190,9 @@ describe("resolveMcpServerAuth", () => {
         json: { ...LINEAR_AS_METADATA, code_challenge_methods_supported: methods },
       },
     });
-    expect(await resolveMcpServerAuth("https://mcp.linear.app/mcp", fn, CIMD_CLIENT_ID, REDIRECT_URI)).toBeNull();
+    await expect(resolveMcpServerAuth("https://mcp.linear.app/mcp", fn, CIMD_CLIENT_ID, REDIRECT_URI)).rejects.toThrow(
+      /authorization server publishes no metadata that passes the checks/,
+    );
   });
 
   it("registers a client via DCR when the AS has a registration_endpoint but no CIMD support", async () => {
@@ -275,7 +277,7 @@ describe("resolveMcpServerAuth", () => {
     expect(result?.clientId).toBe("");
   });
 
-  it("falls back to the server's own origin as its authorization server when it publishes no PRM at all - Atlassian's real shape", async () => {
+  it("refuses a server that publishes no PRM, even when its own address answers as an authorization server - Atlassian's older address", async () => {
     const { fn, requested } = routedFetch({
       "https://mcp.atlassian.com/v1/mcp": {
         status: 401,
@@ -295,25 +297,21 @@ describe("resolveMcpServerAuth", () => {
       },
       "https://mcp.atlassian.com/v1/register": { status: 201, json: { client_id: "atlassian-dcr-client" } },
     });
-    const result = await resolveMcpServerAuth("https://mcp.atlassian.com/v1/mcp", fn, CIMD_CLIENT_ID, REDIRECT_URI);
-    expect(result).toEqual({
-      authorizeUrl: "https://mcp.atlassian.com/v1/authorize",
-      tokenUrl: "https://mcp.atlassian.com/v1/token",
-      clientId: "atlassian-dcr-client",
-      scopes: undefined,
-    });
-    expect(requested).toContain("https://mcp.atlassian.com/.well-known/oauth-authorization-server");
+    await expect(resolveMcpServerAuth("https://mcp.atlassian.com/v1/mcp", fn, CIMD_CLIENT_ID, REDIRECT_URI)).rejects.toThrow(
+      /publishes no sign-in metadata.*current one/,
+    );
+    expect(requested).not.toContain("https://mcp.atlassian.com/.well-known/oauth-authorization-server");
+    expect(requested).not.toContain("https://mcp.atlassian.com/v1/register");
   });
 
-  it("still returns null for a server with no PRM and no authorization server of its own", async () => {
+  it("refuses a server that publishes no PRM at all", async () => {
     const { fn } = routedFetch({
       "https://mcp.example.com/mcp": { status: 401 },
     });
-    const result = await resolveMcpServerAuth("https://mcp.example.com/mcp", fn, CIMD_CLIENT_ID, REDIRECT_URI);
-    expect(result).toBeNull();
+    await expect(resolveMcpServerAuth("https://mcp.example.com/mcp", fn, CIMD_CLIENT_ID, REDIRECT_URI)).rejects.toThrow(/publishes no sign-in metadata/);
   });
 
-  it("returns null when the resource server's authorization server can't be resolved at all", async () => {
+  it("refuses a server whose authorization server can't be resolved at all", async () => {
     const { fn } = routedFetch({
       "https://mcp.example.com/mcp": {
         status: 401,
@@ -324,8 +322,27 @@ describe("resolveMcpServerAuth", () => {
         json: { resource: "https://mcp.example.com/mcp", authorization_servers: ["https://as.example.com"] },
       },
     });
-    const result = await resolveMcpServerAuth("https://mcp.example.com/mcp", fn, CIMD_CLIENT_ID, REDIRECT_URI);
-    expect(result).toBeNull();
+    await expect(resolveMcpServerAuth("https://mcp.example.com/mcp", fn, CIMD_CLIENT_ID, REDIRECT_URI)).rejects.toThrow(
+      /authorization server publishes no metadata/,
+    );
+  });
+});
+
+describe("isListedServer", () => {
+  it("recognises the exact address of a directory entry", () => {
+    expect(isListedServer(DIRECTORY_ENTRIES[0]!.url)).toBe(true);
+  });
+
+  it.each([
+    ["a trailing slash", (url: string) => `${url}/`],
+    ["another path", (url: string) => `${url}/other`],
+    ["another host", (url: string) => url.replace("https://", "https://x.")],
+  ])("does not recognise an address with %s", (_label, change) => {
+    expect(isListedServer(change(DIRECTORY_ENTRIES[0]!.url))).toBe(false);
+  });
+
+  it("does not recognise an address that is not in the directory", () => {
+    expect(isListedServer("https://mcp.example.com/mcp")).toBe(false);
   });
 });
 

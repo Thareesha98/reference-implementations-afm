@@ -58,7 +58,6 @@ export function SharePanel({ agentSource }: Props) {
   const normalized = fileUrl.trim() === "" ? null : normalizeAgentFileUrl(fileUrl);
   const rewritten = normalized !== null && normalized.ok && normalized.url !== fileUrl.trim();
   const fileKeys = literalCredentialFields(agentSource);
-  const literalKeys = method === "inline" ? fileKeys : [];
   const link = buildShareLink(
     origin,
     method,
@@ -147,12 +146,12 @@ export function SharePanel({ agentSource }: Props) {
             >
               {copied ? "Copied" : "Copy link"}
             </button>
-            {literalKeys.length === 0 ? (
+            {fileKeys.length === 0 ? (
               <p className="u-hint">Your API key is never included.</p>
             ) : (
               <p className="u-hint u-warn-note">
-                This file has a key written into it ({literalKeys.join(", ")}), and the link carries the whole
-                file. Replace it with a <code>{"${env:NAME}"}</code> reference first.
+                This file has a key written into it ({fileKeys.join(", ")}), and anyone with the link can read it.
+                Replace it with a <code>{"${env:NAME}"}</code> reference first.
               </p>
             )}
           </div>

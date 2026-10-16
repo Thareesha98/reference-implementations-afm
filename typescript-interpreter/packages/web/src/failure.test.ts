@@ -31,6 +31,13 @@ describe("failureOf", () => {
     expect(failureOf(withCode(502)).kind).toBe("unreachable");
   });
 
+  it("tells a server that answers with a redirect from one that cannot be reached", () => {
+    const refusal = 'Streamable HTTP error: Error POSTing to endpoint: {"error":"The target answered with a redirect, which is not followed for a request with a body or credentials"}';
+    expect(failureOf(withCode(502, refusal))).toEqual({ kind: "redirected", message: refusal });
+    expect(failureOf(withCode(502, 'Error POSTing to endpoint: {"error":"Upstream request failed"}')).kind).toBe("unreachable");
+    expect(failureOf(withCode(401, refusal)).kind).toBe("rejected");
+  });
+
   it("reads the status of an error that wraps another", () => {
     expect(failureOf(Object.assign(new Error("wrapped"), { cause: withCode(401) })).kind).toBe("rejected");
   });

@@ -154,6 +154,12 @@ describe("relayOAuthCallback", () => {
     expect(win.close).toHaveBeenCalled();
   });
 
+  it("passes the issuer along with a refusal too", () => {
+    callbackPage("?error=access_denied&state=xyz&iss=https%3A%2F%2Fauth.example.com");
+    relayOAuthCallback();
+    expect(FakeChannel.all[0]?.posted).toEqual([{ error: "access_denied", state: "xyz", iss: "https://auth.example.com" }]);
+  });
+
   it("says the window can be closed when the browser will not close it", () => {
     const { body } = callbackPage("?code=abc&state=xyz");
     relayOAuthCallback();
@@ -188,9 +194,9 @@ describe("createOAuthSignIns", () => {
     win.open.mockReturnValue(popup);
     vi.stubGlobal("window", win);
     const posted: ClientMessage[] = [];
-    const deps = { post: (message: ClientMessage) => void posted.push(message), onPopupBlocked: vi.fn(), onFailure: vi.fn() };
+    const deps = { post: (message: ClientMessage) => void posted.push(message) };
     const signIns = createOAuthSignIns(deps);
-    const result = signIns.start(provider, false);
+    const result = signIns.start(provider, { listed: true });
     const startId = (posted[0] as { id: string }).id;
     signIns.onAuthorizeUrl(startId, AUTHORIZE);
     return { popup, win, posted, deps, signIns, result, startId };
@@ -213,7 +219,34 @@ describe("createOAuthSignIns", () => {
     expect(posted.at(-1)).toEqual({ type: "oauth-signin-code", id: startId, code: "abc", state: "s" });
 
     signIns.onDone(startId, true);
-    expect(await result).toBe(true);
+    expect(await result).toEqual({ status: "signed-in" });
+  });
+
+  it("tells the worker whether the server is in the directory and which host the user agreed to", async () => {
+    const popup = fakePopup();
+    const win = fakeWindow();
+    win.open.mockReturnValue(popup);
+    vi.stubGlobal("window", win);
+    const posted: ClientMessage[] = [];
+    void createOAuthSignIns({ post: (message) => void posted.push(message) }).start(provider, { listed: false, confirmedHost: "auth.example.com" });
+    expect(posted[0]).toMatchObject({ type: "oauth-signin-start", provider, listed: false, confirmedHost: "auth.example.com" });
+  });
+
+  it("says the pop-up was blocked, and asks the worker for nothing", async () => {
+    const win = fakeWindow();
+    win.open.mockReturnValue(null);
+    vi.stubGlobal("window", win);
+    const posted: ClientMessage[] = [];
+    const outcome = await createOAuthSignIns({ post: (message) => void posted.push(message) }).start(provider, { listed: true });
+    expect(outcome).toEqual({ status: "failed", reason: "Allow pop-ups for this site to sign in." });
+    expect(posted).toHaveLength(0);
+  });
+
+  it("closes the pop-up and hands over the provider's host when the user has to decide first", async () => {
+    const { popup, signIns, result, startId } = setup();
+    signIns.onConfirm(startId, "auth.example.com");
+    expect(await result).toEqual({ status: "confirm", host: "auth.example.com" });
+    expect(popup.close).toHaveBeenCalled();
   });
 
   it("still hears the answer when the provider has cut the popup loose and it reads as closed", async () => {
@@ -223,7 +256,7 @@ describe("createOAuthSignIns", () => {
     await settle();
     expect(posted.at(-1)).toEqual({ type: "oauth-signin-code", id: startId, code: "abc", state: "s" });
     signIns.onDone(startId, true);
-    expect(await result).toBe(true);
+    expect(await result).toEqual({ status: "signed-in" });
   });
 
   it("relays the issuer to the worker when the callback reports one", async () => {
@@ -240,27 +273,33 @@ describe("createOAuthSignIns", () => {
     expect(posted.at(-1)).not.toHaveProperty("iss");
   });
 
-  it("closes the popup and says so when the provider refuses", async () => {
-    const { popup, posted, deps, result } = setup();
-    FakeChannel.deliver({ error: "access_denied", state: "s" });
-    expect(await result).toBe(false);
-    expect(popup.close).toHaveBeenCalled();
-    expect(deps.onFailure).toHaveBeenCalledWith(expect.stringContaining("access_denied"));
+  it("hands the provider's refusal to the worker to check, and shows nothing of it yet", async () => {
+    const { posted, startId } = setup();
+    FakeChannel.deliver({ error: "access_denied", state: "s", iss: "https://auth.example.com" });
+    await settle();
+    expect(posted.at(-1)).toEqual({ type: "oauth-signin-error", id: startId, error: "access_denied", state: "s", iss: "https://auth.example.com" });
     expect(posted.some((message) => message.type === "oauth-signin-code")).toBe(false);
   });
 
+  it("gives the reason the worker reports once the refusal has been checked, and closes the popup", async () => {
+    const { popup, signIns, result, startId } = setup();
+    FakeChannel.deliver({ error: "access_denied", state: "s" });
+    await settle();
+    signIns.onDone(startId, false, "The provider declined the sign-in (access_denied).");
+    expect(await result).toEqual({ status: "failed", reason: "Sign-in failed: The provider declined the sign-in (access_denied)." });
+    expect(popup.close).toHaveBeenCalled();
+  });
+
   it("tells the user why the worker could not finish the sign-in", async () => {
-    const { deps, signIns, result, startId } = setup();
+    const { signIns, result, startId } = setup();
     signIns.onDone(startId, false, "OAuth2 sign-in state mismatch");
-    expect(await result).toBe(false);
-    expect(deps.onFailure).toHaveBeenCalledWith("Sign-in failed: OAuth2 sign-in state mismatch");
+    expect(await result).toEqual({ status: "failed", reason: "Sign-in failed: OAuth2 sign-in state mismatch" });
   });
 
   it("gives up quietly when no answer ever comes", async () => {
-    const { win, deps, result } = setup();
+    const { win, result } = setup();
     for (const timeout of win.timeouts) timeout();
-    expect(await result).toBe(false);
-    expect(deps.onFailure).not.toHaveBeenCalled();
+    expect(await result).toEqual({ status: "failed" });
   });
 
   it("ignores an answer that belongs to a different sign-in", async () => {
@@ -271,7 +310,7 @@ describe("createOAuthSignIns", () => {
     await settle();
     expect(posted.filter((message) => message.type === "oauth-signin-code")).toHaveLength(0);
     signIns.onDone(startId, false);
-    expect(await result).toBe(false);
+    expect(await result).toEqual({ status: "failed" });
   });
 
   it("stops listening once the answer has arrived", async () => {

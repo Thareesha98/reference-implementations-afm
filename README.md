@@ -38,7 +38,7 @@ reference-implementations-afm/
 ├── ballerina-interpreter/          # Ballerina-based AFM interpreter
 ├── python-interpreter/             # Python-based AFM interpreters (plugin-based)
 │   └── packages/afm-langchain/     # LangChain execution backend
-├── typescript-interpreter/         # Browser-based AFM interpreter (web app + MCP proxy)
+├── typescript-interpreter/         # Browser-based AFM interpreter (web app)
 └── .github/workflows/              # CI/CD
 ```
 

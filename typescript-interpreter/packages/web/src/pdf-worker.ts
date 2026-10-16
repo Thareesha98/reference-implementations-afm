@@ -14,28 +14,20 @@
 // specific language governing permissions and limitations
 // under the License.
 
-const CREDENTIAL_KEY = "afm.passkey.credential";
+import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
+import { startBlobWorker } from "./blob-worker";
 
-export function rememberCredentialId(id: Uint8Array<ArrayBuffer>): void {
-  try {
-    localStorage.setItem(CREDENTIAL_KEY, btoa(String.fromCharCode(...id)));
-  } catch {
-  }
-}
+let started: Promise<void> | null = null;
 
-export function knownCredentialId(): Uint8Array<ArrayBuffer> | null {
-  try {
-    const stored = localStorage.getItem(CREDENTIAL_KEY);
-    if (stored === null || stored === "") return null;
-    return Uint8Array.from(atob(stored), (character) => character.charCodeAt(0));
-  } catch {
-    return null;
-  }
-}
-
-export function forgetCredentialId(): void {
-  try {
-    localStorage.removeItem(CREDENTIAL_KEY);
-  } catch {
-  }
+export function ensurePdfWorker(): Promise<void> {
+  started ??= startBlobWorker(new URL("pdfjs-dist/legacy/build/pdf.worker.min.mjs", import.meta.url)).then(
+    (worker) => {
+      pdfjsLib.GlobalWorkerOptions.workerPort = worker;
+    },
+    (error: unknown) => {
+      started = null;
+      throw error;
+    },
+  );
+  return started;
 }

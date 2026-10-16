@@ -15,6 +15,14 @@
 // under the License.
 
 export { inPageToolPort, compositeToolPort, filteredToolPort } from "./tool-ports";
+export {
+  MAX_TOOL_NAME_LENGTH,
+  ToolNameError,
+  displayToolName,
+  namespacedToolName,
+  namespacedToolPort,
+  serverToolId,
+} from "./tool-names";
 export type { InPageTool, ToolFilter } from "./tool-ports";
 export { mcpToolPort, effectiveUrl, mcpAuthHeaders, isDynamicAuthType, createDynamicMcpAuthHeaderProvider } from "./mcp";
 export type { McpDynamicAuthDeps } from "./mcp";

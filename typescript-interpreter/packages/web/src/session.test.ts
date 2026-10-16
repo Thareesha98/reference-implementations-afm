@@ -16,7 +16,7 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { AgentSession } from "./session";
-import { inPageToolPort } from "@afm/adapter-tool";
+import { compositeToolPort, inPageToolPort, namespacedToolPort } from "@afm/adapter-tool";
 import { configSecretPort } from "@afm/adapter-secret";
 import { allowAllPermissions } from "@afm/engine";
 import type { ChatMessage, ModelPort } from "@afm/engine";
@@ -725,14 +725,17 @@ i
     );
 
   function serverTools(url: string) {
-    return {
-      async list() {
-        return [{ name: "echo", inputSchema: { type: "object" as const }, serverId: url }];
+    return namespacedToolPort(
+      {
+        async list() {
+          return [{ name: "echo", inputSchema: { type: "object" as const }, serverId: url }];
+        },
+        async execute() {
+          return { ok: true, content: "echoed" };
+        },
       },
-      async execute() {
-        return { ok: true, content: "echoed" };
-      },
-    };
+      "docs",
+    );
   }
 
   function callingEcho() {
@@ -740,7 +743,7 @@ i
     return async () => ({
       async *stream() {
         turn += 1;
-        if (turn % 2 === 1) yield { type: "tool-call" as const, id: `c${turn}`, name: "echo", args: {} };
+        if (turn % 2 === 1) yield { type: "tool-call" as const, id: `c${turn}`, name: "docs__echo", args: {} };
         else yield { type: "text-delta" as const, text: "done" };
         yield { type: "finish" as const, reason: "stop" as const };
       },
@@ -783,21 +786,21 @@ i
     const { session, asked } = sessionOn(DOCS);
     await session.load(listing(DOCS, ["something_else"]));
     await session.send("go");
-    expect(asked).toEqual([`${DOCS}::echo`]);
+    expect(asked).toEqual([`${DOCS}::docs__echo`]);
   });
 
   it("asks about every tool on a server whose tools the file does not list", async () => {
     const { session, asked } = sessionOn(DOCS);
     await session.load(listing(DOCS));
     await session.send("go");
-    expect(asked).toEqual([`${DOCS}::echo`]);
+    expect(asked).toEqual([`${DOCS}::docs__echo`]);
   });
 
   it("does not let a tool allowed on one server be run on another without asking", async () => {
     const { session, asked } = sessionOn(OTHER);
     await session.load(listing(DOCS, ["echo"]));
     await session.send("go");
-    expect(asked).toEqual([`${OTHER}::echo`]);
+    expect(asked).toEqual([`${OTHER}::docs__echo`]);
   });
 
   it("stops allowing what an earlier file listed once another agent is loaded", async () => {
@@ -805,7 +808,7 @@ i
     await session.load(listing(DOCS, ["echo"]));
     await session.load(listing(DOCS, ["something_else"]));
     await session.send("go");
-    expect(asked).toEqual([`${DOCS}::echo`]);
+    expect(asked).toEqual([`${DOCS}::docs__echo`]);
   });
 
   it("denies a tool the person denied, and tells the model so", async () => {
@@ -813,5 +816,93 @@ i
     await session.load(listing(DOCS, ["something_else"]));
     await session.send("go");
     expect(toolResult(emitted)).toMatchObject({ ok: false, content: "Tool call was denied by the user." });
+  });
+});
+
+describe("AgentSession tool names", () => {
+  const agentWithServers = (names: string[]) => `---
+name: Tester
+interfaces:
+  - type: webchat
+tools:
+  mcp:
+${names.map((name, index) => `    - name: ${name}\n      transport:\n        type: http\n        url: https://s${index}.example.com/mcp`).join("\n")}
+---
+
+# Role
+r
+
+# Instructions
+i
+`;
+
+  const offering = (url: string, tools: string[]) => ({
+    async list() {
+      return tools.map((name) => ({ name, inputSchema: { type: "object" as const }, serverId: url }));
+    },
+    async execute() {
+      return { ok: true, content: "" };
+    },
+  });
+
+  function sessionWith(createTools: () => ReturnType<typeof compositeToolPort>) {
+    const emitted: ServerMessage[] = [];
+    const session = new AgentSession({
+      createModel: async () => replyingModel(),
+      createTools,
+      filesTools: inPageToolPort([]),
+      describeAttachedFiles: () => "no files attached",
+      secrets: configSecretPort({}),
+      permission: allowAllPermissions,
+      emit: (message) => {
+        if (message.type !== "load-step") emitted.push(message);
+      },
+    });
+    return { session, emitted };
+  }
+
+  it("lists each server's tools under their prefixed names", async () => {
+    const { session, emitted } = sessionWith(() =>
+      compositeToolPort([
+        namespacedToolPort(offering("https://s0.example.com/mcp", ["search"]), "first"),
+        namespacedToolPort(offering("https://s1.example.com/mcp", ["search"]), "second"),
+      ]),
+    );
+    await session.load(agentWithServers(["first", "second"]));
+    expect(emitted.find((message) => message.type === "tools-listed")).toMatchObject({
+      tools: [{ name: "first__search" }, { name: "second__search" }],
+    });
+    expect(emitted.some((message) => message.type === "agent-not-ready")).toBe(false);
+  });
+
+  it("is not ready when two servers would offer the same tool under the same name, and says which servers and tool", async () => {
+    const { session, emitted } = sessionWith(() =>
+      compositeToolPort([
+        namespacedToolPort(offering("https://s0.example.com/mcp", ["search"]), "a_b"),
+        namespacedToolPort(offering("https://s1.example.com/mcp", ["search"]), "a-b"),
+      ]),
+    );
+    await session.load(agentWithServers(["a_b", "a-b"]));
+    const notReady = emitted.find((message) => message.type === "agent-not-ready");
+    expect(notReady).toMatchObject({ reason: expect.stringMatching(/'a_b' and 'a-b'.*'search'/) });
+    expect(emitted.some((message) => message.type === "tools-listed")).toBe(false);
+    await session.send("hello");
+    expect(emitted.at(-1)).toMatchObject({ type: "error" });
+  });
+
+  it("is not ready when a prefixed name is longer than the providers allow", async () => {
+    const long = "t".repeat(60);
+    const { session, emitted } = sessionWith(() => compositeToolPort([namespacedToolPort(offering("https://s0.example.com/mcp", [long]), "docs")]));
+    await session.load(agentWithServers(["docs"]));
+    expect(emitted.find((message) => message.type === "agent-not-ready")).toMatchObject({
+      reason: expect.stringContaining("longer than the 64 characters"),
+    });
+  });
+
+  it("stays ready when a server cannot be reached, because that is not a naming problem", async () => {
+    const unreachable = { async list(): Promise<never> { throw new Error("unreachable"); }, async execute() { return { ok: false, content: "" }; } };
+    const { session, emitted } = sessionWith(() => compositeToolPort([namespacedToolPort(unreachable, "docs")]));
+    await session.load(agentWithServers(["docs"]));
+    expect(emitted.some((message) => message.type === "agent-not-ready")).toBe(false);
   });
 });

@@ -14,9 +14,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import type { AgentMetadata } from "@afm/engine";
-import { shareChecks } from "./SharePanel";
+import { SharePanel, shareChecks } from "./SharePanel";
 
 const done = (checks: ReturnType<typeof shareChecks>) => checks.filter((check) => check.done).map((check) => check.label);
 
@@ -40,5 +42,39 @@ describe("shareChecks", () => {
   it("counts blank details as missing", () => {
     const metadata = { description: "  ", authors: [], license: "", provider: {} } as AgentMetadata;
     expect(done(shareChecks(metadata))).toEqual([]);
+  });
+});
+
+describe("the share panel", () => {
+  const file = (apiKey: string) => `---
+name: Demo
+model:
+  provider: openai
+  authentication:
+    type: api-key
+    api_key: ${apiKey}
+---
+
+# Role
+r
+
+# Instructions
+i
+`;
+  const panel = (agentSource: string) => renderToStaticMarkup(createElement(SharePanel, { agentSource }));
+
+  beforeEach(() => vi.stubGlobal("window", { location: { origin: "https://afm.example" } }));
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("warns about a key written into the file, for the hosted file it opens with as well as for the link that carries it", () => {
+    const html = panel(file("sk-typed-in"));
+    expect(html).toContain("This file has a key written into it (api_key), and anyone with the link can read it.");
+    expect(html).not.toContain("Your API key is never included.");
+  });
+
+  it("says no key is included when the file only refers to one", () => {
+    const html = panel(file("\${env:OPENAI_API_KEY}"));
+    expect(html).toContain("Your API key is never included.");
+    expect(html).not.toContain("written into it");
   });
 });

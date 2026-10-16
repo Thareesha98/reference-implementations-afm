@@ -17,24 +17,29 @@
 import {
   authorizationCodeProviderKey,
   createAuthorizationCodeSession,
+  discoverSignInServer,
   type AuthorizationCodeSession,
   type KeyValueStore,
   type OAuthProviderRef,
 } from "@afm/adapter-auth";
 import { SignInRequiredError } from "./failure";
+import type { SignInVetting } from "./protocol";
 
 export interface OAuthManagerDeps {
   fetchFn: typeof fetch;
   redirectUri: string;
+  cimdClientId?: string;
   refreshStore: KeyValueStore;
   emitAuthorizeUrl: (id: string, url: string) => void;
+  emitSignInConfirm: (id: string, host: string) => void;
   emitSignInResult: (id: string, ok: boolean, error?: string) => void;
 }
 
 export interface OAuthManager {
   getAccessToken(provider: OAuthProviderRef): Promise<string>;
-  startSignIn(id: string, provider: OAuthProviderRef): Promise<void>;
+  startSignIn(id: string, provider: OAuthProviderRef, vetting: SignInVetting): Promise<void>;
   completeSignIn(id: string, code: string, state: string, iss?: string): Promise<void>;
+  declineSignIn(id: string, error: string, state: string, iss?: string): void;
   signOut(provider: OAuthProviderRef): void;
 }
 
@@ -54,17 +59,22 @@ export function createOAuthManager(deps: OAuthManagerDeps): OAuthManager {
 
   return {
     async getAccessToken(provider) {
-      const session = sessionFor(provider);
-      if (!session.hasSession()) await session.restore(deps.fetchFn).catch(() => false);
-      const token = await session.getAccessToken(deps.fetchFn);
+      const token = await sessionFor(provider).getAccessToken(deps.fetchFn);
       if (token !== null) return token;
       throw new SignInRequiredError();
     },
 
-    async startSignIn(id, provider) {
+    async startSignIn(id, provider, vetting) {
       inFlight.set(id, provider);
       try {
-        await sessionFor(provider).startSignIn((url) => deps.emitAuthorizeUrl(id, url));
+        const server = await discoverSignInServer(provider, deps);
+        const host = new URL(server.issuer).host;
+        if (!vetting.listed && !server.issuerSent && vetting.confirmedHost !== host) {
+          inFlight.delete(id);
+          deps.emitSignInConfirm(id, host);
+          return;
+        }
+        await sessionFor(provider).startSignIn(server, (url) => deps.emitAuthorizeUrl(id, url));
       } catch (error) {
         inFlight.delete(id);
         deps.emitSignInResult(id, false, error instanceof Error ? error.message : String(error));
@@ -83,6 +93,21 @@ export function createOAuthManager(deps: OAuthManagerDeps): OAuthManager {
         deps.emitSignInResult(id, true);
       } catch (error) {
         deps.emitSignInResult(id, false, error instanceof Error ? error.message : String(error));
+      }
+    },
+
+    declineSignIn(id, error, state, iss) {
+      const provider = inFlight.get(id);
+      inFlight.delete(id);
+      if (provider === undefined) {
+        deps.emitSignInResult(id, false, "This sign-in is no longer waiting.");
+        return;
+      }
+      try {
+        sessionFor(provider).declineSignIn(state, iss);
+        deps.emitSignInResult(id, false, `The provider declined the sign-in (${error.slice(0, 80)}).`);
+      } catch (refusal) {
+        deps.emitSignInResult(id, false, refusal instanceof Error ? refusal.message : String(refusal));
       }
     },
 

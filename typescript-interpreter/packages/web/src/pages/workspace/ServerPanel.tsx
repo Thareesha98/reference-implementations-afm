@@ -15,25 +15,25 @@
 // under the License.
 
 import { useEffect, useRef, useState } from "react";
+import { serverAddress } from "@afm/engine";
 import type { AgentMetadata } from "@afm/engine";
 import type { ProbeResult } from "../../worker-client/useStandaloneSession";
 import { removeMcpServer } from "./agent-source-edit";
 import { isSecretAuthField, lacksRequiredField, secretFieldState } from "./mcp-secret-fields";
 import { AUTH_METHODS, nameFromUrl, prepareServerSave } from "./server-config";
 import type { NewMcpServer } from "./agent-source-edit";
-import type { ToolInfo } from "../../protocol";
-import { discoverMcpServerAuth, resolveDirectoryClient } from "../../mcp-servers";
+import type { SignInVetting, ToolInfo } from "../../protocol";
+import type { SignInOutcome } from "../../oauth-signin";
+import { discoverMcpServerAuth, isListedServer, resolveDirectoryClient } from "../../mcp-servers";
 import type { DiscoveredMcpAuth } from "../../mcp-servers";
 import { ToolTip, tipFor } from "./ToolTip";
 import type { TipTarget } from "./ToolTip";
-import { KeepOnDevice } from "./KeepOnDevice";
 import { credentialOf, displayName, issueSentence, type Issue } from "./setup-check";
-import { hostOf } from "../../load-paths";
 import { AuthFields, ServerTools } from "./server-panel-sections";
 import { ServerDirectory } from "./ServerDirectory";
 import { ServerDetail } from "./ServerDetail";
 import type { DirectoryEntry, OAuthSignIn } from "../../mcp-directory";
-import { authorizationCodeRefreshKey, type OAuthProviderRef } from "@afm/adapter-auth";
+import { SignInRefusedError, authorizationCodeRefreshKey, type OAuthProviderRef } from "@afm/adapter-auth";
 
 interface Props {
   content: string;
@@ -42,9 +42,9 @@ interface Props {
   onApply: (content: string) => void;
   onServerDropped: (serverUrl: string) => void;
   onProbe: (server: NonNullable<AgentMetadata["tools"]>) => Promise<ProbeResult>;
-  onSignIn: (provider: OAuthProviderRef, keep: boolean) => Promise<boolean> | void;
+  onSignIn: (provider: OAuthProviderRef, vetting: SignInVetting) => Promise<SignInOutcome>;
   onSignOut: (provider: OAuthProviderRef) => void;
-  onStoreSecret: (name: string, value: string, keep: boolean, host: string) => Promise<boolean>;
+  onStoreSecret: (name: string, value: string, address?: string) => void;
   knownSecrets: string[];
   issue: Issue | null;
   onBack?: () => void;
@@ -123,8 +123,9 @@ export function ServerPanel({
   const [directoryQuery, setDirectoryQuery] = useState("");
   const [detail, setDetail] = useState<DirectoryEntry | null>(null);
   const [oauthFormOpen, setOauthFormOpen] = useState(false);
+  const [signInNote, setSignInNote] = useState<Exclude<SignInOutcome, { status: "signed-in" }> | null>(null);
+  const signInNoteRef = useRef<HTMLDivElement>(null);
   const [secretEdits, setSecretEdits] = useState<Record<string, string>>({});
-  const [keep, setKeep] = useState(false);
 
   const showTip = (tool: ToolInfo, row: HTMLElement) => {
     const body = (tool.description ?? "").trim();
@@ -149,6 +150,10 @@ export function ServerPanel({
 
   const taken = (metadata.tools?.mcp ?? []).map((s) => s.name).filter((n) => n !== editing);
   const name = editing ?? nameFromUrl(url, taken);
+
+  useEffect(() => {
+    signInNoteRef.current?.scrollIntoView({ block: "nearest" });
+  }, [signInNote]);
 
   useEffect(() => {
     if (!pendingDirectoryProbe) return;
@@ -209,6 +214,14 @@ export function ServerPanel({
     };
   }
 
+  function signIn(confirmedHost?: string) {
+    setSignInNote(null);
+    void onSignIn(oauthProvider(), { listed: isListedServer(url.trim()), confirmedHost }).then((outcome) => {
+      if (outcome.status === "signed-in") void probe(true);
+      else setSignInNote(outcome);
+    });
+  }
+
   async function probe(force = false) {
     if (!writesMethod || url.trim() === "" || name === "") return;
     if (!force && (!live || url.trim() === probedUrl)) return;
@@ -217,7 +230,16 @@ export function ServerPanel({
 
     const auth = authBlock();
     if (method === "none") {
-      const discovered = await discoverMcpServerAuth(url.trim()).catch(() => null);
+      let discovered: DiscoveredMcpAuth | null = null;
+      try {
+        discovered = await discoverMcpServerAuth(url.trim());
+      } catch (refusal) {
+        if (refusal instanceof SignInRefusedError) {
+          setProbing(false);
+          setError(refusal.message);
+          return;
+        }
+      }
       if (discovered !== null) {
         setMethod("oauth2");
         setValues(discoveredValues(discovered));
@@ -246,7 +268,6 @@ export function ServerPanel({
     const reported = (result.tools ?? []).map((tool) => ({ name: tool.name, description: tool.description }));
     setFound(reported);
     setProbedUrl(url.trim());
-    if (live) setAllowed(reported.map((tool) => tool.name).filter((tool) => !denied.includes(tool)));
   }
 
   function toggle(tool: string) {
@@ -264,7 +285,7 @@ export function ServerPanel({
       allowed,
     });
     for (const secret of next.secrets) {
-      void onStoreSecret(secret.name, secret.value, keep, hostOf(url.trim()));
+      onStoreSecret(secret.name, secret.value, serverAddress(url.trim()));
     }
     onApply(next.content);
     if (existingUrl !== "" && existingUrl !== url.trim()) onServerDropped(existingUrl);
@@ -387,21 +408,36 @@ export function ServerPanel({
                       onSecretEdit={(key, value) => setSecretEdits((current) => ({ ...current, [key]: value }))}
                       onSecretBlur={() => hasTypedSecret && void probe(true)}
                     />
-                    {(hasTypedSecret || method === "oauth2") && <KeepOnDevice keep={keep} onChange={setKeep} />}
                     {method === "oauth2" && (
                       <div className="u-signin-row">
                         <button
                           className="u-btn primary"
                           disabled={incomplete}
-                          onClick={() => {
-                            void Promise.resolve(onSignIn(oauthProvider(), keep)).then((ok) => {
-                              if (ok === true) void probe(true);
-                            });
-                          }}
+                          onClick={() => signIn()}
                         >
                           Sign in
                         </button>
                         <span className="u-row-meta">Opens the provider in a pop-up</span>
+                      </div>
+                    )}
+                    {signInNote?.status === "confirm" && (
+                      <div className="repair warn" ref={signInNoteRef}>
+                        <p className="repair-what">
+                          Sign in at <strong className="mono">{signInNote.host}</strong> to use <strong className="mono">{url.trim()}</strong>? This
+                          server is not in the directory, and its sign-in server does not say who is answering, so a wrong answer cannot be detected.
+                          Continue only if you trust that host.
+                        </p>
+                        <button className="u-btn primary" onClick={() => signIn(signInNote.host)}>
+                          Sign in anyway
+                        </button>
+                        <button className="u-btn ghost" onClick={() => setSignInNote(null)}>
+                          Cancel
+                        </button>
+                      </div>
+                    )}
+                    {signInNote?.status === "failed" && signInNote.reason !== undefined && (
+                      <div className="repair" ref={signInNoteRef}>
+                        <p className="repair-what">{signInNote.reason}</p>
                       </div>
                     )}
                   </div>

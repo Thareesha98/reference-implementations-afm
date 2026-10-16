@@ -18,18 +18,16 @@ import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 import { markColour, providerColour } from "./mark-colour";
 import { ProviderMark } from "./ProviderMark";
-import { MODEL_ROW, summaryOf, type KeysState, type SetupRow } from "./setup-check";
+import { MODEL_ROW, summaryOf, type SetupRow } from "./setup-check";
 
 const AUTO_RUN_DELAY_MS = 500;
 
 interface Props {
   rows: SetupRow[];
-  keys: KeysState;
   provider: string;
   ready: boolean;
   onConfigure: (row: SetupRow) => void;
   onCheckAgain: () => void;
-  onRetryKeys: () => void;
   onRun: () => void;
 }
 
@@ -83,55 +81,7 @@ function rowTone(row: SetupRow): string {
   return row.failure === "signin" || row.failure === "rejected" ? "is-bad" : "is-need";
 }
 
-function Keys({ state, onRetry }: { state: KeysState; onRetry: () => void }) {
-  if (state === "none") return null;
-  const declined = state === "declined";
-  return (
-    <div className={`u-run-keys ${declined ? "is-bad" : ""}`}>
-      <span className="u-run-ico">
-        <Icon>
-          <path d="M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4" />
-          <path d="M14 13.12c0 2.38 0 6.38-1 8.88" />
-          <path d="M17.29 21.02c.12-.6.43-2.3.5-3.02" />
-          <path d="M2 12a10 10 0 0 1 18-6" />
-          <path d="M2 16h.01" />
-          <path d="M21.8 16c.2-2 .131-5.354 0-6" />
-          <path d="M5 19.5C5.5 18 6 15 6 12a6 6 0 0 1 .34-2" />
-          <path d="M8.65 22c.21-.66.45-1.32.57-2" />
-          <path d="M9 6.8a6 6 0 0 1 9 5.2v2" />
-        </Icon>
-      </span>
-      <span className="u-run-t">
-        <span className="u-run-name">
-          {declined ? "Your device didn't confirm" : state === "opening" ? "Opening your saved keys" : "Saved keys"}
-        </span>
-        <span className="u-run-note">
-          {declined ? "Nothing was opened." : state === "opening" ? "Your device is asking." : "Ready"}
-        </span>
-      </span>
-      {declined ? (
-        <button className="u-btn primary sm" onClick={onRetry}>
-          Try again
-        </button>
-      ) : state === "opening" ? (
-        <span className="u-run-st">
-          <span className="u-spinner" aria-hidden="true" />
-          Waiting
-        </span>
-      ) : (
-        <span className="u-run-st ok">
-          <Icon>
-            <circle cx="12" cy="12" r="10" />
-            <path d="m9 12 2 2 4-4" />
-          </Icon>
-          Opened
-        </span>
-      )}
-    </div>
-  );
-}
-
-export function SetupPane({ rows, keys, provider, ready, onConfigure, onCheckAgain, onRetryKeys, onRun }: Props) {
+export function SetupPane({ rows, provider, ready, onConfigure, onCheckAgain, onRun }: Props) {
   const run = useRef(onRun);
   run.current = onRun;
   useEffect(() => {
@@ -140,9 +90,9 @@ export function SetupPane({ rows, keys, provider, ready, onConfigure, onCheckAga
     return () => window.clearTimeout(timer);
   }, [ready]);
 
-  const summary = summaryOf(rows, keys);
+  const summary = summaryOf(rows);
   const servers = rows.filter((row) => row.kind === "server");
-  const busy = keys === "opening" || rows.some((row) => row.state === "checking");
+  const busy = rows.some((row) => row.state === "checking");
 
   const renderRow = (row: SetupRow) => (
     <div className={`u-run-row ${rowTone(row)}`} key={row.id}>
@@ -164,7 +114,6 @@ export function SetupPane({ rows, keys, provider, ready, onConfigure, onCheckAga
           <span className={`u-chip ${summary.tone}`}>{summary.chip}</span>
           <span>{summary.text}</span>
         </div>
-        <Keys state={keys} onRetry={onRetryKeys} />
         <span className="u-label">Model</span>
         {rows.filter((row) => row.id === MODEL_ROW).map(renderRow)}
         {servers.length > 0 && (

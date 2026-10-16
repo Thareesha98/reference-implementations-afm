@@ -61,7 +61,7 @@ export function normalizeAgentFileUrl(input: string): AgentFileUrl {
   } catch {
     return { ok: false, error: "That doesn't look like a full URL - include https://" };
   }
-  if (url.protocol !== "https:" && url.protocol !== "http:") {
+  if (url.protocol !== "https:") {
     return { ok: false, error: "The URL must start with https://" };
   }
 
@@ -86,6 +86,14 @@ export function inlineAfmParam(search: URLSearchParams, hash: string): string | 
   return new URLSearchParams(hash.replace(/^#/, "")).get("afm") ?? search.get("afm");
 }
 
+function isHttps(raw: string): boolean {
+  try {
+    return new URL(raw).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 export async function resolveContent(
   source: LoadSource,
   fetchFn: typeof fetch,
@@ -101,6 +109,9 @@ export async function resolveContent(
       return saved.source;
     }
     case "remote": {
+      if (!isHttps(source.url)) {
+        throw new Error("An agent file link must start with https://");
+      }
       const response = await fetchFn(source.url);
       if (!response.ok) {
         throw new Error(

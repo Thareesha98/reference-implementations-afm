@@ -18,6 +18,7 @@ import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
 import type { FileInfo } from "@afm/adapter-tool";
 import type { ImageAttachment } from "./protocol";
 import { fileExtension } from "./chat/attachment";
+import { ensurePdfWorker } from "./pdf-worker";
 
 const MAX_FILES = 100;
 
@@ -120,31 +121,42 @@ export function supportsDirectoryDrop(items: DataTransferItemList): boolean {
   return items.length > 0 && typeof items[0]?.webkitGetAsEntry === "function";
 }
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-  "pdfjs-dist/legacy/build/pdf.worker.min.mjs",
-  import.meta.url,
-).toString();
-
 const MAX_FILE_BYTES = 15 * 1024 * 1024;
+export const MAX_TOTAL_BYTES = 100 * 1024 * 1024;
+export const MAX_PDF_PAGES = 500;
+export const MAX_PDF_MS = 30_000;
 const SUPPORTED_EXTENSIONS = new Set(["pdf", "md", "markdown", "txt"]);
 
 export type ExtractResult = { ok: true; file: FileInfo } | { ok: false; name: string; reason: string };
 
-async function extractPdfText(file: File): Promise<{ text: string; pages: number }> {
-  const buffer = await file.arrayBuffer();
-  const doc = await pdfjsLib.getDocument({ data: buffer }).promise;
+async function extractPdfText(file: File): Promise<{ text: string; pages: number; note?: string }> {
+  await ensurePdfWorker();
+  const task = pdfjsLib.getDocument({ data: await file.arrayBuffer() });
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    void task.destroy();
+  }, MAX_PDF_MS);
+  const pageTexts: string[] = [];
+  let pages = 0;
   try {
-    const pageTexts: string[] = [];
-    for (let pageNumber = 1; pageNumber <= doc.numPages; pageNumber++) {
+    const doc = await task.promise;
+    pages = doc.numPages;
+    for (let pageNumber = 1; pageNumber <= Math.min(pages, MAX_PDF_PAGES); pageNumber++) {
       const page = await doc.getPage(pageNumber);
       const content = await page.getTextContent();
       const text = content.items.map((item) => ("str" in item ? item.str : "")).join(" ");
       pageTexts.push(`--- Page ${pageNumber} ---\n${text}`);
     }
-    return { text: pageTexts.join("\n\n"), pages: doc.numPages };
+  } catch (error) {
+    if (!timedOut) throw error;
   } finally {
-    await doc.cleanup();
+    clearTimeout(timer);
+    await task.destroy();
   }
+  if (timedOut && pageTexts.length === 0) throw new Error(`took longer than ${MAX_PDF_MS / 1000} seconds to read`);
+  const text = pageTexts.join("\n\n");
+  return pageTexts.length < pages ? { text, pages, note: `stopped after page ${pageTexts.length} of ${pages}` } : { text, pages };
 }
 
 export async function extractFile(file: File, path: string = file.name): Promise<ExtractResult> {
@@ -160,8 +172,8 @@ export async function extractFile(file: File, path: string = file.name): Promise
 
   try {
     if (ext === "pdf") {
-      const { text, pages } = await extractPdfText(file);
-      return { ok: true, file: { name: file.name, path: cleanPath, text, pages } };
+      const { text, pages, note } = await extractPdfText(file);
+      return { ok: true, file: { name: file.name, path: cleanPath, text, pages, ...(note === undefined ? {} : { note }) } };
     }
     const text = await file.text();
     return { ok: true, file: { name: file.name, path: cleanPath, text } };
@@ -174,17 +186,28 @@ export async function extractFile(file: File, path: string = file.name): Promise
 export interface BatchExtractResult {
   attached: FileInfo[];
   skipped: { name: string; reason: string }[];
+  sizes: Map<string, number>;
 }
 
-export async function extractFiles(collected: CollectedFile[]): Promise<BatchExtractResult> {
-  const results = await Promise.all(collected.map(({ file, path }) => extractFile(file, path)));
+export async function extractFiles(collected: CollectedFile[], remainingBytes = MAX_TOTAL_BYTES): Promise<BatchExtractResult> {
   const attached: FileInfo[] = [];
   const skipped: { name: string; reason: string }[] = [];
-  for (const result of results) {
-    if (result.ok) attached.push(result.file);
-    else skipped.push({ name: result.name, reason: result.reason });
+  const sizes = new Map<string, number>();
+  for (const { file, path } of collected) {
+    if (file.size > remainingBytes) {
+      skipped.push({ name: file.name, reason: `would take this conversation past ${MAX_TOTAL_BYTES / (1024 * 1024)} MB of files` });
+      continue;
+    }
+    const result = await extractFile(file, path);
+    if (result.ok) {
+      attached.push(result.file);
+      sizes.set(result.file.path, file.size);
+      remainingBytes -= file.size;
+    } else {
+      skipped.push({ name: result.name, reason: result.reason });
+    }
   }
-  return { attached, skipped };
+  return { attached, skipped, sizes };
 }
 
 export const MAX_IMAGE_BYTES = 8 * 1024 * 1024;

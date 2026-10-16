@@ -38,8 +38,6 @@ export interface SetupRow extends RowResult {
   url?: string;
 }
 
-export type KeysState = "none" | "opening" | "opened" | "declined";
-
 export const MODEL_ROW = "model";
 
 export interface Issue {
@@ -72,6 +70,7 @@ const SENTENCE: Record<FailureKind, (who: string, credential: Credential, messag
   slow: (who) => `${who} did not answer in time. Try again in a moment.`,
   busy: (who) => `${who} is busy right now. Try again in a moment.`,
   unreachable: (who) => `${who} can't be reached from this browser. Check the address, or try again.`,
+  redirected: (who) => `${who} answered with a redirect, which AFM does not follow. Use the address it redirects to.`,
   other: (_who, _credential, message) => message,
 };
 
@@ -135,6 +134,7 @@ const FAILURE_NOTE: Record<Exclude<FailureKind, "missing" | "signin" | "rejected
   slow: "Did not answer in time",
   busy: "Busy right now",
   unreachable: "Can't be reached",
+  redirected: "Redirects elsewhere",
 };
 
 const REFUSED_NOTE: Record<Credential, string> = {
@@ -176,9 +176,8 @@ export interface Summary {
   text: string;
 }
 
-export function summaryOf(rows: SetupRow[], keys: KeysState): Summary {
-  if (keys === "declined") return { tone: "neutral", chip: "Waiting", text: "Nothing was opened and nothing was sent." };
-  if (keys === "opening" || rows.some((row) => row.state === "checking")) {
+export function summaryOf(rows: SetupRow[]): Summary {
+  if (rows.some((row) => row.state === "checking")) {
     return { tone: "neutral", chip: "Checking", text: "Everything this agent needs, checked at once." };
   }
   const attention = attentionCount(rows);

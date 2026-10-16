@@ -23,25 +23,38 @@ interface Props {
   metadata: AgentMetadata;
   source: string;
   savedSecrets: string[];
+  fileUrl: string | null;
   onRun: () => void;
   onOpenBuilder: () => void;
 }
 
-export function toolSummary(metadata: AgentMetadata): string {
-  const servers = metadata.tools?.mcp ?? [];
-  if (servers.length === 0) return "None";
-  return servers
-    .map((server) => {
-      const allowed = server.tool_filter?.allow?.length;
-      const host = server.transport.type === "http" ? ` (${hostOf(server.transport.url)})` : "";
-      const count = allowed === undefined ? "" : ` · ${allowed} tool${allowed === 1 ? "" : "s"}`;
-      return `${server.name}${host}${count}`;
-    })
-    .join(", ");
+export interface ServerTools {
+  name: string;
+  host: string | null;
+  tools: string[];
 }
 
-export function TrustScreen({ metadata, source, savedSecrets, onRun, onOpenBuilder }: Props) {
+export function serverTools(metadata: AgentMetadata): ServerTools[] {
+  return (metadata.tools?.mcp ?? []).map((server) => ({
+    name: server.name,
+    host: server.transport.type === "http" ? hostOf(server.transport.url) : null,
+    tools: server.tool_filter?.allow ?? [],
+  }));
+}
+
+export function linkedFileHost(fileUrl: string | null): string | null {
+  try {
+    const url = new URL(fileUrl ?? "");
+    return url.protocol === "https:" ? url.host : null;
+  } catch {
+    return null;
+  }
+}
+
+export function TrustScreen({ metadata, source, savedSecrets, fileUrl, onRun, onOpenBuilder }: Props) {
   const keys = referencedSecretNames(source);
+  const servers = serverTools(metadata);
+  const fileHost = linkedFileHost(fileUrl);
 
   return (
     <div className="u-centre">
@@ -56,6 +69,12 @@ export function TrustScreen({ metadata, source, savedSecrets, onRun, onOpenBuild
         <p>Someone shared this agent with you. Here is what the file sets up, before it runs.</p>
 
         <div className="u-declare">
+          {fileHost !== null && (
+            <div className="u-declare-row">
+              <span className="u-declare-k">File from</span>
+              <span>{fileHost}</span>
+            </div>
+          )}
           <div className="u-declare-row">
             <span className="u-declare-k">Model</span>
             <span>
@@ -63,9 +82,31 @@ export function TrustScreen({ metadata, source, savedSecrets, onRun, onOpenBuild
               {metadata.model?.provider !== undefined && <span className="u-row-sub"> · {metadata.model.provider}</span>}
             </span>
           </div>
-          <div className="u-declare-row">
+          <div className="u-declare-row top">
             <span className="u-declare-k">Tool servers</span>
-            <span>{toolSummary(metadata)}</span>
+            {servers.length === 0 ? (
+              <span>None</span>
+            ) : (
+              <div className="u-declare-servers">
+                {servers.map((server) => (
+                  <div key={server.name}>
+                    {server.name}
+                    {server.host !== null && <span className="u-row-sub"> · {server.host}</span>}
+                    <div className="u-declare-tools">
+                      {server.tools.length === 0 ? (
+                        <span className="u-row-sub">No tools listed. Every tool asks first.</span>
+                      ) : (
+                        server.tools.map((tool) => (
+                          <span key={tool} className="tag mono">
+                            {tool}
+                          </span>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           <div className="u-declare-row">
             <span className="u-declare-k">Needs from you</span>
@@ -92,7 +133,7 @@ export function TrustScreen({ metadata, source, savedSecrets, onRun, onOpenBuild
 
         <p className="u-hint">
           Tools the file lists run without asking. Any other tool asks first, unless you allow it in this tab. A key you enter stays
-          in memory for this tab unless you choose to save it on this device.
+          in memory for this tab and is gone when you close or refresh it.
         </p>
         <div className="u-trust-actions">
           <button className="u-btn ghost" onClick={onOpenBuilder}>

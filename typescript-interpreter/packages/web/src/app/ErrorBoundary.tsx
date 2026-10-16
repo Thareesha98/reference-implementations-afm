@@ -38,7 +38,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
       <div className="u-centre">
         <div className="u-trust">
           <h4>Something went wrong</h4>
-          <p>The page hit an unexpected error. Your agents and saved keys are untouched - reload to carry on.</p>
+          <p>The page hit an unexpected error. Your agents are untouched - reload to carry on.</p>
           <div className="u-trust-actions">
             <button className="u-btn primary" onClick={() => window.location.reload()}>
               Reload

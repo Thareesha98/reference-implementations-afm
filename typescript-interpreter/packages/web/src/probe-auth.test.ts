@@ -97,23 +97,23 @@ describe("resolveProbeAuth", () => {
 });
 
 describe("probeToolUses", () => {
-  it("reads the name and host from the server being probed, not any other server", () => {
+  it("reads the name and address from the server being probed, not any other server", () => {
     const uses = probeToolUses(server({ type: "bearer", token: "${env:GITHUB_TOKEN}" }));
-    expect(uses).toEqual([{ name: "GITHUB_TOKEN", host: "huggingface.co" }]);
+    expect(uses).toEqual([{ name: "GITHUB_TOKEN", address: "https://huggingface.co/mcp" }]);
   });
 
-  it("changes host when the probed server's own address changes", () => {
+  it("changes address when the probed server's own address changes", () => {
     const edited = {
       mcp: [{ name: "gh", transport: { type: "http", url: "https://api.githubcopilott.com/mcp", authentication: { type: "bearer", token: "${env:GITHUB_TOKEN}" } } }],
     } as AgentMetadata["tools"];
-    expect(probeToolUses(edited)).toEqual([{ name: "GITHUB_TOKEN", host: "api.githubcopilott.com" }]);
+    expect(probeToolUses(edited)).toEqual([{ name: "GITHUB_TOKEN", address: "https://api.githubcopilott.com/mcp" }]);
   });
 
   it("finds every reference across every field, not just one", () => {
     const uses = probeToolUses(server({ type: "basic", username: "${env:U}", password: "${env:P}" }));
     expect(uses).toEqual([
-      { name: "U", host: "huggingface.co" },
-      { name: "P", host: "huggingface.co" },
+      { name: "U", address: "https://huggingface.co/mcp" },
+      { name: "P", address: "https://huggingface.co/mcp" },
     ]);
   });
 
@@ -125,7 +125,7 @@ describe("probeToolUses", () => {
 
   it("ignores fields that are not a bare secret reference", () => {
     const uses = probeToolUses(server({ type: "oauth2", client_id: "${env:ID}", scopes: ["mcp"] }));
-    expect(uses).toEqual([{ name: "ID", host: "huggingface.co" }]);
+    expect(uses).toEqual([{ name: "ID", address: "https://huggingface.co/mcp" }]);
   });
 });
 

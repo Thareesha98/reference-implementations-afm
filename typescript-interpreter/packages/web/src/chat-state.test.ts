@@ -15,7 +15,7 @@
 // under the License.
 
 import { describe, it, expect } from "vitest";
-import { chatReducer, initialChatState, lockedSecrets, usableSecrets } from "./chat-state";
+import { chatReducer, initialChatState } from "./chat-state";
 import type { ServerMessage } from "./protocol";
 import type { ChatState } from "./chat-state";
 
@@ -348,55 +348,21 @@ describe("a start that fails", () => {
   });
 });
 
-function afterReload(sealedOnDisk: string[], inMemory: string[] = []): ChatState {
-  let state = initialChatState;
-  state = chatReducer(state, { type: "server", message: { type: "secrets-list", names: inMemory } });
-  return chatReducer(state, { type: "server", message: { type: "passkey-list", names: sealedOnDisk } });
+function withSecrets(names: string[]): ChatState {
+  return chatReducer(initialChatState, { type: "server", message: { type: "secrets-list", names } });
 }
 
-describe("usableSecrets", () => {
-  it("counts a key that only exists sealed on disk", () => {
-    expect(usableSecrets(afterReload(["ANTHROPIC_API_KEY"]))).toEqual(["ANTHROPIC_API_KEY"]);
+describe("savedSecrets", () => {
+  it("are the names the worker last listed", () => {
+    expect(withSecrets(["OPENAI_API_KEY", "HF_TOKEN"]).savedSecrets).toEqual(["OPENAI_API_KEY", "HF_TOKEN"]);
   });
 
-  it("counts a key that is only in memory", () => {
-    expect(usableSecrets(afterReload([], ["OPENAI_API_KEY"]))).toEqual(["OPENAI_API_KEY"]);
+  it("are empty before the worker has said anything", () => {
+    expect(initialChatState.savedSecrets).toEqual([]);
   });
 
-  it("does not list a key twice when it is both", () => {
-    expect(usableSecrets(afterReload(["HF_TOKEN"], ["HF_TOKEN"]))).toEqual(["HF_TOKEN"]);
-  });
-
-  it("is empty when nothing is available", () => {
-    expect(usableSecrets(initialChatState)).toEqual([]);
-  });
-
-  it("keeps both lists across an agent switch, so switching files does not lose a key", () => {
-    const state = chatReducer(afterReload(["HF_TOKEN"], ["OPENAI_API_KEY"]), { type: "agent-cleared" });
-    expect(usableSecrets(state).sort()).toEqual(["HF_TOKEN", "OPENAI_API_KEY"]);
-  });
-
-  it("still distinguishes sealed from in-memory for Settings", () => {
-    const state = afterReload(["SEALED"], ["IN_MEMORY"]);
-    expect(state.passkeySecrets).toEqual(["SEALED"]);
-    expect(state.savedSecrets).toEqual(["IN_MEMORY"]);
-  });
-});
-
-describe("lockedSecrets", () => {
-  it("lists what is sealed on disk and not yet open in this tab", () => {
-    expect(lockedSecrets(afterReload(["OPENAI_API_KEY", "HF_TOKEN"]))).toEqual(["OPENAI_API_KEY", "HF_TOKEN"]);
-  });
-
-  it("leaves out a sealed value once it is open in memory", () => {
-    expect(lockedSecrets(afterReload(["OPENAI_API_KEY", "HF_TOKEN"], ["OPENAI_API_KEY"]))).toEqual(["HF_TOKEN"]);
-  });
-
-  it("leaves out a value that was never sealed", () => {
-    expect(lockedSecrets(afterReload([], ["OPENAI_API_KEY"]))).toEqual([]);
-  });
-
-  it("is empty before the worker has said anything", () => {
-    expect(lockedSecrets(initialChatState)).toEqual([]);
+  it("stay across an agent switch, so switching files does not lose a key", () => {
+    const state = chatReducer(withSecrets(["OPENAI_API_KEY"]), { type: "agent-cleared" });
+    expect(state.savedSecrets).toEqual(["OPENAI_API_KEY"]);
   });
 });

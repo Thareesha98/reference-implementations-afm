@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { discoverAuthorizationServer } from "./discovery";
+import { discoverSignIn, resolveClientId } from "./discovery";
 
 function binaryString(bytes: Uint8Array): string {
   let binary = "";
@@ -305,20 +305,15 @@ export function isExpired(tokens: AuthorizationCodeTokens, skewMs = 30_000): boo
   return Date.now() >= tokens.expiresAt - skewMs;
 }
 
-function syncHash(value: string): string {
-  let hash = 0;
-  for (let index = 0; index < value.length; index += 1) {
-    hash = (Math.imul(31, hash) + value.charCodeAt(index)) | 0;
-  }
-  return (hash >>> 0).toString(36);
+export function authorizationCodeProviderKey(
+  config: Pick<AuthorizationCodeConfig, "authorizeUrl" | "tokenUrl" | "clientId" | "resource">,
+): string {
+  return JSON.stringify([config.authorizeUrl, config.tokenUrl, config.clientId, config.resource ?? null]);
 }
 
-export function authorizationCodeProviderKey(config: Pick<AuthorizationCodeConfig, "authorizeUrl" | "clientId" | "resource">): string {
-  const base = `${config.authorizeUrl}::${config.clientId}`.replace(/[^a-zA-Z0-9]/g, "").slice(0, 64);
-  return config.resource === undefined ? base : `${base}-${syncHash(config.resource)}`;
-}
-
-export function authorizationCodeRefreshKey(config: Pick<AuthorizationCodeConfig, "authorizeUrl" | "clientId" | "resource">): string {
+export function authorizationCodeRefreshKey(
+  config: Pick<AuthorizationCodeConfig, "authorizeUrl" | "tokenUrl" | "clientId" | "resource">,
+): string {
   return `afm.oauth.${authorizationCodeProviderKey(config)}.refresh`;
 }
 
@@ -330,37 +325,54 @@ function sameUrl(a: string, b: string): boolean {
   }
 }
 
-async function requireSameServer(
-  config: Pick<AuthorizationCodeConfig, "authorizeUrl" | "tokenUrl">,
-  iss: string,
-  fetchFn: typeof fetch,
-): Promise<void> {
-  const mismatch = (): Error =>
-    new Error("The sign-in answer came from a different server than the one this sign-in started with - please sign in again.");
-  let issUrl: URL;
-  try {
-    issUrl = new URL(iss);
-  } catch {
-    throw mismatch();
+export interface SignInServer {
+  authorizeUrl: string;
+  tokenUrl: string;
+  clientId: string;
+  issuer: string;
+  issuerSent: boolean;
+  resource: string;
+}
+
+export async function discoverSignInServer(
+  provider: OAuthProviderRef,
+  deps: { fetchFn: typeof fetch; redirectUri: string; cimdClientId?: string },
+): Promise<SignInServer> {
+  const found = provider.resource === undefined ? null : await discoverSignIn(provider.resource, deps.fetchFn);
+  if (found === null) {
+    throw new Error("This server did not ask for a sign-in, or did not answer, so the sign-in was not started.");
   }
-  if (issUrl.protocol !== "https:") throw mismatch();
-  const metadata = await discoverAuthorizationServer(iss, fetchFn);
-  if (
-    metadata === null ||
-    !sameUrl(metadata.authorization_endpoint, config.authorizeUrl) ||
-    !sameUrl(metadata.token_endpoint, config.tokenUrl)
-  ) {
-    throw mismatch();
+  const { metadata } = found;
+  const sameServer = sameUrl(metadata.authorization_endpoint, provider.authorizeUrl) && sameUrl(metadata.token_endpoint, provider.tokenUrl);
+  const clientId =
+    sameServer && provider.clientId !== ""
+      ? provider.clientId
+      : await resolveClientId(metadata, deps.cimdClientId, deps.redirectUri, deps.fetchFn);
+  if (clientId === "") {
+    throw new Error("This server's sign-in needs a client ID, and none could be registered. Enter one in the server window.");
   }
+  return {
+    authorizeUrl: metadata.authorization_endpoint,
+    tokenUrl: metadata.token_endpoint,
+    clientId,
+    issuer: metadata.issuer,
+    issuerSent: metadata.authorization_response_iss_parameter_supported === true,
+    resource: found.resource,
+  };
 }
 
 export interface AuthorizationCodeSession {
   hasSession(): boolean;
   getAccessToken(fetchFn?: typeof fetch): Promise<string | null>;
-  startSignIn(redirect: (url: string) => void): Promise<void>;
+  startSignIn(server: SignInServer, redirect: (url: string) => void): Promise<void>;
   completeSignIn(code: string, state: string, fetchFn?: typeof fetch, iss?: string): Promise<void>;
-  restore(fetchFn?: typeof fetch): Promise<boolean>;
+  declineSignIn(state: string, iss?: string): void;
   signOut(): void;
+}
+
+interface SignedIn {
+  provider: AuthorizationCodeConfig;
+  tokens: AuthorizationCodeTokens;
 }
 
 export function createAuthorizationCodeSession(
@@ -368,61 +380,87 @@ export function createAuthorizationCodeSession(
   persistentStore: KeyValueStore,
 ): AuthorizationCodeSession {
   const REFRESH_KEY = authorizationCodeRefreshKey(config);
-  let tokens: AuthorizationCodeTokens | null = null;
-  let pending: { verifier: string; state: string } | null = null;
+  let current: SignedIn | null = null;
+  let pending: { verifier: string; state: string; server: SignInServer } | null = null;
+  let refreshing: Promise<void> | null = null;
+
+  const providerFor = (server: SignInServer): AuthorizationCodeConfig => ({
+    ...config,
+    authorizeUrl: server.authorizeUrl,
+    tokenUrl: server.tokenUrl,
+    clientId: server.clientId,
+    resource: server.resource,
+  });
+
+  function takeFlow(state: string, iss: string | undefined): NonNullable<typeof pending> {
+    const flow = pending;
+    pending = null;
+    if (flow === null) {
+      throw new Error("No OAuth2 sign-in is waiting for this answer - please sign in again.");
+    }
+    if (state !== flow.state) {
+      throw new Error("OAuth2 sign-in state mismatch (possible CSRF) - please sign in again.");
+    }
+    if (iss === undefined ? flow.server.issuerSent : iss !== flow.server.issuer) {
+      throw new Error("The sign-in response did not come from the expected provider - please sign in again.");
+    }
+    return flow;
+  }
 
   async function persist(): Promise<void> {
-    if (tokens?.refreshToken !== undefined) {
-      await persistentStore.set(REFRESH_KEY, tokens.refreshToken);
+    if (current?.tokens.refreshToken !== undefined) {
+      await persistentStore.set(REFRESH_KEY, current.tokens.refreshToken);
     }
+  }
+
+  async function refresh(from: SignedIn, refreshToken: string, fetchFn: typeof fetch): Promise<void> {
+    const tokens = await refreshAuthorizationCodeTokens(from.provider, refreshToken, fetchFn);
+    if (current !== from) return;
+    current = { provider: from.provider, tokens };
+    await persist();
   }
 
   return {
     hasSession(): boolean {
-      return tokens !== null;
+      return current !== null;
     },
 
     async getAccessToken(fetchFn: typeof fetch = fetch): Promise<string | null> {
-      if (tokens === null) return null;
-      if (isExpired(tokens) && tokens.refreshToken !== undefined) {
-        tokens = await refreshAuthorizationCodeTokens(config, tokens.refreshToken, fetchFn);
-        await persist();
+      const signedIn = current;
+      if (signedIn === null) return null;
+      const refreshToken = signedIn.tokens.refreshToken;
+      if (isExpired(signedIn.tokens) && refreshToken !== undefined) {
+        refreshing ??= refresh(signedIn, refreshToken, fetchFn).finally(() => {
+          refreshing = null;
+        });
+        await refreshing;
       }
-      return tokens.accessToken;
+      return current?.tokens.accessToken ?? null;
     },
 
-    async startSignIn(redirect: (url: string) => void): Promise<void> {
+    async startSignIn(server: SignInServer, redirect: (url: string) => void): Promise<void> {
       const { verifier, challenge } = await generatePkce();
       const state = randomString(16);
-      pending = { verifier, state };
-      redirect(buildAuthorizeUrl(config, { state, codeChallenge: challenge }));
+      const url = buildAuthorizeUrl(providerFor(server), { state, codeChallenge: challenge });
+      pending = { verifier, state, server };
+      redirect(url);
     },
 
     async completeSignIn(code: string, state: string, fetchFn: typeof fetch = fetch, iss?: string): Promise<void> {
-      const flow = pending;
-      pending = null;
-      if (flow === null) {
-        throw new Error("No OAuth2 sign-in is waiting for this code - please sign in again.");
-      }
-      if (state !== flow.state) {
-        throw new Error("OAuth2 sign-in state mismatch (possible CSRF) - please sign in again.");
-      }
-      if (iss !== undefined) await requireSameServer(config, iss, fetchFn);
-      tokens = await exchangeCodeForTokens(config, code, flow.verifier, fetchFn);
+      const flow = takeFlow(state, iss);
+      const provider = providerFor(flow.server);
+      const tokens = await exchangeCodeForTokens(provider, code, flow.verifier, fetchFn);
+      current = { provider, tokens };
       persistentStore.remove(REFRESH_KEY);
       await persist();
     },
 
-    async restore(fetchFn: typeof fetch = fetch): Promise<boolean> {
-      const refreshToken = persistentStore.get(REFRESH_KEY);
-      if (refreshToken === null) return false;
-      tokens = await refreshAuthorizationCodeTokens(config, refreshToken, fetchFn);
-      await persist();
-      return true;
+    declineSignIn(state: string, iss?: string): void {
+      takeFlow(state, iss);
     },
 
     signOut(): void {
-      tokens = null;
+      current = null;
       persistentStore.remove(REFRESH_KEY);
     },
   };

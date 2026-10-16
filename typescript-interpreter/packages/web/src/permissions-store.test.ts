@@ -30,7 +30,6 @@ describe("grantsToRevoke", () => {
     toolName,
     serverId,
     rule,
-    risk: "read",
     updatedAt: 0,
   });
 
@@ -71,36 +70,36 @@ describe("setPermission", () => {
   const B = "https://b.example/mcp";
 
   it("adds the grant to what is already there", () => {
-    const first = setPermission([], "agent:1", "search", "auto-allow", "read", A);
-    const both = setPermission(first, "agent:1", "fetch", "auto-allow", "read", A);
+    const first = setPermission([], "agent:1", "search", "auto-allow", A);
+    const both = setPermission(first, "agent:1", "fetch", "auto-allow", A);
     expect(both.map((entry) => entry.toolName)).toEqual(["search", "fetch"]);
   });
 
   it("replaces the answer for the same agent, tool and server", () => {
-    const granted = setPermission([], "agent:1", "search", "auto-allow", "read", A);
-    const taken = setPermission(granted, "agent:1", "search", "always-ask", "read", A);
+    const granted = setPermission([], "agent:1", "search", "auto-allow", A);
+    const taken = setPermission(granted, "agent:1", "search", "always-ask", A);
     expect(taken).toHaveLength(1);
     expect(taken[0]?.rule).toBe("always-ask");
   });
 
   it("keeps the same tool apart across servers and agents", () => {
-    let entries = setPermission([], "agent:1", "search", "auto-allow", "read", A);
-    entries = setPermission(entries, "agent:1", "search", "auto-allow", "read", B);
-    entries = setPermission(entries, "agent:2", "search", "auto-allow", "read", A);
+    let entries = setPermission([], "agent:1", "search", "auto-allow", A);
+    entries = setPermission(entries, "agent:1", "search", "auto-allow", B);
+    entries = setPermission(entries, "agent:2", "search", "auto-allow", A);
     expect(entries).toHaveLength(3);
   });
 
   it("leaves the list it was given alone", () => {
     const before: PermissionEntry[] = [];
-    setPermission(before, "agent:1", "search", "auto-allow", "read", A);
+    setPermission(before, "agent:1", "search", "auto-allow", A);
     expect(before).toEqual([]);
   });
 });
 
 describe("resetPermissions", () => {
   const entries = [
-    ...setPermission([], "agent:1", "search", "auto-allow", "read"),
-    ...setPermission([], "agent:2", "search", "auto-allow", "read"),
+    ...setPermission([], "agent:1", "search", "auto-allow"),
+    ...setPermission([], "agent:2", "search", "auto-allow"),
   ];
 
   it("forgets one agent and keeps the rest", () => {
