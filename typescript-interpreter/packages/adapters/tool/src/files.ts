@@ -23,6 +23,7 @@ export interface FileInfo {
   path: string;
   text: string;
   pages?: number;
+  note?: string;
 }
 
 export class FileToolError extends Error {}
@@ -35,7 +36,8 @@ const MAX_MATCHES = 20;
 
 function formatSize(info: FileInfo): string {
   const base = `${info.text.length.toLocaleString()} characters`;
-  return info.pages !== undefined ? `${base}, ${info.pages} page${info.pages === 1 ? "" : "s"}` : base;
+  const sized = info.pages !== undefined ? `${base}, ${info.pages} page${info.pages === 1 ? "" : "s"}` : base;
+  return info.note !== undefined ? `${sized}, ${info.note}` : sized;
 }
 
 export function listFilesText(files: Map<string, FileInfo>): string {
