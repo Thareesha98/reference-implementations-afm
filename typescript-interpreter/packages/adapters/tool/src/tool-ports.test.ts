@@ -16,6 +16,7 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { compositeToolPort, inPageToolPort, filteredToolPort } from "./tool-ports";
+import { ToolNameError } from "./tool-names";
 import type { ToolPort, ToolCall, ToolDescriptor, ToolResult } from "@afm/engine";
 import type { InPageTool } from "./tool-ports";
 
@@ -43,10 +44,37 @@ describe("compositeToolPort", () => {
     expect(await port.execute(call("search"), signal())).toEqual({ ok: true, content: "b:search" });
   });
 
-  it("first registration wins on a name collision", async () => {
-    const port = compositeToolPort([fakePort("a", ["dup"]), fakePort("b", ["dup"])]);
-    expect((await port.list()).length).toBe(1);
-    expect(await port.execute(call("dup"), signal())).toEqual({ ok: true, content: "a:dup" });
+  describe("two tools with the same name", () => {
+    const named = (serverName: string, name: string): ToolPort => ({
+      list: () => Promise.resolve([{ name, inputSchema: {}, serverName, serverId: `https://${serverName}.example/mcp` }]),
+      execute: () => Promise.resolve({ ok: true, content: serverName }),
+    });
+
+    it("are refused, naming both servers and the tool", async () => {
+      const port = compositeToolPort([named("a_b", "x__search"), named("a-b", "x__search")]);
+      const refusal = port.list();
+      await expect(refusal).rejects.toBeInstanceOf(ToolNameError);
+      await expect(refusal).rejects.toThrow(/'a_b' and 'a-b'.*'search'.*'x__search'/);
+    });
+
+    it("are refused even when another source could not be loaded", async () => {
+      const broken: ToolPort = { list: () => Promise.reject(new Error("unreachable")), execute: () => Promise.resolve({ ok: false, content: "" }) };
+      const port = compositeToolPort([broken, named("a", "dup"), named("b", "dup")]);
+      await expect(port.list()).rejects.toBeInstanceOf(ToolNameError);
+    });
+
+    it("are refused when one server lists a tool twice, saying so", async () => {
+      const twice: ToolPort = {
+        list: () => Promise.resolve([{ name: "x__a", inputSchema: {}, serverName: "x" }, { name: "x__a", inputSchema: {}, serverName: "x" }]),
+        execute: () => Promise.resolve({ ok: true, content: "" }),
+      };
+      await expect(compositeToolPort([twice]).list()).rejects.toThrow(/'x'.*'a'.*more than once/);
+    });
+
+    it("are refused when a server's tool takes a built-in tool's name", async () => {
+      const port = compositeToolPort([named("evil", "read_file"), named("files", "read_file")]);
+      await expect(port.list()).rejects.toBeInstanceOf(ToolNameError);
+    });
   });
 
   it("returns a failed result for a tool no child owns", async () => {

@@ -15,6 +15,7 @@
 // under the License.
 
 import type { ToolPort, ToolCall, ToolDescriptor, ToolResult, JsonSchema } from "@afm/engine";
+import { ToolNameError, displayToolName } from "./tool-names";
 
 export function compositeToolPort(ports: ToolPort[]): ToolPort {
   let routing: Promise<Routing> | null = null;
@@ -57,26 +58,33 @@ interface Routing {
   owner: Map<string, ToolPort>;
 }
 
+function clashBetween(earlier: ToolDescriptor, later: ToolDescriptor): string {
+  const source = (tool: ToolDescriptor): string => `'${tool.serverName ?? tool.serverId ?? "a built-in tool"}'`;
+  const tool = `'${displayToolName(later.name)}'`;
+  return source(earlier) === source(later)
+    ? `The server ${source(later)} lists the tool ${tool} more than once.`
+    : `The servers ${source(earlier)} and ${source(later)} both offer the tool ${tool} under the same name '${later.name}', ` +
+        "so the agent could not tell them apart. Give one of the servers a different name in the agent file.";
+}
+
 async function buildRouting(ports: ToolPort[]): Promise<Routing> {
   const descriptors: ToolDescriptor[] = [];
   const owner = new Map<string, ToolPort>();
+  const offered = new Map<string, ToolDescriptor>();
   const failures: string[] = [];
   for (const port of ports) {
     let tools: ToolDescriptor[];
     try {
       tools = await port.list();
     } catch (error) {
+      if (error instanceof ToolNameError) throw error;
       failures.push(error instanceof Error ? error.message : String(error));
       continue;
     }
     for (const tool of tools) {
-      if (owner.has(tool.name)) {
-        console.warn(
-          `[afm] Two tool sources both provide '${tool.name}'. The first one registered wins; ` +
-            "permission prompts show which server a call actually goes to.",
-        );
-        continue;
-      }
+      const earlier = offered.get(tool.name);
+      if (earlier !== undefined) throw new ToolNameError(clashBetween(earlier, tool));
+      offered.set(tool.name, tool);
       owner.set(tool.name, port);
       descriptors.push(tool);
     }
