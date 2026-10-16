@@ -15,8 +15,8 @@
 // under the License.
 
 import { describe, it, expect, vi } from "vitest";
-import { generatePkce, randomString, buildAuthorizeUrl, exchangeCodeForTokens, refreshAuthorizationCodeTokens, isExpired, authorizationCodeProviderKey, authorizationCodeRefreshKey, createAuthorizationCodeSession, isInteractiveOAuth, oauthProviderFrom, createOAuth2MachineClient, requireHttpsUrl } from "./oauth";
-import type { AuthorizationCodeConfig, AuthorizationCodeTokens, KeyValueStore, OAuth2MachineConfig } from "./oauth";
+import { generatePkce, randomString, buildAuthorizeUrl, exchangeCodeForTokens, refreshAuthorizationCodeTokens, isExpired, authorizationCodeProviderKey, authorizationCodeRefreshKey, createAuthorizationCodeSession, discoverSignInServer, isInteractiveOAuth, oauthProviderFrom, createOAuth2MachineClient, requireHttpsUrl } from "./oauth";
+import type { AuthorizationCodeConfig, AuthorizationCodeTokens, KeyValueStore, OAuth2MachineConfig, OAuthProviderRef, SignInServer } from "./oauth";
 
 const config: AuthorizationCodeConfig = {
   authorizeUrl: "https://auth.example.com/oauth2/authorize",
@@ -97,6 +97,15 @@ const redirectTo = {
   state: () => new URL(redirectTo.url).searchParams.get("state")!,
 };
 
+const server: SignInServer = {
+  authorizeUrl: config.authorizeUrl,
+  tokenUrl: config.tokenUrl,
+  clientId: config.clientId,
+  issuer: "https://auth.example.com",
+  issuerSent: false,
+  resource: "https://mcp.example.com/mcp",
+};
+
 describe("exchangeCodeForTokens", () => {
   it("POSTs the code + verifier and returns tokens", async () => {
     const { fn, calls } = fakeFetch({ access_token: "at", refresh_token: "rt", expires_in: 3600 });
@@ -160,36 +169,51 @@ describe("isExpired", () => {
 });
 
 describe("authorizationCodeProviderKey", () => {
-  it("is stable for the same provider config and storage-safe", () => {
+  it("is stable for the same provider config", () => {
     const key = authorizationCodeProviderKey(config);
-    expect(key).toMatch(/^[a-zA-Z0-9]+$/);
     expect(authorizationCodeProviderKey({ ...config })).toBe(key);
   });
 
-  it("differs for a different provider or client_id", () => {
+  it("differs when any part of the provider differs", () => {
     const key = authorizationCodeProviderKey(config);
     expect(authorizationCodeProviderKey({ ...config, clientId: "other-client" })).not.toBe(key);
     expect(authorizationCodeProviderKey({ ...config, authorizeUrl: "https://other.example.com/authorize" })).not.toBe(key);
-  });
-
-  it("is unchanged when resource is absent, so every existing (non-MCP) caller keeps its key", () => {
-    expect(authorizationCodeProviderKey(config)).toBe(
-      `${config.authorizeUrl}::${config.clientId}`.replace(/[^a-zA-Z0-9]/g, "").slice(0, 64),
-    );
+    expect(authorizationCodeProviderKey({ ...config, tokenUrl: "https://other.example.com/token" })).not.toBe(key);
+    expect(authorizationCodeProviderKey({ ...config, resource: "https://mcp.example.com/mcp" })).not.toBe(key);
   });
 
   it("differs for two MCP servers that share an authorization server and client_id", () => {
     const serverA: AuthorizationCodeConfig = { ...config, resource: "https://mcp-a.example.com/mcp" };
     const serverB: AuthorizationCodeConfig = { ...config, resource: "https://mcp-b.example.com/mcp" };
     expect(authorizationCodeProviderKey(serverA)).not.toBe(authorizationCodeProviderKey(serverB));
-    expect(authorizationCodeProviderKey(serverA)).toMatch(/^[a-zA-Z0-9-]+$/);
   });
 
-  it("survives a very long authorizeUrl without losing the resource suffix", () => {
+  it("tells apart server addresses that differ only slightly", () => {
+    const resources = [
+      "https://mcp.example.com/team",
+      "https://mcp.example.com/team/",
+      "https://mcp.example.com/team-other",
+      "https://mcp.example.com:8443/team",
+      "http://mcp.example.com/team",
+      "https://mcp.example.com/Team",
+      "",
+    ];
+    const keys = resources.map((resource) => authorizationCodeProviderKey({ ...config, resource }));
+    expect(new Set(keys).size).toBe(resources.length);
+  });
+
+  it("does not let one field run into the next", () => {
+    const first = authorizationCodeProviderKey({ ...config, clientId: "a", resource: "b" });
+    const second = authorizationCodeProviderKey({ ...config, clientId: 'a","b', resource: undefined });
+    expect(first).not.toBe(second);
+  });
+
+  it("survives a very long authorizeUrl without losing the client_id or the resource", () => {
     const longConfig: AuthorizationCodeConfig = { ...config, authorizeUrl: `https://auth.example.com/${"x".repeat(200)}/authorize` };
     const serverA: AuthorizationCodeConfig = { ...longConfig, resource: "https://mcp-a.example.com/mcp" };
     const serverB: AuthorizationCodeConfig = { ...longConfig, resource: "https://mcp-b.example.com/mcp" };
     expect(authorizationCodeProviderKey(serverA)).not.toBe(authorizationCodeProviderKey(serverB));
+    expect(authorizationCodeProviderKey({ ...longConfig, clientId: "other-client" })).not.toBe(authorizationCodeProviderKey(longConfig));
   });
 });
 
@@ -199,16 +223,16 @@ describe("authorizationCodeRefreshKey", () => {
     const fetchFn = (async () =>
       new Response(JSON.stringify({ access_token: "at", refresh_token: "rt", expires_in: 3600 }), { status: 200 })) as unknown as typeof fetch;
     const session = createAuthorizationCodeSession(config, store);
-    await session.startSignIn(redirectTo.capture);
+    await session.startSignIn(server, redirectTo.capture);
     await session.completeSignIn("abc", redirectTo.state(), fetchFn);
 
     expect(store.get(authorizationCodeRefreshKey(config))).toBe("rt");
   });
 
-  it("does not need redirectUri or tokenUrl - a caller checking for a stored session has neither", () => {
-    const { authorizeUrl, clientId, resource } = { ...config, resource: "https://mcp.example.com/mcp" };
-    expect(authorizationCodeRefreshKey({ authorizeUrl, clientId, resource })).toBe(
-      `afm.oauth.${authorizationCodeProviderKey({ authorizeUrl, clientId, resource })}.refresh`,
+  it("does not need redirectUri - a caller checking for a stored session does not have one", () => {
+    const { authorizeUrl, tokenUrl, clientId, resource } = { ...config, resource: "https://mcp.example.com/mcp" };
+    expect(authorizationCodeRefreshKey({ authorizeUrl, tokenUrl, clientId, resource })).toBe(
+      `afm.oauth.${authorizationCodeProviderKey({ authorizeUrl, tokenUrl, clientId, resource })}.refresh`,
     );
   });
 });
@@ -223,9 +247,31 @@ function fakeStore(): KeyValueStore {
 }
 
 describe("createAuthorizationCodeSession", () => {
+  const refreshKey = `afm.oauth.${authorizationCodeProviderKey(config)}.refresh`;
+  const tokensFor = (accessToken: string, refreshToken = "rt", expiresIn = 3600) => ({ access_token: accessToken, refresh_token: refreshToken, expires_in: expiresIn });
+
+  async function signedIn(expiresIn: number, store = fakeStore()) {
+    const session = createAuthorizationCodeSession(config, store);
+    await session.startSignIn(server, redirectTo.capture);
+    await session.completeSignIn("abc", redirectTo.state(), fakeFetch(tokensFor("old", "rt", expiresIn)).fn);
+    return { session, store };
+  }
+
+  function pausedFetch(json: unknown) {
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const calls: string[] = [];
+    const fn = (async (_url: string, init?: RequestInit) => {
+      calls.push(String(init?.body));
+      await gate;
+      return { ok: true, status: 200, json: async () => json } as Response;
+    }) as unknown as typeof fetch;
+    return { fn, calls, release: () => release() };
+  }
+
   it("startSignIn redirects to a PKCE authorize URL and leaves no session yet", async () => {
     const session = createAuthorizationCodeSession(config, fakeStore());
-    await session.startSignIn(redirectTo.capture);
+    await session.startSignIn(server, redirectTo.capture);
 
     const url = new URL(redirectTo.url);
     expect(url.searchParams.get("code_challenge_method")).toBe("S256");
@@ -233,10 +279,56 @@ describe("createAuthorizationCodeSession", () => {
     expect(session.hasSession()).toBe(false);
   });
 
+  it("sends the user to the server it was given, with that server's client", async () => {
+    const session = createAuthorizationCodeSession(config, fakeStore());
+    await session.startSignIn({ ...server, authorizeUrl: "https://elsewhere.example/authorize", clientId: "other-client" }, redirectTo.capture);
+
+    const url = new URL(redirectTo.url);
+    expect(url.origin + url.pathname).toBe("https://elsewhere.example/authorize");
+    expect(url.searchParams.get("client_id")).toBe("other-client");
+  });
+
+  it("asks for the resource the server named, not the address the file was configured with, in every request", async () => {
+    const forTeam = { ...config, resource: "https://mcp.example.com/team/mcp" };
+    const session = createAuthorizationCodeSession(forTeam, fakeStore());
+    await session.startSignIn({ ...server, resource: "https://mcp.example.com" }, redirectTo.capture);
+    expect(new URL(redirectTo.url).searchParams.get("resource")).toBe("https://mcp.example.com");
+    const exchange = fakeFetch(tokensFor("old", "rt", 1));
+    await session.completeSignIn("abc", redirectTo.state(), exchange.fn);
+    const refresh = fakeFetch(tokensFor("fresh"));
+    await session.getAccessToken(refresh.fn);
+    for (const call of [exchange.calls[0]!, refresh.calls[0]!]) {
+      expect(new URLSearchParams(call.body).get("resource")).toBe("https://mcp.example.com");
+    }
+  });
+
+  it("keeps the sign-in under the server's own address, whatever resource it asked for", async () => {
+    const forTeam = { ...config, resource: "https://mcp.example.com/team/mcp" };
+    const store = fakeStore();
+    const session = createAuthorizationCodeSession(forTeam, store);
+    await session.startSignIn({ ...server, resource: "https://mcp.example.com" }, redirectTo.capture);
+    await session.completeSignIn("abc", redirectTo.state(), fakeFetch(tokensFor("at")).fn);
+    expect(store.get(authorizationCodeRefreshKey(forTeam))).toBe("rt");
+  });
+
+  it("exchanges the code, and later refreshes, at the server it was given with that server's client", async () => {
+    const session = createAuthorizationCodeSession(config, fakeStore());
+    await session.startSignIn({ ...server, tokenUrl: "https://elsewhere.example/token", clientId: "other-client" }, redirectTo.capture);
+    const exchange = fakeFetch(tokensFor("old", "rt", 1));
+    await session.completeSignIn("abc", redirectTo.state(), exchange.fn);
+    const refresh = fakeFetch(tokensFor("fresh"));
+    await session.getAccessToken(refresh.fn);
+
+    for (const call of [exchange.calls[0]!, refresh.calls[0]!]) {
+      expect(call.url).toBe("https://elsewhere.example/token");
+      expect(new URLSearchParams(call.body).get("client_id")).toBe("other-client");
+    }
+  });
+
   it("exchanges the code for tokens when the state matches", async () => {
     const session = createAuthorizationCodeSession(config, fakeStore());
-    await session.startSignIn(redirectTo.capture);
-    const fetchFn = fakeFetch({ access_token: "at", refresh_token: "rt", expires_in: 3600 }).fn;
+    await session.startSignIn(server, redirectTo.capture);
+    const fetchFn = fakeFetch(tokensFor("at")).fn;
 
     await session.completeSignIn("abc", redirectTo.state(), fetchFn);
     expect(session.hasSession()).toBe(true);
@@ -251,8 +343,8 @@ describe("createAuthorizationCodeSession", () => {
       remove: (_k: string) => void calls.push("remove"),
     };
     const session = createAuthorizationCodeSession(config, tracked);
-    await session.startSignIn(redirectTo.capture);
-    await session.completeSignIn("abc", redirectTo.state(), fakeFetch({ access_token: "at", refresh_token: "rt", expires_in: 3600 }).fn);
+    await session.startSignIn(server, redirectTo.capture);
+    await session.completeSignIn("abc", redirectTo.state(), fakeFetch(tokensFor("at")).fn);
     expect(calls).toEqual(["remove", "set:rt"]);
   });
 
@@ -262,93 +354,100 @@ describe("createAuthorizationCodeSession", () => {
     expect(session.hasSession()).toBe(false);
   });
 
-  describe("when the answer names the server it came from", () => {
-    const issuer = "https://auth.example.com";
-    const own = {
-      issuer,
-      authorization_endpoint: config.authorizeUrl,
-      token_endpoint: config.tokenUrl,
-      code_challenge_methods_supported: ["S256"],
-    };
-
-    function issuerFetch(metadata: unknown) {
-      const calls: string[] = [];
-      const fn = (async (url: string) => {
-        calls.push(String(url));
-        if (String(url) === config.tokenUrl) {
-          return { ok: true, status: 200, json: async () => ({ access_token: "at", refresh_token: "rt", expires_in: 3600 }) } as Response;
-        }
-        return metadata === null
-          ? ({ ok: false, status: 404, json: async () => ({}) } as Response)
-          : ({ ok: true, status: 200, json: async () => metadata } as Response);
-      }) as unknown as typeof fetch;
-      return { fn, calls };
-    }
-
-    async function started() {
+  describe("the issuer the answer names", () => {
+    async function started(issuerSent: boolean) {
       const session = createAuthorizationCodeSession(config, fakeStore());
-      await session.startSignIn(redirectTo.capture);
-      return { session, state: redirectTo.state() };
+      await session.startSignIn({ ...server, issuerSent }, redirectTo.capture);
+      const { fn, calls } = fakeFetch(tokensFor("at"));
+      return { session, state: redirectTo.state(), fn, calls };
     }
 
-    it("exchanges the code when that server's endpoints are the ones this sign-in started with", async () => {
-      const { session, state } = await started();
-      const { fn, calls } = issuerFetch(own);
-      await session.completeSignIn("abc", state, fn, issuer);
-      expect(session.hasSession()).toBe(true);
-      expect(calls).toContain(config.tokenUrl);
-    });
-
-    it("compares the endpoints as normalised URLs", async () => {
-      const { session, state } = await started();
-      const { fn } = issuerFetch({ ...own, token_endpoint: "https://auth.example.com:443/oauth2/token" });
-      await session.completeSignIn("abc", state, fn, issuer);
+    it("lets the sign-in finish when it is the one the sign-in started with", async () => {
+      const { session, state, fn } = await started(true);
+      await session.completeSignIn("abc", state, fn, server.issuer);
       expect(session.hasSession()).toBe(true);
     });
 
     it.each([
-      ["authorization", { authorization_endpoint: "https://elsewhere.example/authorize" }],
-      ["token", { token_endpoint: "https://elsewhere.example/token" }],
-    ])("refuses a server with a different %s endpoint, without exchanging the code", async (_label, different) => {
-      const { session, state } = await started();
-      const { fn, calls } = issuerFetch({ ...own, ...different });
-      await expect(session.completeSignIn("abc", state, fn, issuer)).rejects.toThrow(/different server/);
-      expect(calls).not.toContain(config.tokenUrl);
+      ["another server", "https://other.example.com"],
+      ["the same server with a trailing slash", "https://auth.example.com/"],
+      ["the same server in capitals", "HTTPS://AUTH.EXAMPLE.COM"],
+      ["the same server with its default port", "https://auth.example.com:443"],
+      ["something that is not a URL", "not a url"],
+    ])("refuses %s, without exchanging the code", async (_label, iss) => {
+      const { session, state, fn, calls } = await started(true);
+      await expect(session.completeSignIn("abc", state, fn, iss)).rejects.toThrow(/expected provider/);
+      expect(calls).toHaveLength(0);
       expect(session.hasSession()).toBe(false);
     });
 
-    it("refuses a server that publishes no metadata", async () => {
-      const { session, state } = await started();
-      const { fn, calls } = issuerFetch(null);
-      await expect(session.completeSignIn("abc", state, fn, issuer)).rejects.toThrow(/different server/);
-      expect(calls).not.toContain(config.tokenUrl);
+    it("still checks an issuer the server did not say it sends", async () => {
+      const { session, state, fn, calls } = await started(false);
+      await expect(session.completeSignIn("abc", state, fn, "https://other.example.com")).rejects.toThrow(/expected provider/);
+      expect(calls).toHaveLength(0);
     });
 
-    it("refuses a server that is not https, without asking it anything", async () => {
-      const { session, state } = await started();
-      const { fn, calls } = issuerFetch(own);
-      await expect(session.completeSignIn("abc", state, fn, "http://auth.example.com")).rejects.toThrow(/different server/);
-      expect(calls).toEqual([]);
+    it("refuses an answer with no issuer when the server said it sends one, without exchanging the code", async () => {
+      const { session, state, fn, calls } = await started(true);
+      await expect(session.completeSignIn("abc", state, fn)).rejects.toThrow(/expected provider/);
+      expect(calls).toHaveLength(0);
     });
 
-    it("refuses an iss that is not a valid URL, without asking it anything", async () => {
-      const { session, state } = await started();
-      const { fn, calls } = issuerFetch(own);
-      await expect(session.completeSignIn("abc", state, fn, "not a url")).rejects.toThrow(/different server/);
-      expect(calls).toEqual([]);
-    });
-
-    it("looks nothing up when the answer names no server", async () => {
-      const { session, state } = await started();
-      const { fn, calls } = issuerFetch(null);
+    it("lets an answer with no issuer through when the server does not send one", async () => {
+      const { session, state, fn } = await started(false);
       await session.completeSignIn("abc", state, fn);
-      expect(calls).toEqual([config.tokenUrl]);
+      expect(session.hasSession()).toBe(true);
+    });
+
+    it("asks no server about the issuer", async () => {
+      const { session, state, fn, calls } = await started(true);
+      await session.completeSignIn("abc", state, fn, server.issuer);
+      expect(calls.map((call) => call.url)).toEqual([config.tokenUrl]);
+    });
+  });
+
+  describe("a refusal from the provider", () => {
+    async function started(issuerSent: boolean) {
+      const session = createAuthorizationCodeSession(config, fakeStore());
+      await session.startSignIn({ ...server, issuerSent }, redirectTo.capture);
+      return { session, state: redirectTo.state() };
+    }
+
+    it("is let through when it names the issuer the sign-in started with", async () => {
+      const { session, state } = await started(true);
+      expect(() => session.declineSignIn(state, server.issuer)).not.toThrow();
+    });
+
+    it.each([
+      ["names another server", "https://other.example.com", true],
+      ["names the same server with a trailing slash", "https://auth.example.com/", true],
+      ["names another server although the server does not say it sends one", "https://other.example.com", false],
+      ["names no server although the server said it sends one", undefined, true],
+    ])("is dropped when it %s", async (_label, iss, issuerSent) => {
+      const { session, state } = await started(issuerSent);
+      expect(() => session.declineSignIn(state, iss)).toThrow(/expected provider/);
+    });
+
+    it("is let through when it names no server and the server does not say it sends one", async () => {
+      const { session, state } = await started(false);
+      expect(() => session.declineSignIn(state)).not.toThrow();
+    });
+
+    it("is dropped when it carries the wrong state", async () => {
+      const { session } = await started(false);
+      expect(() => session.declineSignIn("WRONG")).toThrow(/state mismatch/i);
+    });
+
+    it("ends the sign-in, so a later answer for it is refused", async () => {
+      const { session, state } = await started(false);
+      session.declineSignIn(state);
+      await expect(session.completeSignIn("abc", state, fakeFetch(tokensFor("at")).fn)).rejects.toThrow(/No OAuth2 sign-in is waiting/);
     });
   });
 
   it("throws on a state mismatch (CSRF), and the sign-in cannot be retried with the right state", async () => {
     const session = createAuthorizationCodeSession(config, fakeStore());
-    await session.startSignIn(redirectTo.capture);
+    await session.startSignIn(server, redirectTo.capture);
     const state = redirectTo.state();
     const { fn, calls } = fakeFetch({ access_token: "at", expires_in: 3600 });
 
@@ -357,42 +456,180 @@ describe("createAuthorizationCodeSession", () => {
     expect(calls).toHaveLength(0);
   });
 
-  it("restore() resumes a session from a persisted refresh token", async () => {
-    const persistentStore = fakeStore();
-    persistentStore.set(`afm.oauth.${authorizationCodeProviderKey(config)}.refresh`, "saved-refresh");
-    const session = createAuthorizationCodeSession(config, persistentStore);
-    const fetchFn = fakeFetch({ access_token: "at3", expires_in: 3600 }).fn;
-    const restored = await session.restore(fetchFn);
-    expect(restored).toBe(true);
-    expect(await session.getAccessToken(fetchFn)).toBe("at3");
-  });
-
-  it("restore() returns false when nothing was persisted", async () => {
-    const session = createAuthorizationCodeSession(config, fakeStore());
-    expect(await session.restore()).toBe(false);
-  });
-
   it("getAccessToken refreshes an expired token automatically, and persists the rotated refresh token", async () => {
-    const persistentStore = fakeStore();
-    const session = createAuthorizationCodeSession(config, persistentStore);
-    await session.startSignIn(redirectTo.capture);
-    await session.completeSignIn("abc", redirectTo.state(), fakeFetch({ access_token: "expired-token", refresh_token: "rt", expires_in: 1 }).fn);
+    const { session, store } = await signedIn(1);
+    expect(await session.getAccessToken(fakeFetch(tokensFor("fresh-token", "rotated-rt")).fn)).toBe("fresh-token");
+    expect(store.get(refreshKey)).toBe("rotated-rt");
+  });
 
-    const refreshFetch = fakeFetch({ access_token: "fresh-token", refresh_token: "rotated-rt", expires_in: 3600 }).fn;
-    expect(await session.getAccessToken(refreshFetch)).toBe("fresh-token");
-    expect(persistentStore.get(`afm.oauth.${authorizationCodeProviderKey(config)}.refresh`)).toBe("rotated-rt");
+  describe("refreshing", () => {
+    it("runs one refresh for the calls that arrive while it is under way, and serves them all the new token", async () => {
+      const { session } = await signedIn(1);
+      const refresh = pausedFetch(tokensFor("fresh"));
+      const calls = [session.getAccessToken(refresh.fn), session.getAccessToken(refresh.fn), session.getAccessToken(refresh.fn)];
+      refresh.release();
+      expect(await Promise.all(calls)).toEqual(["fresh", "fresh", "fresh"]);
+      expect(refresh.calls).toHaveLength(1);
+    });
+
+    it("refreshes again when the new token has expired as well", async () => {
+      const { session } = await signedIn(1);
+      const first = fakeFetch(tokensFor("second", "rt2", 1));
+      await session.getAccessToken(first.fn);
+      const second = fakeFetch(tokensFor("third", "rt3"));
+      expect(await session.getAccessToken(second.fn)).toBe("third");
+      expect(new URLSearchParams(second.calls[0]!.body).get("refresh_token")).toBe("rt2");
+    });
+
+    it("lets the next call try again after a refresh failed", async () => {
+      const { session } = await signedIn(1);
+      await expect(session.getAccessToken(fakeFetch({}, false).fn)).rejects.toThrow(/refresh failed/);
+      expect(await session.getAccessToken(fakeFetch(tokensFor("fresh")).fn)).toBe("fresh");
+    });
+
+    it("drops a refresh that finishes after sign-out, so the user stays signed out", async () => {
+      const { session, store } = await signedIn(1);
+      const refresh = pausedFetch(tokensFor("fresh", "rt2"));
+      const call = session.getAccessToken(refresh.fn);
+      session.signOut();
+      refresh.release();
+      expect(await call).toBeNull();
+      expect(session.hasSession()).toBe(false);
+      expect(store.get(refreshKey)).toBeNull();
+    });
+
+    it("drops a refresh that finishes after a newer sign-in, which keeps its own tokens", async () => {
+      const { session, store } = await signedIn(1);
+      const refresh = pausedFetch(tokensFor("stale", "stale-rt"));
+      const call = session.getAccessToken(refresh.fn);
+      session.signOut();
+      await session.startSignIn(server, redirectTo.capture);
+      await session.completeSignIn("abc", redirectTo.state(), fakeFetch(tokensFor("newer", "newer-rt")).fn);
+      refresh.release();
+      await call;
+      expect(await session.getAccessToken()).toBe("newer");
+      expect(store.get(refreshKey)).toBe("newer-rt");
+    });
   });
 
   it("signOut clears the session and the persisted refresh token", async () => {
-    const persistentStore = fakeStore();
-    const session = createAuthorizationCodeSession(config, persistentStore);
-    await session.startSignIn(redirectTo.capture);
-    await session.completeSignIn("abc", redirectTo.state(), fakeFetch({ access_token: "at", refresh_token: "rt", expires_in: 3600 }).fn);
+    const { session, store } = await signedIn(3600);
 
     session.signOut();
     expect(session.hasSession()).toBe(false);
-    expect(await session.restore()).toBe(false);
-    expect(persistentStore.get(`afm.oauth.${authorizationCodeProviderKey(config)}.refresh`)).toBeNull();
+    expect(await session.getAccessToken()).toBeNull();
+    expect(store.get(refreshKey)).toBeNull();
+  });
+});
+
+describe("discoverSignInServer", () => {
+  const MCP = "https://mcp.example.com/mcp";
+  const CIMD = "https://afm.example.com/oauth/client-metadata.json";
+  const published = {
+    issuer: "https://auth.example.com",
+    authorization_endpoint: config.authorizeUrl,
+    token_endpoint: config.tokenUrl,
+    code_challenge_methods_supported: ["S256"],
+    registration_endpoint: "https://auth.example.com/register",
+  };
+  const provider: OAuthProviderRef = { authorizeUrl: config.authorizeUrl, tokenUrl: config.tokenUrl, clientId: config.clientId, resource: MCP };
+
+  function serverFetch(as: Record<string, unknown> | null = published, resource: string = MCP) {
+    const requested: string[] = [];
+    const routes: Record<string, { status?: number; json?: unknown; headers?: Record<string, string> }> = {
+      [MCP]: { status: 401, headers: { "www-authenticate": 'Bearer resource_metadata="https://mcp.example.com/prm"' } },
+      "https://mcp.example.com/prm": { json: { resource, authorization_servers: ["https://auth.example.com"] } },
+      "https://auth.example.com/register": { status: 201, json: { client_id: "registered" } },
+      ...(as === null ? {} : { "https://auth.example.com/.well-known/oauth-authorization-server": { json: as } }),
+    };
+    const fn = (async (input: string) => {
+      requested.push(String(input));
+      const route = routes[String(input)];
+      return route === undefined ? new Response("", { status: 404 }) : Response.json(route.json ?? {}, { status: route.status ?? 200, headers: route.headers });
+    }) as unknown as typeof fetch;
+    return { fn, requested };
+  }
+
+  const discover = (fn: typeof fetch, from = provider, cimdClientId?: string) =>
+    discoverSignInServer(from, { fetchFn: fn, redirectUri: config.redirectUri, cimdClientId });
+
+  it("takes the endpoints and the issuer from what the server publishes, not from the file", async () => {
+    const found = await discover(serverFetch().fn, { ...provider, authorizeUrl: "https://attacker.example/authorize", tokenUrl: "https://attacker.example/token" });
+    expect(found).toMatchObject({ authorizeUrl: config.authorizeUrl, tokenUrl: config.tokenUrl, issuer: "https://auth.example.com" });
+  });
+
+  it("takes the resource from what the server publishes, as written, even when it is a parent of the server's address", async () => {
+    expect((await discover(serverFetch(published, "https://mcp.example.com").fn)).resource).toBe("https://mcp.example.com");
+    expect((await discover(serverFetch().fn)).resource).toBe(MCP);
+  });
+
+  it("keeps the file's client id for the authorization server it was set up with, registering nothing", async () => {
+    const { fn, requested } = serverFetch();
+    expect((await discover(fn)).clientId).toBe(config.clientId);
+    expect(requested).not.toContain("https://auth.example.com/register");
+  });
+
+  it("compares the endpoints as normalised URLs", async () => {
+    const found = await discover(serverFetch({ ...published, token_endpoint: "https://auth.example.com:443/oauth2/token" }).fn);
+    expect(found.clientId).toBe(config.clientId);
+  });
+
+  it("registers a client when the file has none", async () => {
+    expect((await discover(serverFetch().fn, { ...provider, clientId: "" })).clientId).toBe("registered");
+  });
+
+  describe("when the server uses a different authorization server than the file was set up with", () => {
+    const moved = { ...provider, authorizeUrl: "https://old-auth.example.com/authorize", tokenUrl: "https://old-auth.example.com/token" };
+
+    it("does not reuse the file's client id: it registers a new one", async () => {
+      const { fn, requested } = serverFetch();
+      expect((await discover(fn, moved)).clientId).toBe("registered");
+      expect(requested).toContain("https://auth.example.com/register");
+    });
+
+    it("uses the client id document, when the server accepts one, registering nothing", async () => {
+      const { fn, requested } = serverFetch({ ...published, client_id_metadata_document_supported: true });
+      expect((await discover(fn, moved, CIMD)).clientId).toBe(CIMD);
+      expect(requested).not.toContain("https://auth.example.com/register");
+    });
+
+    it("refuses when no client id can be had, so the user is asked for one", async () => {
+      const { registration_endpoint: _omitted, ...noRegistration } = published;
+      await expect(discover(serverFetch(noRegistration).fn, moved)).rejects.toThrow(/client ID/);
+    });
+  });
+
+  it.each([
+    ["sends one", true, true],
+    ["does not say it sends one", undefined, false],
+    ["says it does not send one", false, false],
+  ])("notes whether the server %s", async (_label, flag, sent) => {
+    const found = await discover(serverFetch({ ...published, authorization_response_iss_parameter_supported: flag }).fn);
+    expect(found.issuerSent).toBe(sent);
+  });
+
+  it("refuses a server that publishes no resource document, so no sign-in starts", async () => {
+    const { fn, requested } = serverFetch();
+    const bare = (async (input: string, init?: RequestInit) => (String(input) === "https://mcp.example.com/prm" ? new Response("", { status: 404 }) : fn(input, init))) as unknown as typeof fetch;
+    await expect(discover(bare)).rejects.toThrow(/publishes no sign-in metadata.*current one/);
+    expect(requested).not.toContain("https://auth.example.com/register");
+  });
+
+  it("refuses a server whose resource document names another server", async () => {
+    await expect(discover(serverFetch(published, "https://other.example.com/mcp").fn)).rejects.toThrow(/does not name this server/);
+  });
+
+  it("refuses a server whose authorization server does not pass the checks", async () => {
+    await expect(discover(serverFetch({ ...published, issuer: "https://attacker.example" }).fn)).rejects.toThrow(/authorization server publishes no metadata/);
+  });
+
+  it("refuses a server that does not ask for a sign-in", async () => {
+    const open = (async () => Response.json({}, { status: 200 })) as unknown as typeof fetch;
+    await expect(discover(open)).rejects.toThrow(/did not ask for a sign-in/);
+  });
+
+  it("refuses a file that names no server address", async () => {
+    await expect(discover(serverFetch().fn, { ...provider, resource: undefined })).rejects.toThrow(/did not ask for a sign-in/);
   });
 });
 
@@ -433,13 +670,12 @@ describe("insecure endpoints in an untrusted agent file", () => {
     }
   });
 
-  it("does not redirect the browser when authorize_url is not https", async () => {
-    const session = createAuthorizationCodeSession(
-      { ...config, authorizeUrl: "http://auth.example.com/oauth2/authorize" },
-      fakeStore(),
-    );
+  it("does not redirect the browser when the authorization endpoint is not https", async () => {
+    const session = createAuthorizationCodeSession(config, fakeStore());
     let redirected: string | null = null;
-    await expect(session.startSignIn((u) => void (redirected = u))).rejects.toThrow(/must use https/);
+    await expect(
+      session.startSignIn({ ...server, authorizeUrl: "http://auth.example.com/oauth2/authorize" }, (u) => void (redirected = u)),
+    ).rejects.toThrow(/must use https/);
     expect(redirected).toBeNull();
   });
 
@@ -463,7 +699,7 @@ describe("insecure endpoints in an untrusted agent file", () => {
 
   it("still lets an ordinary https provider through, redirect and exchange both", async () => {
     const session = createAuthorizationCodeSession(config, fakeStore());
-    await session.startSignIn(redirectTo.capture);
+    await session.startSignIn(server, redirectTo.capture);
     expect(redirectTo.url.startsWith("https://auth.example.com/oauth2/authorize?")).toBe(true);
 
     const { fn, calls } = fakeFetch({ access_token: "at", expires_in: 3600 });
