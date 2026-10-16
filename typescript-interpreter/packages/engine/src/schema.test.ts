@@ -150,7 +150,7 @@ describe("validateMetadata", () => {
     it("rejects an unrecognized auth type", () => {
       expect(() =>
         validateMetadata({ model: { authentication: { type: "carrier-pigeon" } } }),
-      ).toThrow(/unknown authentication type/);
+      ).toThrow(/unknown authentication type\. Supported types/);
     });
 
     it("accepts an x-* extension type with arbitrary fields, unvalidated", () => {
@@ -193,7 +193,7 @@ describe("validateMetadata", () => {
           validateMetadata({
             model: { authentication: { type: "jwt", issuer: "i", signing_key: "k", algorithm: "ES256" } },
           }),
-        ).toThrow(/'algorithm' 'ES256' is not supported/);
+        ).toThrow(/jwt 'algorithm' is not supported/);
       });
     });
 
@@ -207,7 +207,7 @@ describe("validateMetadata", () => {
       it("rejects an unsupported grant_type", () => {
         expect(() =>
           validateMetadata({ model: { authentication: { type: "oauth2", grant_type: "implicit" } } }),
-        ).toThrow(/grant_type 'implicit' is not supported/);
+        ).toThrow(/oauth2 'grant_type' is not supported/);
       });
 
       it("requires client_credentials' fields", () => {
@@ -279,7 +279,7 @@ describe("validateMetadata", () => {
               },
             },
           }),
-        ).toThrow(/'credential_bearer' 'query_param' is not supported/);
+        ).toThrow(/oauth2 'credential_bearer' is not supported/);
       });
 
       it("accepts the browser-runtime authorization_code grant without a client_secret", () => {
