@@ -136,12 +136,14 @@ describe("createDynamicMcpAuthHeaderProvider", () => {
 interface TestServer {
   url: string;
   lastSeenHeader: string | undefined;
+  received: string[];
   forgetSessions: () => void;
   close: () => Promise<void>;
 }
 
 function startTestMcpServer(requiredHeader?: { name: string; value: string }): Promise<TestServer> {
   const state: { lastSeenHeader: string | undefined } = { lastSeenHeader: undefined };
+  const received: string[] = [];
   const transports = new Map<string, StreamableHTTPServerTransport>();
 
   function buildMcpServer(): McpServer {
@@ -170,6 +172,7 @@ function startTestMcpServer(requiredHeader?: { name: string; value: string }): P
       for await (const chunk of req) chunks.push(chunk as Buffer);
       const body: unknown = chunks.length > 0 ? JSON.parse(Buffer.concat(chunks).toString()) : undefined;
 
+      received.push(String((body as { method?: unknown } | undefined)?.method));
       const sessionId = req.headers["mcp-session-id"];
       let transport = typeof sessionId === "string" ? transports.get(sessionId) : undefined;
 
@@ -200,6 +203,7 @@ function startTestMcpServer(requiredHeader?: { name: string; value: string }): P
         get lastSeenHeader() {
           return state.lastSeenHeader;
         },
+        received,
         forgetSessions: () => transports.clear(),
         close: () =>
           new Promise((res) => {
@@ -233,16 +237,33 @@ describe("mcpToolPort — real auth headers through a real MCP handshake", () =>
     expect(result).toEqual({ ok: true, content: "Bearer secret-token" });
   });
 
-  it("starts a new session when the server has forgotten the old one, instead of failing from then on", async () => {
+  it("starts a new session for listing when the server has forgotten the old one, instead of failing from then on", async () => {
     server = await startTestMcpServer();
     const port = mcpToolPort({ serverUrl: server.url });
     await port.list();
 
     server.forgetSessions();
 
-    const result = await port.execute({ id: "1", name: "whoami", args: {} }, new AbortController().signal);
-    expect(result.ok).toBe(true);
     expect((await port.list()).map((t) => t.name)).toContain("whoami");
+    expect(server.received.filter((method) => method === "initialize")).toHaveLength(2);
+    await port.dispose?.();
+  });
+
+  it("does not repeat a tool call when the server has forgotten the session, and starts a new session for the next call", async () => {
+    server = await startTestMcpServer();
+    const port = mcpToolPort({ serverUrl: server.url });
+    await port.list();
+
+    server.forgetSessions();
+
+    await expect(port.execute({ id: "1", name: "whoami", args: {} }, new AbortController().signal)).rejects.toThrow(
+      /session had ended.*not repeated/,
+    );
+    expect(server.received.filter((method) => method === "tools/call")).toHaveLength(1);
+
+    const next = await port.execute({ id: "2", name: "whoami", args: {} }, new AbortController().signal);
+    expect(next.ok).toBe(true);
+    expect(server.received.filter((method) => method === "initialize")).toHaveLength(2);
     await port.dispose?.();
   });
 
@@ -323,6 +344,35 @@ describe("mcpToolPort — real auth headers through a real MCP handshake", () =>
     const tools = await port.list();
     expect(tools.map((t) => t.name)).toContain("whoami");
     expect(rejectedCount).toBe(0);
+  });
+});
+
+describe("mcpToolPort — the fetch it is given carries all of its traffic", () => {
+  let server: TestServer | null = null;
+
+  afterEach(async () => {
+    await server?.close();
+    server = null;
+  });
+
+  it.each([
+    ["static headers", { headers: { Authorization: "Bearer good-token" } }],
+    ["a dynamic auth provider", { authHeaderProvider: async () => ({ Authorization: "Bearer good-token" }) }],
+  ])("sends every POST and the event-stream GET through it, with %s", async (_name, auth) => {
+    server = await startTestMcpServer({ name: "authorization", value: "Bearer good-token" });
+    const calls: { method: string | undefined; authorization: string | null }[] = [];
+    const fetchFn = ((url: string | URL, init?: RequestInit) => {
+      calls.push({ method: init?.method, authorization: new Headers(init?.headers).get("authorization") });
+      return fetch(url, init);
+    }) as typeof fetch;
+    const port = mcpToolPort({ serverUrl: server.url, fetchFn, ...auth });
+
+    expect((await port.list()).map((t) => t.name)).toContain("whoami");
+    await vi.waitFor(() => expect(calls.map((c) => c.method)).toContain("GET"));
+
+    expect(calls.filter((c) => c.method === "POST").length).toBeGreaterThanOrEqual(3);
+    expect(calls.every((c) => c.authorization === "Bearer good-token")).toBe(true);
+    await port.dispose?.();
   });
 });
 
