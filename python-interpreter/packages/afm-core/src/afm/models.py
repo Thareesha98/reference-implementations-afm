@@ -57,11 +57,12 @@ class ClientAuthentication(BaseModel):
 
 
 class Model(BaseModel):
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
     name: str | None = None
     provider: str | None = None
     url: str | None = None
+    provider_options: dict[str, str] | None = None
     authentication: ClientAuthentication | None = None
 
 
