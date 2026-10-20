@@ -15,6 +15,7 @@
 // under the License.
 
 import ballerina/ai;
+import ballerina/file;
 import ballerina/http;
 import ballerina/io;
 import ballerina/lang.runtime;
@@ -421,7 +422,7 @@ function testGetModelGeminiMissingProject() returns error? {
     };
     var result = getModel(model);
     test:assertTrue(result is error);
-    test:assertTrue((<error>result).message().includes("'project'"));
+    test:assertTrue((<error>result).message().includes("'provider_options.project'"));
 }
 
 @test:Config
@@ -430,8 +431,7 @@ function testGetModelGeminiMissingCredentials() returns error? {
     Model model = {
         provider: "gemini",
         name: "gemini-2.5-flash",
-        project: "test-project",
-        location: "us-central1"
+        provider_options: {project: "test-project", location: "us-central1"}
     };
     var result = getModel(model);
     test:assertTrue(result is error);
@@ -439,10 +439,59 @@ function testGetModelGeminiMissingCredentials() returns error? {
 }
 
 @test:Config
+function testGetModelGeminiUnsupportedProviderOption() returns error? {
+    Model model = {
+        provider: "gemini",
+        name: "gemini-2.5-flash",
+        provider_options: {projet: "test-project"}
+    };
+    var result = getModel(model);
+    test:assertTrue(result is error);
+    test:assertTrue((<error>result).message().includes("projet"));
+}
+
+@test:Config
+function testGetModelGeminiBlankProviderOption() returns error? {
+    Model model = {
+        provider: "gemini",
+        name: "gemini-2.5-flash",
+        provider_options: {project: " "}
+    };
+    var result = getModel(model);
+    test:assertTrue(result is error);
+    test:assertTrue((<error>result).message().includes("must not be blank"));
+}
+
+@test:Config
+function testGetModelGeminiAuthenticationNotSupported() returns error? {
+    Model model = {
+        provider: "gemini",
+        name: "gemini-2.5-flash",
+        provider_options: {project: "test-project"},
+        authentication: {'type: "api-key", "api_key": "key"}
+    };
+    var result = getModel(model);
+    test:assertTrue(result is error);
+    test:assertTrue((<error>result).message().includes("'authentication' field is not supported"));
+}
+
+@test:Config
+function testGetModelProviderOptionsNotAcceptedByOpenAI() returns error? {
+    Model model = {
+        provider: "openai",
+        name: "gpt-4o",
+        provider_options: {project: "test-project"}
+    };
+    var result = getModel(model);
+    test:assertTrue(result is error);
+    test:assertTrue((<error>result).message().includes("does not accept provider_options"));
+}
+
+@test:Config
 function testGetModelOllamaLocalLoopback() returns error? {
     Model model = {
         provider: "ollama",
-        name: "llama3"
+        name: "llama3.1"
     };
     var result = getModel(model);
     test:assertTrue(result is ai:ModelProvider);
@@ -457,4 +506,45 @@ function testGetModelOllamaCustomEndpoint() returns error? {
     };
     var result = getModel(model);
     test:assertTrue(result is ai:ModelProvider);
+}
+
+@test:Config
+function testGetModelOllamaAuthenticationNotSupported() returns error? {
+    Model model = {
+        provider: "ollama",
+        name: "llama3.1",
+        authentication: {'type: "bearer", "token": "token"}
+    };
+    var result = getModel(model);
+    test:assertTrue(result is error);
+    test:assertTrue((<error>result).message().includes("'authentication' field is not supported"));
+}
+
+@test:Config
+function testResolveVertexAuthUnsupportedCredentialsType() returns error? {
+    string credentialsPath = check file:createTemp(".json");
+    check io:fileWriteJson(credentialsPath, {"type": "external_account", "audience": "test-audience"});
+    var result = resolveVertexAuth(credentialsPath);
+    check file:remove(credentialsPath);
+    test:assertTrue(result is error);
+    test:assertTrue((<error>result).message().includes("'external_account'"));
+}
+
+@test:Config
+function testResolveVertexAuthServiceAccount() returns error? {
+    string credentialsPath = check file:createTemp(".json");
+    check io:fileWriteJson(credentialsPath, {"type": "service_account", "client_email": "test@test.iam.gserviceaccount.com"});
+    var result = resolveVertexAuth(credentialsPath);
+    check file:remove(credentialsPath);
+    test:assertEquals(result, credentialsPath);
+}
+
+@test:Config
+function testResolveVertexAuthAuthorizedUserMissingFields() returns error? {
+    string credentialsPath = check file:createTemp(".json");
+    check io:fileWriteJson(credentialsPath, {"type": "authorized_user", "client_id": "test-client"});
+    var result = resolveVertexAuth(credentialsPath);
+    check file:remove(credentialsPath);
+    test:assertTrue(result is error);
+    test:assertTrue((<error>result).message().includes("'refresh_token'"));
 }

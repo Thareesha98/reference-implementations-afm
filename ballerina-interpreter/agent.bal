@@ -22,9 +22,9 @@ import ballerina/log;
 import ballerina/os;
 import ballerina/http;
 import ballerinax/ai.anthropic;
-import ballerinax/ai.openai;
-import ballerinax/ai.ollama;
 import ballerinax/ai.googleapis.vertex;
+import ballerinax/ai.ollama;
+import ballerinax/ai.openai;
 
 function createAgent(AFMRecord afmRecord, string afmFileDir) returns ai:Agent|error {
     AFMRecord {metadata, role, instructions} = afmRecord;
@@ -103,6 +103,8 @@ function getModel(Model? model) returns ai:ModelProvider|error {
 
     string providerLower = provider.toLowerAscii();
 
+    check validateProviderOptions(model.provider_options, providerLower);
+
     if providerLower == "wso2" {
         return new ai:Wso2ModelProvider(
             model.url ?: "https://dev-tools.wso2.com/ballerina-copilot/v2.0",
@@ -131,8 +133,14 @@ function getModel(Model? model) returns ai:ModelProvider|error {
             );
         }
         "ollama" => {
-            string url = model.url ?: "http://localhost:11434";
-            return new ollama:ModelProvider(check name.ensureType(), url);
+            if model.authentication !is () {
+                return error("The 'authentication' field is not supported for the 'ollama' provider");
+            }
+
+            string? url = model.url;
+            return url is string ?
+                new ollama:ModelProvider(check name.ensureType(), url) :
+                new ollama:ModelProvider(check name.ensureType());
         }
         "gemini" => {
             return getGeminiModel(model, name);
@@ -141,18 +149,58 @@ function getModel(Model? model) returns ai:ModelProvider|error {
     return error(string `Model provider: ${provider} not yet supported`);
 }
 
-// Standard Google environment variable holding the path to a service account JSON key.
+// Standard Google environment variable holding the path to a service account key
+// or an Application Default Credentials file.
 const GOOGLE_APP_CREDENTIALS_ENV = "GOOGLE_APPLICATION_CREDENTIALS";
-const DEFAULT_VERTEX_LOCATION = "us-central1";
-//(e.g. "gemini-2.5-flash" -> "google/gemini-2.5-flash").
-const DEFAULT_MODEL_PUBLISHER = "google";
 
+// Keys accepted under `provider_options`, per provider.
+const map<string[]> SUPPORTED_PROVIDER_OPTIONS = {
+    "wso2": [],
+    "openai": [],
+    "anthropic": [],
+    "ollama": [],
+    "gemini": ["project", "location"]
+};
+
+function validateProviderOptions(map<string>? providerOptions, string provider) returns error? {
+    string[]? supportedKeys = SUPPORTED_PROVIDER_OPTIONS[provider];
+    if providerOptions is () || supportedKeys is () {
+        return;
+    }
+
+    string[] unsupportedKeys = [];
+    string[] blankKeys = [];
+    foreach [string, string] [key, value] in providerOptions.entries() {
+        if supportedKeys.indexOf(key) is () {
+            unsupportedKeys.push(key);
+        } else if value.trim() == "" {
+            blankKeys.push(key);
+        }
+    }
+
+    if unsupportedKeys.length() > 0 {
+        string hint = supportedKeys.length() == 0 ? "This provider does not accept provider_options" :
+            string `Supported keys: ${string:'join(", ", ...supportedKeys)}`;
+        return error(string `Unsupported provider_options key(s) for provider '${provider}': ` +
+            string `${string:'join(", ", ...unsupportedKeys)}. ${hint}`);
+    }
+
+    if blankKeys.length() > 0 {
+        return error(string `provider_options value(s) must not be blank: ${string:'join(", ", ...blankKeys)}`);
+    }
+}
 
 function getGeminiModel(Model model, string name) returns ai:ModelProvider|error {
-    string? project = model.project;
+    map<string> providerOptions = model.provider_options ?: {};
+    string? project = providerOptions["project"];
     if project is () {
-        return error("Vertex AI requires the 'project' field to be set in the model block " +
-            "(AI Studio Gemini is not yet supported by the Ballerina interpreter)");
+        return error("The 'gemini' provider requires 'provider_options.project': " +
+            "the Ballerina interpreter supports Gemini on Vertex AI only");
+    }
+
+    if model.authentication !is () {
+        return error("The 'authentication' field is not supported for the 'gemini' provider. Vertex AI " +
+            string `authenticates with the credentials file referenced by '${GOOGLE_APP_CREDENTIALS_ENV}'`);
     }
 
     string? credentialsPath = os:getEnv(GOOGLE_APP_CREDENTIALS_ENV);
@@ -164,10 +212,10 @@ function getGeminiModel(Model model, string name) returns ai:ModelProvider|error
 
     vertex:VertexAiAuth auth = check resolveVertexAuth(credentialsPath);
 
-    string location = model.location ?: DEFAULT_VERTEX_LOCATION;
-    string qualifiedModel = name.includes("/") ? name : string `${DEFAULT_MODEL_PUBLISHER}/${name}`;
-
-    vertex:ModelProvider|error vertexModel = new (auth, project, qualifiedModel, location = location);
+    string? location = providerOptions["location"];
+    vertex:ModelProvider|error vertexModel = location is string ?
+        trap new (auth, project, name, location = location) :
+        trap new (auth, project, name);
     if vertexModel is error {
         return error(string `Failed to initialize the Vertex AI model provider: ${vertexModel.message()}`, vertexModel);
     }
@@ -195,6 +243,12 @@ function resolveVertexAuth(string credentialsPath) returns vertex:VertexAiAuth|e
         }
         vertex:OAuth2RefreshConfig oauth2Config = {clientId, clientSecret, refreshToken};
         return oauth2Config;
+    }
+
+    json credentialsType = creds["type"];
+    if credentialsType is string && credentialsType != "service_account" {
+        return error(string `Unsupported Google credentials type '${credentialsType}'. ` +
+            "Supported types are 'authorized_user' and 'service_account'");
     }
 
     return credentialsPath;
