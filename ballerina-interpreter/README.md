@@ -43,36 +43,36 @@ The model is configured via the `model` block in the AFM frontmatter. Supported 
 
 | `provider` | Required fields | Credentials |
 |---|---|---|
-| _(omitted)_ | — | `WSO2_MODEL_PROVIDER_TOKEN` env var (WSO2 default model) |
-| `wso2` | — | `authentication` (bearer) or `WSO2_MODEL_PROVIDER_TOKEN` |
+| _(no `model` block)_ | — | `WSO2_MODEL_PROVIDER_TOKEN` env var (WSO2 default model) |
+| `wso2` | — | `authentication` (bearer) |
 | `openai` | `name` | `authentication` (api-key) |
 | `anthropic` | `name` | `authentication` (api-key) |
-| `ollama` | `name` | none (local; optional `url`) |
-| `gemini` | `name`, `project` | Google ADC or service account key via `GOOGLE_APPLICATION_CREDENTIALS` |
+| `ollama` | `name` | none (optional `url`, defaults to `http://localhost:11434`) |
+| `gemini` | `name`, `provider_options.project` | Google credentials file via `GOOGLE_APPLICATION_CREDENTIALS` |
 
-### Vertex AI (Gemini)
+Provider-specific settings go under `provider_options`. Keys that the selected provider does not support are rejected.
 
-`provider: gemini` runs against **Vertex AI**. Vertex mode is selected by the presence of the
-`project` field (matching the Python interpreter). No `authentication` block is needed in the
-AFM file — credentials are read from the standard `GOOGLE_APPLICATION_CREDENTIALS` environment
-variable, which may point at **either** credential format:
+### Gemini (Vertex AI)
 
-- **Application Default Credentials** (`authorized_user`) — produced by
-  `gcloud auth application-default login`. The interpreter maps these to the connector's
-  OAuth2 refresh-token flow. This is the quickest path for local development and is the same
-  file the Python interpreter uses.
-- **Service account key** (`service_account`) — a downloaded JSON key. Recommended for
-  production / CI.
+The Ballerina interpreter runs Gemini on Vertex AI only. Set the project, and optionally the location, under `provider_options`:
 
 ```yaml
 model:
   provider: gemini
-  name: gemini-2.5-flash      # bare names are sent to the "google" publisher
-  project: your-gcp-project-id
-  location: us-central1        # optional, defaults to us-central1
+  name: gemini-2.5-flash
+  provider_options:
+    project: your-gcp-project-id
+    location: us-central1        # optional, defaults to global
 ```
 
-**Local development (ADC):**
+The `authentication` field is not used. Credentials are read from the file referenced by the `GOOGLE_APPLICATION_CREDENTIALS` environment variable, which can be either:
+
+- **Application Default Credentials** (`authorized_user`), created by `gcloud auth application-default login`.
+- **A service account key** (`service_account`), a downloaded JSON key file.
+
+Other credential types, such as `external_account` files or credentials provided by the metadata server (for example workload identity on GKE or Cloud Run), are not supported.
+
+**Local development:**
 
 ```bash
 gcloud auth application-default login
@@ -80,20 +80,7 @@ export GOOGLE_APPLICATION_CREDENTIALS="$HOME/.config/gcloud/application_default_
 bal run -- agent-vertex.afm.md
 ```
 
-**Production (service account):**
-
-```bash
-gcloud iam service-accounts create afm-vertex --project YOUR_PROJECT_ID
-gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
-  --member="serviceAccount:afm-vertex@YOUR_PROJECT_ID.iam.gserviceaccount.com" \
-  --role="roles/aiplatform.user"
-gcloud iam service-accounts keys create sa-key.json \
-  --iam-account=afm-vertex@YOUR_PROJECT_ID.iam.gserviceaccount.com
-export GOOGLE_APPLICATION_CREDENTIALS="$(pwd)/sa-key.json"
-```
-
-**Docker** — mount the credentials file (read-only) and point the env var at it inside the
-container. Using your ADC file (same as the Python interpreter):
+**Docker:** mount the credentials file read-only and point the environment variable at it. The file must be readable by the container user (UID 10014).
 
 ```bash
 docker run -it --rm \
@@ -102,9 +89,6 @@ docker run -it --rm \
   -e GOOGLE_APPLICATION_CREDENTIALS=/tmp/adc.json \
   afm-ballerina-interpreter /app/agent.afm.md
 ```
-
-In a managed environment (e.g. GKE / Cloud Run), prefer an attached service account
-(workload identity) instead of mounting a credentials file.
 
 ## Running with Docker
 
