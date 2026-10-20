@@ -14,21 +14,24 @@
 # specific language governing permissions and limitations
 # under the License.
 
-import time
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
-import jwt
 import pytest
-from langchain_core.tools import BaseTool
-from langchain_mcp_adapters.sessions import StdioConnection
-
-from afm.exceptions import MCPAuthenticationError, MCPConnectionError
+from afm.authentication import (
+    ApiKeyAuthentication,
+    BasicAuthentication,
+    BearerAuthentication,
+    ClientAuthentication,
+    JwtAuthentication,
+    OAuth2Authentication,
+)
+from afm.exceptions import MCPAuthenticationError, MCPConnectionError, MCPError
+from afm.http_auth import HeaderAuth, JwtAuth, OAuth2Auth
 from afm.models import (
     AFMRecord,
     AgentMetadata,
-    ClientAuthentication,
     HttpTransport,
     MCPServer,
     StdioTransport,
@@ -36,15 +39,15 @@ from afm.models import (
     Tools,
 )
 from afm_langchain.tools.mcp import (
-    ApiKeyAuth,
-    BearerAuth,
-    JwtAuth,
     MCPClient,
     MCPManager,
-    OAuth2Auth,
-    build_httpx_auth,
     filter_tools,
 )
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from langchain_core.tools import BaseTool
+from langchain_mcp_adapters.sessions import StdioConnection
+from pydantic import TypeAdapter
 
 
 def make_mcp_server(
@@ -55,25 +58,23 @@ def make_mcp_server(
 ) -> MCPServer:
     auth = None
     if auth_type == "bearer":
-        auth = ClientAuthentication(type="bearer", token="test-token")
+        auth = BearerAuthentication(token="test-token")
     elif auth_type == "basic":
-        auth = ClientAuthentication(type="basic", username="user", password="pass")
+        auth = BasicAuthentication(username="user", password="pass")
     elif auth_type == "api-key":
-        auth = ClientAuthentication(type="api-key", api_key="test-api-key")
+        auth = ApiKeyAuthentication(api_key="test-api-key")
     elif auth_type == "oauth2":
-        auth = ClientAuthentication(
-            type="oauth2",
+        auth = OAuth2Authentication(
             grant_type="client_credentials",
-            token_url="https://auth.example.com/token",
-            client_id="id",
+            token_url="https://idp.example.com/token",
+            client_id="client",
             client_secret="secret",
         )
     elif auth_type == "jwt":
-        auth = ClientAuthentication(
-            type="jwt",
-            issuer="afm-agent",
-            audience="https://api.example.com",
-            signing_key="secret",
+        auth = JwtAuthentication(
+            issuer="issuer",
+            audience="audience",
+            signing_key="k" * 32,
             algorithm="HS256",
         )
 
@@ -125,286 +126,6 @@ def make_mock_tool(name: str, description: str = "A test tool") -> MagicMock:
 
     tool.args_schema = MockArgsSchema
     return tool
-
-
-class TestBuildHttpxAuth:
-    def test_none_auth_returns_none(self):
-        result = build_httpx_auth(None)
-        assert result is None
-
-    def test_bearer_auth_returns_bearer_auth_instance(self):
-        auth = ClientAuthentication(type="bearer", token="my-token")
-        result = build_httpx_auth(auth)
-        assert isinstance(result, BearerAuth)
-        assert result.token == "my-token"
-
-    def test_basic_auth_returns_httpx_basic_auth(self):
-        auth = ClientAuthentication(type="basic", username="user", password="pass")
-        result = build_httpx_auth(auth)
-        assert isinstance(result, httpx.BasicAuth)
-
-    def test_api_key_auth_returns_api_key_auth_instance(self):
-        auth = ClientAuthentication(type="api-key", api_key="my-api-key")
-        result = build_httpx_auth(auth)
-        assert isinstance(result, ApiKeyAuth)
-        assert result.api_key == "my-api-key"
-
-    def test_api_key_auth_defaults_to_authorization_header(self):
-        auth = ClientAuthentication(type="api-key", api_key="my-api-key")
-        result = build_httpx_auth(auth)
-        assert isinstance(result, ApiKeyAuth)
-        assert result.header_name == "Authorization"
-
-    def test_api_key_auth_uses_custom_header_name(self):
-        auth = ClientAuthentication(
-            type="api-key", api_key="my-api-key", header_name="X-API-Key"
-        )
-        result = build_httpx_auth(auth)
-        assert isinstance(result, ApiKeyAuth)
-        assert result.api_key == "my-api-key"
-        assert result.header_name == "X-API-Key"
-
-    def test_jwt_auth_returns_jwt_auth_instance(self):
-        auth = ClientAuthentication(
-            type="jwt",
-            issuer="afm-agent",
-            audience="https://api.example.com",
-            signing_key="secret",
-            algorithm="HS256",
-        )
-        result = build_httpx_auth(auth)
-        assert isinstance(result, JwtAuth)
-        assert result.issuer == "afm-agent"
-        assert result.algorithm == "HS256"
-
-    def test_jwt_auth_defaults_to_rs256(self):
-        auth = ClientAuthentication(
-            type="jwt", issuer="i", audience="a", signing_key="s"
-        )
-        result = build_httpx_auth(auth)
-        assert isinstance(result, JwtAuth)
-        assert result.algorithm == "RS256"
-
-    def test_jwt_auth_signs_valid_hmac_token(self):
-        auth = ClientAuthentication(
-            type="jwt",
-            issuer="afm-agent",
-            audience="https://api.example.com",
-            signing_key="topsecret-key-that-is-32-bytes-or-more",
-            algorithm="HS256",
-            subject="agent-1",
-            custom_claims={"scope": "read"},
-            expiry_seconds=600,
-        )
-        jwt_auth = build_httpx_auth(auth)
-        assert isinstance(jwt_auth, JwtAuth)
-        token = jwt_auth.sign()
-        decoded = jwt.decode(
-            token,
-            "topsecret-key-that-is-32-bytes-or-more",
-            algorithms=["HS256"],
-            audience="https://api.example.com",
-        )
-        assert decoded["iss"] == "afm-agent"
-        assert decoded["sub"] == "agent-1"
-        assert decoded["scope"] == "read"
-        assert decoded["exp"] - decoded["iat"] == 600
-
-    def test_jwt_auth_signs_rs256_with_key_file(self, tmp_path):
-        from cryptography.hazmat.primitives import serialization
-        from cryptography.hazmat.primitives.asymmetric import rsa
-
-        private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-        key_file = tmp_path / "jwt_key.pem"
-        key_file.write_bytes(
-            private_key.private_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PrivateFormat.PKCS8,
-                encryption_algorithm=serialization.NoEncryption(),
-            )
-        )
-
-        auth = ClientAuthentication(
-            type="jwt",
-            issuer="afm-agent",
-            audience="https://api.example.com",
-            signing_key=str(key_file),  # asymmetric: signing_key is a file path
-            algorithm="RS256",
-        )
-        jwt_auth = build_httpx_auth(auth)
-        assert isinstance(jwt_auth, JwtAuth)
-        token = jwt_auth.sign()
-
-        public_pem = private_key.public_key().public_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PublicFormat.SubjectPublicKeyInfo,
-        )
-        decoded = jwt.decode(
-            token,
-            public_pem,
-            algorithms=["RS256"],
-            audience="https://api.example.com",
-        )
-        assert decoded["iss"] == "afm-agent"
-
-    def test_jwt_signing_key_file_read_once_and_cached(self, tmp_path):
-        from cryptography.hazmat.primitives import serialization
-        from cryptography.hazmat.primitives.asymmetric import rsa
-
-        private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-        key_file = tmp_path / "jwt_key.pem"
-        key_file.write_bytes(
-            private_key.private_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PrivateFormat.PKCS8,
-                encryption_algorithm=serialization.NoEncryption(),
-            )
-        )
-        auth = ClientAuthentication(
-            type="jwt", issuer="i", signing_key=str(key_file), algorithm="RS256"
-        )
-        jwt_auth = build_httpx_auth(auth)
-        assert isinstance(jwt_auth, JwtAuth)
-        jwt_auth.sign()
-        # Key is cached after first sign; removing the file must not break a second sign.
-        key_file.unlink()
-        jwt_auth.sign()
-
-    def test_oauth2_returns_oauth2_auth_instance(self):
-        auth = ClientAuthentication(
-            type="oauth2",
-            grant_type="client_credentials",
-            token_url="https://auth.example.com/token",
-            client_id="id",
-            client_secret="secret",
-            scopes=["read"],
-        )
-        result = build_httpx_auth(auth)
-        assert isinstance(result, OAuth2Auth)
-        assert result.grant_type == "client_credentials"
-
-    def test_oauth2_client_credentials_token_request(self):
-        result = build_httpx_auth(
-            ClientAuthentication(
-                type="oauth2",
-                grant_type="client_credentials",
-                token_url="https://auth.example.com/token",
-                client_id="id",
-                client_secret="secret",
-                scopes=["read", "write"],
-            )
-        )
-        assert isinstance(result, OAuth2Auth)
-        url, data, basic = result._token_request()
-        assert url == "https://auth.example.com/token"
-        assert data["grant_type"] == "client_credentials"
-        assert data["scope"] == "read write"
-        assert basic == ("id", "secret")
-
-    def test_oauth2_refresh_token_uses_token_url(self):
-        result = build_httpx_auth(
-            ClientAuthentication(
-                type="oauth2",
-                grant_type="refresh_token",
-                token_url="https://auth.example.com/token",
-                refresh_token="rt",
-                client_id="id",
-                client_secret="secret",
-            )
-        )
-        assert isinstance(result, OAuth2Auth)
-        url, data, _basic = result._token_request()
-        assert url == "https://auth.example.com/token"
-        assert data["grant_type"] == "refresh_token"
-        assert data["refresh_token"] == "rt"
-
-    def test_oauth2_jwt_bearer_token_request(self):
-        result = build_httpx_auth(
-            ClientAuthentication(
-                type="oauth2",
-                grant_type="jwt_bearer",
-                token_url="https://auth.example.com/token",
-                assertion="signed.jwt",
-            )
-        )
-        assert isinstance(result, OAuth2Auth)
-        _url, data, basic = result._token_request()
-        assert data["grant_type"] == "urn:ietf:params:oauth:grant-type:jwt-bearer"
-        assert data["assertion"] == "signed.jwt"
-        assert basic is None  # no client credentials provided
-
-    def test_oauth2_uses_cached_token(self):
-        result = build_httpx_auth(
-            ClientAuthentication(
-                type="oauth2",
-                grant_type="client_credentials",
-                token_url="u",
-                client_id="id",
-                client_secret="secret",
-            )
-        )
-        assert isinstance(result, OAuth2Auth)
-        result._token = "cached-token"
-        result._expires_at = time.time() + 1000
-        request = httpx.Request("GET", "https://api.example.com/resource")
-        flow = result.sync_auth_flow(request)
-        next(flow)
-        assert request.headers["Authorization"] == "Bearer cached-token"
-
-    def test_oauth2_credential_bearer_post_body(self):
-        result = build_httpx_auth(
-            ClientAuthentication(
-                type="oauth2",
-                grant_type="client_credentials",
-                token_url="https://auth.example.com/token",
-                client_id="id",
-                client_secret="secret",
-                credential_bearer="post_body",
-            )
-        )
-        assert isinstance(result, OAuth2Auth)
-        _url, data, basic = result._token_request()
-        assert basic is None
-        assert data["client_id"] == "id"
-        assert data["client_secret"] == "secret"
-
-    def test_oauth2_credential_bearer_defaults_to_auth_header(self):
-        result = build_httpx_auth(
-            ClientAuthentication(
-                type="oauth2",
-                grant_type="client_credentials",
-                token_url="https://auth.example.com/token",
-                client_id="id",
-                client_secret="secret",
-            )
-        )
-        assert isinstance(result, OAuth2Auth)
-        _url, data, basic = result._token_request()
-        assert basic == ("id", "secret")
-        assert "client_secret" not in data
-
-    def test_jwt_without_audience_omits_aud_claim(self):
-        auth = ClientAuthentication(
-            type="jwt",
-            issuer="afm-agent",
-            signing_key="topsecret-key-that-is-32-bytes-or-more",
-            algorithm="HS256",
-        )
-        jwt_auth = build_httpx_auth(auth)
-        assert isinstance(jwt_auth, JwtAuth)
-        token = jwt_auth.sign()
-        decoded = jwt.decode(
-            token,
-            "topsecret-key-that-is-32-bytes-or-more",
-            algorithms=["HS256"],
-        )
-        assert decoded["iss"] == "afm-agent"
-        assert "aud" not in decoded
-
-    def test_extension_type_not_supported_by_runtime(self):
-        auth = ClientAuthentication(type="x-aws-sigv4", region="us-east-1")
-        with pytest.raises(MCPAuthenticationError, match="extension authentication type"):
-            build_httpx_auth(auth)
 
 
 class TestFilterTools:
@@ -515,7 +236,7 @@ class TestMCPClient:
 
         assert config["transport"] == "streamable_http"
         assert "auth" in config
-        assert isinstance(config["auth"], BearerAuth)
+        assert isinstance(config["auth"], HeaderAuth)
 
     def test_build_connection_config_stdio(self):
         server = make_stdio_mcp_server(
@@ -842,3 +563,91 @@ class TestMCPManager:
         assert len(tools) == 2
         assert tools[0].name == "http_tool"
         assert tools[1].name == "stdio_tool"
+
+
+class TestMCPAuthentication:
+    @pytest.mark.parametrize(
+        ("auth_type", "expected"),
+        [
+            ("bearer", HeaderAuth),
+            ("api-key", HeaderAuth),
+            ("basic", httpx.BasicAuth),
+            ("jwt", JwtAuth),
+            ("oauth2", OAuth2Auth),
+        ],
+    )
+    def test_every_type_is_applied_to_the_http_transport(self, auth_type, expected):
+        client = MCPClient.from_mcp_server(make_mcp_server(auth_type=auth_type))
+
+        assert isinstance(client._build_connection_config()["auth"], expected)
+
+    def test_stdio_transports_have_no_authentication(self):
+        client = MCPClient.from_mcp_server(make_stdio_mcp_server())
+        assert client.auth is None
+
+    def test_the_transport_url_is_the_default_oauth2_resource(self):
+        server = make_mcp_server(
+            url="HTTPS://MCP.Example.com/mcp#frag", auth_type="oauth2"
+        )
+        client = MCPClient.from_mcp_server(server)
+        assert client.auth._resource == "https://mcp.example.com/mcp"
+
+    def test_the_afm_directory_resolves_relative_signing_keys(self, tmp_path):
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        (tmp_path / "signing.pem").write_bytes(
+            key.private_bytes(
+                serialization.Encoding.PEM,
+                serialization.PrivateFormat.PKCS8,
+                serialization.NoEncryption(),
+            )
+        )
+        server = make_mcp_server()
+        server.transport.authentication = TypeAdapter(
+            ClientAuthentication
+        ).validate_python(
+            {
+                "type": "jwt",
+                "issuer": "i",
+                "audience": "a",
+                "signing_key": "signing.pem",
+            }
+        )
+        afm = make_afm_with_mcp([server])
+        afm.source_dir = tmp_path
+
+        manager = MCPManager.from_afm(afm)
+
+        assert isinstance(manager._clients[0].auth, JwtAuth)
+
+    def test_an_unusable_key_fails_when_the_manager_is_created(self, tmp_path):
+        server = make_mcp_server(name="secured")
+        server.transport.authentication = TypeAdapter(
+            ClientAuthentication
+        ).validate_python(
+            {
+                "type": "jwt",
+                "issuer": "i",
+                "audience": "a",
+                "signing_key": "missing.pem",
+            }
+        )
+        afm = make_afm_with_mcp([server])
+        afm.source_dir = tmp_path
+
+        with pytest.raises(MCPAuthenticationError, match="MCP server 'secured'"):
+            MCPManager.from_afm(afm)
+
+    def test_other_mcp_errors_still_skip_the_server(self, caplog):
+        good, bad = make_mcp_server(name="good"), make_mcp_server(name="bad")
+        real = MCPClient.from_mcp_server
+
+        def from_mcp_server(server, base_dir=None):
+            if server.name == "bad":
+                raise MCPError("Unsupported transport type", server_name=server.name)
+            return real(server, base_dir)
+
+        with patch.object(MCPClient, "from_mcp_server", side_effect=from_mcp_server):
+            manager = MCPManager([good, bad])
+
+        assert manager.server_names == ["good"]
+        assert "Skipping MCP server" in caplog.text

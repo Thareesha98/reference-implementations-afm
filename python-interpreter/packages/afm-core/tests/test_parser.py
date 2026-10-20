@@ -17,11 +17,9 @@
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
 
 from afm.exceptions import AFMParseError, AFMValidationError, VariableResolutionError
 from afm.models import (
-    ClientAuthentication,
     ConsoleChatInterface,
     HttpTransport,
     StdioTransport,
@@ -142,6 +140,31 @@ class TestParseAfm:
         # Should have role and instructions
         assert result.role == "This is the role without frontmatter."
         assert result.instructions == "These are instructions without frontmatter."
+
+    def test_parse_frontmatter_with_leading_blank_lines(self) -> None:
+        content = """
+
+---
+spec_version: "0.3.0"
+model:
+  provider: "ollama"
+  name: "llama3"
+---
+
+# Role
+The role.
+
+# Instructions
+The instructions.
+"""
+        result = parse_afm(content)
+
+        assert result.metadata.spec_version == "0.3.0"
+        assert result.metadata.model is not None
+        assert result.metadata.model.provider == "ollama"
+        assert result.metadata.model.name == "llama3"
+        assert result.role == "The role."
+        assert result.instructions == "The instructions."
 
     def test_parse_unclosed_frontmatter(self) -> None:
         content = """---
@@ -497,261 +520,78 @@ Test instructions
         assert result.metadata.model.authentication.token == "secret-token-123"
 
 
-class TestClientAuthenticationValidation:
+class TestAuthenticationVariables:
+    def test_variables_are_resolved_inside_nested_authentication_values(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SCOPE", "read")
+        monkeypatch.setenv("TENANT", "t1")
+        content = """---
+tools:
+  mcp:
+    - name: server
+      transport:
+        type: http
+        url: https://mcp.example.com
+        authentication:
+          type: oauth2
+          grant_type: client_credentials
+          token_url: https://idp.example.com/token
+          client_id: id
+          client_secret: secret
+          scopes: ["${env:SCOPE}"]
+          extra_params:
+            tenant: "${env:TENANT}"
+---
+# Role
+r
+# Instructions
+i
+"""
+        auth = parse_afm(content).metadata.tools.mcp[0].transport.authentication
 
-    def test_bearer_valid(self) -> None:
-        auth = ClientAuthentication(type="bearer", token="t")
-        assert auth.type == "bearer"
-        assert auth.token == "t"
+        assert auth.scopes == ["read"]
+        assert auth.extra_params == {"tenant": "t1"}
 
-    def test_basic_valid(self) -> None:
-        auth = ClientAuthentication(type="basic", username="u", password="p")
-        assert auth.username == "u"
-        assert auth.password == "p"
-
-    def test_api_key_valid(self) -> None:
-        auth = ClientAuthentication(type="api-key", api_key="k")
-        assert auth.api_key == "k"
-        assert auth.header_name is None
-
-    def test_api_key_with_header_name(self) -> None:
-        auth = ClientAuthentication(type="api-key", api_key="k", header_name="X-API-Key")
-        assert auth.header_name == "X-API-Key"
-
-    def test_type_is_case_insensitive(self) -> None:
-        auth = ClientAuthentication(type="Bearer", token="t")
-        assert auth.token == "t"
-
-    def test_jwt_valid(self) -> None:
-        auth = ClientAuthentication(
-            type="jwt",
-            issuer="afm-agent",
-            audience="https://api.example.com",
-            signing_key="secret",
-        )
-        assert auth.issuer == "afm-agent"
-        assert auth.audience == "https://api.example.com"
-
-    def test_jwt_audience_list(self) -> None:
-        auth = ClientAuthentication(
-            type="jwt", issuer="i", audience=["a", "b"], signing_key="s"
-        )
-        assert auth.audience == ["a", "b"]
-
-    def test_jwt_without_audience_valid(self) -> None:
-        auth = ClientAuthentication(type="jwt", issuer="i", signing_key="s")
-        assert auth.audience is None
-
-    def test_jwt_missing_signing_key_rejected(self) -> None:
-        with pytest.raises(
-            ValidationError, match="type 'jwt' requires 'signing_key'"
-        ):
-            ClientAuthentication(type="jwt", issuer="i", audience="a")
-
-    def test_jwt_algorithm_valid(self) -> None:
-        auth = ClientAuthentication(
-            type="jwt", issuer="i", signing_key="s", algorithm="HS256"
-        )
-        assert auth.algorithm == "HS256"
-
-    def test_jwt_algorithm_none_rejected(self) -> None:
-        with pytest.raises(ValidationError, match="'none' is not allowed"):
-            ClientAuthentication(
-                type="jwt", issuer="i", signing_key="s", algorithm="none"
-            )
-
-    def test_jwt_algorithm_unsupported_rejected(self) -> None:
-        with pytest.raises(
-            ValidationError, match="'ES256' is not supported"
-        ):
-            ClientAuthentication(
-                type="jwt", issuer="i", signing_key="s", algorithm="ES256"
-            )
-
-    def test_jwt_unknown_field_rejected(self) -> None:
-        with pytest.raises(ValidationError, match="does not support"):
-            ClientAuthentication(
-                type="jwt", issuer="i", audience="a", signing_key="s", token="x"
-            )
-
-    def test_oauth2_client_credentials_valid(self) -> None:
-        auth = ClientAuthentication(
-            type="oauth2",
-            grant_type="client_credentials",
-            token_url="https://auth.example.com/token",
-            client_id="id",
-            client_secret="secret",
-            scopes=["read", "write"],
-        )
-        assert auth.grant_type == "client_credentials"
-        assert auth.scopes == ["read", "write"]
-
-    def test_oauth2_password_valid(self) -> None:
-        auth = ClientAuthentication(
-            type="oauth2",
-            grant_type="password",
-            token_url="https://auth.example.com/token",
-            username="u",
-            password="p",
-            client_id="id",
-            client_secret="secret",
-        )
-        assert auth.grant_type == "password"
-
-    def test_oauth2_refresh_token_valid(self) -> None:
-        auth = ClientAuthentication(
-            type="oauth2",
-            grant_type="refresh_token",
-            token_url="https://auth.example.com/token",
-            refresh_token="rt",
-            client_id="id",
-            client_secret="secret",
-        )
-        assert auth.grant_type == "refresh_token"
-
-    def test_oauth2_refresh_token_rejects_refresh_url(self) -> None:
-        with pytest.raises(ValidationError, match="does not support 'refresh_url'"):
-            ClientAuthentication(
-                type="oauth2",
-                grant_type="refresh_token",
-                token_url="https://auth.example.com/token",
-                refresh_url="https://auth.example.com/token",
-                refresh_token="rt",
-                client_id="id",
-                client_secret="secret",
-            )
-
-    def test_oauth2_credential_bearer_valid(self) -> None:
-        auth = ClientAuthentication(
-            type="oauth2",
-            grant_type="client_credentials",
-            token_url="u",
-            client_id="id",
-            client_secret="secret",
-            credential_bearer="post_body",
-        )
-        assert auth.credential_bearer == "post_body"
-
-    def test_oauth2_credential_bearer_invalid_rejected(self) -> None:
-        with pytest.raises(
-            ValidationError, match="'credential_bearer' 'body' is not supported"
-        ):
-            ClientAuthentication(
-                type="oauth2",
-                grant_type="client_credentials",
-                token_url="u",
-                client_id="id",
-                client_secret="secret",
-                credential_bearer="body",
-            )
-
-    def test_oauth2_jwt_bearer_valid(self) -> None:
-        auth = ClientAuthentication(
-            type="oauth2",
-            grant_type="jwt_bearer",
-            token_url="https://auth.example.com/token",
-            assertion="signed.jwt.token",
-        )
-        assert auth.grant_type == "jwt_bearer"
-
-    def test_oauth2_grant_type_case_insensitive(self) -> None:
-        auth = ClientAuthentication(
-            type="oauth2",
-            grant_type="Client_Credentials",
-            token_url="u",
-            client_id="id",
-            client_secret="secret",
-        )
-        assert auth.grant_type == "Client_Credentials"
-
-    def test_oauth2_missing_grant_type_rejected(self) -> None:
-        with pytest.raises(
-            ValidationError, match="type 'oauth2' requires 'grant_type'"
-        ):
-            ClientAuthentication(type="oauth2", token_url="u")
-
-    def test_oauth2_unknown_grant_type_rejected(self) -> None:
-        with pytest.raises(
-            ValidationError, match="grant_type 'device_code' is not supported"
-        ):
-            ClientAuthentication(
-                type="oauth2", grant_type="device_code", token_url="u"
-            )
-
-    def test_oauth2_missing_required_field_rejected(self) -> None:
-        with pytest.raises(
-            ValidationError,
-            match="grant_type 'client_credentials' requires 'client_secret'",
-        ):
-            ClientAuthentication(
-                type="oauth2",
-                grant_type="client_credentials",
-                token_url="u",
-                client_id="id",
-            )
-
-    def test_oauth2_field_not_allowed_for_grant_rejected(self) -> None:
-        with pytest.raises(ValidationError, match="does not support 'refresh_token'"):
-            ClientAuthentication(
-                type="oauth2",
-                grant_type="client_credentials",
-                token_url="u",
-                client_id="id",
-                client_secret="secret",
-                refresh_token="rt",
-            )
-
-    def test_unknown_type_rejected(self) -> None:
-        with pytest.raises(ValidationError, match="unknown authentication type 'token'"):
-            ClientAuthentication(type="token", token="t")
-
-    def test_extension_type_passes_through(self) -> None:
-        auth = ClientAuthentication(
-            type="x-aws-sigv4", region="us-east-1", service="bedrock"
-        )
-        assert auth.type == "x-aws-sigv4"
-        assert (auth.model_extra or {}).get("region") == "us-east-1"
-
-    def test_extension_type_case_insensitive(self) -> None:
-        auth = ClientAuthentication(type="X-Custom", foo="bar")
-        assert auth.type == "X-Custom"
-
-    def test_bearer_missing_token_rejected(self) -> None:
-        with pytest.raises(ValidationError, match="type 'bearer' requires 'token'"):
-            ClientAuthentication(type="bearer")
-
-    def test_basic_missing_password_rejected(self) -> None:
-        with pytest.raises(ValidationError, match="type 'basic' requires 'password'"):
-            ClientAuthentication(type="basic", username="u")
-
-    def test_api_key_missing_key_rejected(self) -> None:
-        with pytest.raises(ValidationError, match="type 'api-key' requires 'api_key'"):
-            ClientAuthentication(type="api-key")
-
-    def test_unknown_field_rejected(self) -> None:
-        with pytest.raises(
-            ValidationError, match="type 'bearer' does not support 'username'"
-        ):
-            ClientAuthentication(type="bearer", token="t", username="u")
-
-    def test_typo_field_rejected(self) -> None:
-        with pytest.raises(ValidationError):
-            ClientAuthentication(type="api-key", api_key="k", headername="X")
-
-    def test_invalid_auth_fails_at_parse_time(self) -> None:
+    def test_a_resolved_value_is_validated_without_echoing_it(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("TOKEN", "has a space")
         content = """---
 model:
   provider: openai
-  name: gpt-4
+  name: gpt-4o
   authentication:
     type: bearer
+    token: "${env:TOKEN}"
 ---
-
 # Role
-Role
-
+r
 # Instructions
-Instructions
+i
 """
-        with pytest.raises(AFMValidationError):
+        with pytest.raises(AFMValidationError) as exc_info:
             parse_afm(content)
+
+        assert "whitespace" in str(exc_info.value)
+        assert "has a space" not in str(exc_info.value)
+
+    def test_variables_are_kept_and_not_validated_when_resolution_is_disabled(
+        self,
+    ) -> None:
+        content = """---
+model:
+  provider: openai
+  name: gpt-4o
+  authentication:
+    type: bearer
+    token: "${env:NOT_SET_ANYWHERE}"
+---
+# Role
+r
+# Instructions
+i
+"""
+        auth = parse_afm(content, resolve_env=False).metadata.model.authentication
+
+        assert auth.token == "${env:NOT_SET_ANYWHERE}"
