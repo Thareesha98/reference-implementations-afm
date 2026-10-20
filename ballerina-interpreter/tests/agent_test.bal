@@ -218,171 +218,22 @@ function testGetFilteredToolsEmptyAllow() returns error? {
 }
 
 @test:Config
-function testGetAuthTokenOrApiKeyNullAuth() returns error? {
-    string|error result = getAuthTokenOrApiKey((), "bearer", "token");
+function testGetCredentialBearer() returns error? {
+    ModelAuthentication auth = {token: "my-token-123"};
+    test:assertEquals(check getCredential(auth), "my-token-123");
+}
+
+@test:Config
+function testGetCredentialApiKey() returns error? {
+    ModelAuthentication auth = {api_key: "my-api-key-456"};
+    test:assertEquals(check getCredential(auth), "my-api-key-456");
+}
+
+@test:Config
+function testGetCredentialNoAuthentication() {
+    string|error result = getCredential(());
     test:assertTrue(result is error);
     test:assertEquals((<error>result).message(), "No authentication provided");
-}
-
-@test:Config
-function testGetAuthTokenOrApiKeyTypeMismatch() returns error? {
-    ClientAuthentication auth = {
-        'type: "basic"
-    };
-    string|error result = getAuthTokenOrApiKey(auth, "bearer", "token");
-    test:assertTrue(result is error);
-    test:assertTrue((<error>result).message().includes("Unsupported authentication type"));
-}
-
-@test:Config
-function testGetAuthTokenOrApiKeyMissingKey() returns error? {
-    ClientAuthentication auth = {
-        'type: "bearer"
-    };
-    string|error result = getAuthTokenOrApiKey(auth, "bearer", "token");
-    test:assertTrue(result is error);
-    test:assertEquals((<error>result).message(), "token not found in 'authentication'");
-}
-
-@test:Config
-function testGetAuthTokenOrApiKeyValidBearer() returns error? {
-    ClientAuthentication auth = {
-        'type: "bearer",
-        "token": "my-token-123"
-    };
-    string result = check getAuthTokenOrApiKey(auth, "bearer", "token");
-    test:assertEquals(result, "my-token-123");
-}
-
-@test:Config
-function testGetAuthTokenOrApiKeyValidApiKey() returns error? {
-    ClientAuthentication auth = {
-        'type: "api-key",
-        "api_key": "my-api-key-456"
-    };
-    string result = check getAuthTokenOrApiKey(auth, "api-key", "api_key");
-    test:assertEquals(result, "my-api-key-456");
-}
-
-@test:Config
-function testGetAuthTokenOrApiKeyCaseInsensitive() returns error? {
-    ClientAuthentication auth = {
-        'type: "BEARER",
-        "token": "case-insensitive-token"
-    };
-    string result = check getAuthTokenOrApiKey(auth, "bearer", "token");
-    test:assertEquals(result, "case-insensitive-token");
-}
-
-@test:Config
-function testGetApiKeyValid() returns error? {
-    ClientAuthentication auth = {
-        'type: "api-key",
-        "api_key": "test-api-key"
-    };
-    string result = check getApiKey(auth);
-    test:assertEquals(result, "test-api-key");
-}
-
-@test:Config
-function testGetApiKeyNull() returns error? {
-    string|error result = getApiKey(());
-    test:assertTrue(result is error);
-    test:assertEquals((<error>result).message(), "No authentication provided");
-}
-
-@test:Config
-function testGetTokenValid() returns error? {
-    ClientAuthentication auth = {
-        'type: "bearer",
-        "token": "test-token"
-    };
-    string result = check getToken(auth);
-    test:assertEquals(result, "test-token");
-}
-
-@test:Config
-function testGetTokenNull() returns error? {
-    string|error result = getToken(());
-    test:assertTrue(result is error);
-    test:assertEquals((<error>result).message(), "No authentication provided");
-}
-
-@test:Config
-function testValidateJwtAlgorithmNoneRejected() returns error? {
-    ClientAuthentication auth = {'type: "jwt", "issuer": "i", "signing_key": "s", "algorithm": "none"};
-    error? result = validateAuthentication(auth);
-    test:assertTrue(result is error);
-    test:assertTrue((<error>result).message().includes("'none' is not allowed"));
-}
-
-@test:Config
-function testValidateJwtAlgorithmUnsupportedRejected() returns error? {
-    ClientAuthentication auth = {'type: "jwt", "issuer": "i", "signing_key": "s", "algorithm": "ES256"};
-    error? result = validateAuthentication(auth);
-    test:assertTrue(result is error);
-    test:assertTrue((<error>result).message().includes("'ES256' is not supported"));
-}
-
-@test:Config
-function testValidateJwtAlgorithmValid() returns error? {
-    ClientAuthentication auth = {'type: "jwt", "issuer": "i", "signing_key": "s", "algorithm": "HS256"};
-    error? result = validateAuthentication(auth);
-    test:assertTrue(result is ());
-}
-
-@test:Config
-function testValidateJwtWithoutAudienceValid() returns error? {
-    ClientAuthentication auth = {'type: "jwt", "issuer": "i", "signing_key": "s"};
-    error? result = validateAuthentication(auth);
-    test:assertTrue(result is ());
-}
-
-@test:Config
-function testValidateExtensionTypePassesThrough() returns error? {
-    ClientAuthentication auth = {'type: "x-aws-sigv4", "region": "us-east-1", "service": "bedrock"};
-    error? result = validateAuthentication(auth);
-    test:assertTrue(result is ());
-}
-
-@test:Config
-function testValidateOAuth2RefreshTokenUsesTokenUrl() returns error? {
-    ClientAuthentication auth = {'type: "oauth2", "grant_type": "refresh_token", "token_url": "u", "refresh_token": "rt", "client_id": "id", "client_secret": "secret"};
-    error? result = validateAuthentication(auth);
-    test:assertTrue(result is ());
-}
-
-@test:Config
-function testValidateOAuth2RefreshTokenRejectsRefreshUrl() returns error? {
-    ClientAuthentication auth = {'type: "oauth2", "grant_type": "refresh_token", "token_url": "u", "refresh_url": "u", "refresh_token": "rt", "client_id": "id", "client_secret": "secret"};
-    error? result = validateAuthentication(auth);
-    test:assertTrue(result is error);
-    test:assertTrue((<error>result).message().includes("does not support 'refresh_url'"));
-}
-
-@test:Config
-function testValidateOAuth2CredentialBearerInvalidRejected() returns error? {
-    ClientAuthentication auth = {'type: "oauth2", "grant_type": "client_credentials", "token_url": "u", "client_id": "id", "client_secret": "secret", "credential_bearer": "body"};
-    error? result = validateAuthentication(auth);
-    test:assertTrue(result is error);
-    test:assertTrue((<error>result).message().includes("'credential_bearer' 'body' is not supported"));
-}
-
-@test:Config
-function testMapExtensionTypeNotSupported() returns error? {
-    ClientAuthentication auth = {'type: "x-aws-sigv4", "region": "us-east-1"};
-    http:ClientAuthConfig|error? result = mapToHttpClientAuth(auth);
-    test:assertTrue(result is error);
-    test:assertTrue((<error>result).message().includes("extension authentication type"));
-}
-
-@test:Config
-function testBuildOAuth2CredentialBearerPostBody() returns error? {
-    OAuth2Config cfg = {grant_type: "client_credentials", token_url: "u", client_id: "id", client_secret: "secret", credential_bearer: "post_body"};
-    http:OAuth2GrantConfig grantConfig = check buildOAuth2GrantConfig(cfg);
-    test:assertTrue(grantConfig is http:OAuth2ClientCredentialsGrantConfig);
-    http:OAuth2ClientCredentialsGrantConfig ccConfig = <http:OAuth2ClientCredentialsGrantConfig>grantConfig;
-    test:assertEquals(ccConfig.credentialBearer, "POST_BODY_BEARER");
 }
 
 @test:Config
@@ -414,6 +265,29 @@ function testGetModelUnsupportedProvider() returns error? {
     var result = getModel(model);
     test:assertTrue(result is error);
     test:assertTrue((<error>result).message().includes("not yet supported"));
+}
+
+@test:Config
+function testParseAfmIgnoresLeadingBlankLines() returns error? {
+    string content = "\n\n---\n" +
+        "model:\n" +
+        "  provider: \"ollama\"\n" +
+        "  name: \"llama3\"\n" +
+        "---\n\n" +
+        "# Role\n" +
+        "You are a helpful assistant.\n\n" +
+        "# Instructions\n" +
+        "Be concise.\n";
+
+    AFMRecord afm = check parseAfm(content);
+
+    AgentMetadata? metadata = afm.metadata;
+    test:assertTrue(metadata is AgentMetadata);
+    Model? model = (<AgentMetadata>metadata).model;
+    test:assertTrue(model is Model);
+    test:assertEquals((<Model>model).provider, "ollama");
+    test:assertEquals((<Model>model).name, "llama3");
+    test:assertEquals(afm.role, "You are a helpful assistant.");
 }
 
 function extractJsonFromCodeBlockDataProvider() returns [string, string, string][] {
