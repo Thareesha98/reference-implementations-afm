@@ -20,18 +20,26 @@ import ballerina/os;
 function parseAfm(string content) returns AFMRecord|error {
     string resolvedContent = check resolveVariables(content);
 
+    string[] resolvedLines = splitLines(resolvedContent);
+    int firstNonBlank = 0;
+    while firstNonBlank < resolvedLines.length() && resolvedLines[firstNonBlank].trim() == "" {
+        firstNonBlank += 1;
+    }
+    if firstNonBlank > 0 {
+        resolvedContent = string:'join("\n", ...resolvedLines.slice(firstNonBlank));
+        resolvedLines = splitLines(resolvedContent);
+    }
+
     AgentMetadata? metadata = ();
     string body;
-    string[] resolvedLines = splitLines(resolvedContent);
     if resolvedLines.length() > 0 && resolvedLines[0].trim() == FRONTMATTER_DELIMITER {
         map<json> frontmatterMap;
         [frontmatterMap, body] = check extractFrontMatter(resolvedContent);
+        check normalizeAuthentications(frontmatterMap);
         metadata = check frontmatterMap.fromJsonWithType();
     } else {
         body = resolvedContent;
     }
-
-    check validateMetadataAuthentication(metadata);
 
     // Extract Role and Instructions sections
     string[] bodyLines = splitLines(body);
@@ -67,6 +75,43 @@ function parseAfm(string content) returns AFMRecord|error {
     check validateHttpVariables(afmRecord);
 
     return afmRecord;
+}
+
+function normalizeAuthentications(map<json> frontmatter) returns error? {
+    json model = frontmatter["model"];
+    if model is map<json> {
+        check normalizeAuthentication(model, "model.authentication", true);
+    }
+
+    json tools = frontmatter["tools"];
+    json servers = tools is map<json> ? tools["mcp"] : ();
+    if servers is json[] {
+        foreach int index in 0 ..< servers.length() {
+            json server = servers[index];
+            json transport = server is map<json> ? server["transport"] : ();
+            if transport is map<json> {
+                check normalizeAuthentication(transport, string `tools.mcp[${index}].transport.authentication`);
+            }
+        }
+    }
+
+    json interfaces = frontmatter["interfaces"];
+    if interfaces is json[] {
+        foreach int index in 0 ..< interfaces.length() {
+            json interface = interfaces[index];
+            json subscription = interface is map<json> ? interface["subscription"] : ();
+            if subscription is map<json> {
+                check normalizeAuthentication(subscription, string `interfaces[${index}].subscription.authentication`);
+            }
+        }
+    }
+}
+
+function normalizeAuthentication(map<json> owner, string location, boolean forModel = false) returns error? {
+    json authentication = owner["authentication"];
+    if authentication !is () {
+        owner["authentication"] = check validateAuthentication(authentication, location, forModel);
+    }
 }
 
 function resolveVariables(string content) returns string|error {
@@ -294,199 +339,28 @@ function validateHttpVariables(AFMRecord afmRecord) returns error? {
 function containsHttpVariable(string content) returns boolean =>
     content.indexOf("${http:") != ();
 
-function authenticationContainsHttpVariable(ClientAuthentication? authentication) returns boolean {
-    if authentication is () {
-        return false;
-    }
+function authenticationContainsHttpVariable(ClientAuthentication? authentication) returns boolean =>
+    authentication is () ? false : jsonContainsHttpVariable(authentication.toJson());
 
-    foreach anydata value in authentication {
-        if value is string && containsHttpVariable(value) {
-            return true;
+function jsonContainsHttpVariable(json value) returns boolean {
+    if value is string {
+        return containsHttpVariable(value);
+    }
+    if value is json[] {
+        foreach json item in value {
+            if jsonContainsHttpVariable(item) {
+                return true;
+            }
+        }
+    }
+    if value is map<json> {
+        foreach json item in value {
+            if jsonContainsHttpVariable(item) {
+                return true;
+            }
         }
     }
     return false;
-}
-
-final readonly & string[] RECOGNIZED_AUTH_TYPES = ["bearer", "basic", "api-key", "jwt", "oauth2"];
-
-function validateMetadataAuthentication(AgentMetadata? metadata) returns error? {
-    if metadata is () {
-        return;
-    }
-
-    Model? model = metadata.model;
-    if model is Model {
-        check validateAuthentication(model.authentication);
-    }
-
-    Tools? tools = metadata.tools;
-    if tools is Tools {
-        MCPServer[]? mcp = tools.mcp;
-        if mcp is MCPServer[] {
-            foreach MCPServer server in mcp {
-                Transport transport = server.transport;
-                if transport is HttpTransport {
-                    check validateAuthentication(transport.authentication);
-                }
-            }
-        }
-    }
-
-    Interface[]? interfaces = metadata.interfaces;
-    if interfaces is Interface[] {
-        foreach Interface interface in interfaces {
-            if interface is WebhookInterface {
-                check validateAuthentication(interface.subscription.authentication);
-            }
-        }
-    }
-}
-
-function validateAuthentication(ClientAuthentication? auth) returns error? {
-    if auth is () {
-        return;
-    }
-
-    string authType = auth.'type.toLowerAscii();
-    if authType.startsWith("x-") {
-        return;
-    }
-    if RECOGNIZED_AUTH_TYPES.indexOf(authType) is () {
-        return error(string `unknown authentication type '${auth.'type}'. Supported types: bearer, basic, api-key, jwt, oauth2`);
-    }
-
-    if authType == "oauth2" {
-        return validateOAuth2(auth);
-    }
-
-    string[]? allowed = allowedAuthFields(authType);
-    if allowed is () {
-        return;
-    }
-
-    string[] provided = from string key in auth.keys() where key != "type" select key;
-
-    foreach string required in requiredAuthFields(authType) {
-        if provided.indexOf(required) is () {
-            return error(string `type '${authType}' requires '${required}' field`);
-        }
-    }
-
-    foreach string fieldName in provided {
-        if allowed.indexOf(fieldName) is () {
-            return error(string `type '${authType}' does not support '${fieldName}' field`);
-        }
-    }
-
-    if authType == "jwt" {
-        return validateJwtAlgorithm(auth);
-    }
-}
-
-final readonly & string[] JWT_ALGORITHMS = ["RS256", "RS384", "RS512", "HS256", "HS384", "HS512"];
-
-function validateJwtAlgorithm(ClientAuthentication auth) returns error? {
-    anydata alg = auth["algorithm"];
-    if alg is () {
-        return;
-    }
-    if alg !is string {
-        return error("jwt 'algorithm' must be a string");
-    }
-    if alg.toLowerAscii() == "none" {
-        return error("jwt 'algorithm' 'none' is not allowed; it produces an unsigned token");
-    }
-    if JWT_ALGORITHMS.indexOf(alg) is () {
-        return error("jwt 'algorithm' '" + alg + "' is not supported. Supported algorithms: RS256, RS384, RS512, HS256, HS384, HS512");
-    }
-}
-
-function allowedAuthFields(string authType) returns string[]? {
-    match authType {
-        "bearer" => {
-            return ["token"];
-        }
-        "basic" => {
-            return ["username", "password"];
-        }
-        "api-key" => {
-            return ["api_key", "header_name"];
-        }
-        "jwt" => {
-            return ["issuer", "audience", "signing_key", "algorithm", "key_id", "subject", "custom_claims", "expiry_seconds"];
-        }
-    }
-    return ();
-}
-
-function requiredAuthFields(string authType) returns string[] {
-    match authType {
-        "bearer" => {
-            return ["token"];
-        }
-        "basic" => {
-            return ["username", "password"];
-        }
-        "api-key" => {
-            return ["api_key"];
-        }
-        "jwt" => {
-            return ["issuer", "audience", "signing_key"];
-        }
-    }
-    return [];
-}
-
-function validateOAuth2(ClientAuthentication auth) returns error? {
-    anydata grantTypeValue = auth["grant_type"];
-    if grantTypeValue !is string {
-        return error("type 'oauth2' requires 'grant_type' field");
-    }
-
-    string grant = grantTypeValue.toLowerAscii();
-    [string[], string[]]? grantFields = oauth2GrantFields(grant);
-    if grantFields is () {
-        return error("oauth2 grant_type '" + grantTypeValue + "' is not supported. Supported grant types: client_credentials, password, refresh_token, jwt_bearer");
-    }
-
-    [string[], string[]] [required, optional] = grantFields;
-    string[] allowed = ["grant_type", ...required, ...optional];
-    string[] provided = from string key in auth.keys() where key != "type" select key;
-
-    foreach string req in required {
-        if provided.indexOf(req) is () {
-            return error("oauth2 grant_type '" + grant + "' requires '" + req + "' field");
-        }
-    }
-
-    foreach string fieldName in provided {
-        if allowed.indexOf(fieldName) is () {
-            return error("oauth2 grant_type '" + grant + "' does not support '" + fieldName + "' field");
-        }
-    }
-
-    anydata credentialBearer = auth["credential_bearer"];
-    if credentialBearer is string && credentialBearer != "auth_header" && credentialBearer != "post_body" {
-        return error("oauth2 'credential_bearer' '" + credentialBearer + "' is not supported. Supported values: auth_header, post_body");
-    }
-}
-
-function oauth2GrantFields(string grant) returns [string[], string[]]? {
-    match grant {
-        "client_credentials" => {
-            return [["token_url", "client_id", "client_secret"], ["scopes", "credential_bearer"]];
-        }
-        "password" => {
-            return [["token_url", "username", "password", "client_id", "client_secret"], ["scopes", "credential_bearer"]];
-        }
-        "refresh_token" => {
-            return [["token_url", "refresh_token", "client_id", "client_secret"], ["scopes", "credential_bearer"]];
-        }
-        "jwt_bearer" => {
-            return [["token_url", "assertion"], ["client_id", "client_secret", "scopes", "credential_bearer"]];
-        }
-    }
-    return ();
 }
 
 function signatureContainsHttpVariable(Signature signature) returns boolean =>
