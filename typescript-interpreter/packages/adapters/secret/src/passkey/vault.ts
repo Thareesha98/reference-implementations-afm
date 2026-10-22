@@ -67,6 +67,14 @@ async function sealedEntries(): Promise<SealedEntry[]> {
   return entries;
 }
 
+function distinctCredentials(entries: SealedEntry[]): Uint8Array<ArrayBuffer>[] {
+  const ids: Uint8Array<ArrayBuffer>[] = [];
+  for (const { blob } of entries) {
+    if (!ids.some((id) => sameBytes(id, blob.credentialId))) ids.push(blob.credentialId);
+  }
+  return ids;
+}
+
 async function hasSecretsUnder(credentialId: Uint8Array<ArrayBuffer>): Promise<boolean> {
   return (await sealedEntries()).some((entry) => sameBytes(entry.blob.credentialId, credentialId));
 }
@@ -101,4 +109,23 @@ export async function seal(post: Post, name: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+export async function unlockAll(post: Post): Promise<boolean> {
+  const entries = await sealedEntries();
+  const all: Opened[] = [];
+  for (const credentialId of distinctCredentials(entries)) {
+    let credential: Opened;
+    try {
+      credential = await ceremony(credentialId);
+    } catch {
+      continue;
+    }
+    all.push(credential);
+    for (const { name, blob } of entries) {
+      if (sameBytes(blob.credentialId, credentialId)) post({ type: "unlock-secret", name, key: await deriveAesKey(credential.prf, blob.salt) });
+    }
+  }
+  if (all[0] !== undefined) opened = all[0];
+  return all.length > 0;
 }

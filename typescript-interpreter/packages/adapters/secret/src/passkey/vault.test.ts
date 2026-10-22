@@ -62,6 +62,9 @@ type Vault = typeof import("./vault");
 let vault: Vault;
 
 const A = new Uint8Array([1]) as Uint8Array<ArrayBuffer>;
+const B = new Uint8Array([2]) as Uint8Array<ArrayBuffer>;
+
+const saltOf = (message: VaultMessage) => [...(message as unknown as { key: { salt: Uint8Array } }).key.salt];
 
 function put(name: string, credentialId: Uint8Array, value: string): void {
   h.store.set(name, { data: new TextEncoder().encode(value), iv: new Uint8Array([0]), credentialId, salt: new Uint8Array([1]) });
@@ -143,5 +146,59 @@ describe("seal", () => {
     const reloaded = await import("./vault");
     await reloaded.seal(() => {}, "TWO");
     expect(h.ceremonies).toHaveLength(2);
+  });
+});
+
+describe("unlockAll", () => {
+  it("opens every key under one passkey with a single ceremony", async () => {
+    put("K1", A, "v1");
+    put("K2", A, "v2");
+    const posted: VaultMessage[] = [];
+    const opened = await vault.unlockAll((message) => posted.push(message));
+    expect(opened).toBe(true);
+    expect(h.ceremonies).toHaveLength(1);
+    expect(posted.filter((m) => m.type === "unlock-secret").map((m) => m.name)).toEqual(["K1", "K2"]);
+  });
+
+  it("opens each key with the key derived from its own salt", async () => {
+    h.store.set("K1", { data: new Uint8Array([1]), iv: new Uint8Array([0]), credentialId: A, salt: new Uint8Array([41]) });
+    h.store.set("K2", { data: new Uint8Array([2]), iv: new Uint8Array([0]), credentialId: A, salt: new Uint8Array([42]) });
+    const posted: VaultMessage[] = [];
+    await vault.unlockAll((message) => posted.push(message));
+    expect(posted.map(saltOf)).toEqual([[41], [42]]);
+  });
+
+  it("asks once for each passkey the sealed keys are under", async () => {
+    put("K1", A, "v1");
+    put("K2", B, "v2");
+    const posted: VaultMessage[] = [];
+    await vault.unlockAll((message) => posted.push(message));
+    expect(h.ceremonies).toHaveLength(2);
+    expect(posted.map((m) => m.type)).toEqual(["unlock-secret", "unlock-secret"]);
+  });
+
+  it("opens nothing, and asks nothing, when no key is sealed", async () => {
+    const posted: VaultMessage[] = [];
+    expect(await vault.unlockAll((message) => posted.push(message))).toBe(false);
+    expect(h.ceremonies).toHaveLength(0);
+    expect(posted).toEqual([]);
+  });
+
+  it("opens nothing when the device does not confirm", async () => {
+    put("K1", A, "v1");
+    h.refuse.unlock = true;
+    const posted: VaultMessage[] = [];
+    expect(await vault.unlockAll((message) => posted.push(message))).toBe(false);
+    expect(posted).toEqual([]);
+  });
+
+  it("asks the device once for a whole tab: a seal and an unlock reuse the first answer", async () => {
+    h.known.current = A;
+    put("OLD", A, "v");
+    const post = () => {};
+    await vault.seal(post, "ONE");
+    await vault.seal(post, "TWO");
+    await vault.unlockAll(post);
+    expect(h.ceremonies).toHaveLength(1);
   });
 });
