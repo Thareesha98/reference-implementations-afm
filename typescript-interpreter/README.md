@@ -11,7 +11,7 @@ The engine handles parsing, validation, variable resolution, browser-oriented se
 | `@afm/engine` | `packages/engine` | Agent parsing, validation, setup planning, and execution |
 | `@afm/adapter-auth` | `packages/adapters/auth` | MCP OAuth discovery, grants, and token handling |
 | `@afm/adapter-model` | `packages/adapters/model` | OpenAI and Anthropic model adapters |
-| `@afm/adapter-secret` | `packages/adapters/secret` | Config, prompt, and chained secret providers |
+| `@afm/adapter-secret` | `packages/adapters/secret` | Config, prompt, and chained secret providers, and passkey-sealed secret helpers |
 | `@afm/adapter-tool` | `packages/adapters/tool` | MCP HTTP tools, file tools, filtering, and namespacing |
 
 ## Development
@@ -43,6 +43,22 @@ A consuming application normally:
 4. Handles the streamed loop events, cancellation, and application state.
 
 The public exports in each package's `src/index.ts` and the colocated tests describe the available interfaces. The existing browser-oriented planning behavior remains in the engine; separating the application does not add CLI or server interfaces.
+
+## Passkey-sealed secrets
+
+`@afm/adapter-secret` exports a `passkey` namespace for applications that let people keep a secret on their own device. It holds the logic only; the application supplies the interface and decides what runs where.
+
+- A WebAuthn passkey with the PRF extension gives a secret that only the person's authenticator can produce, after the device confirms the person.
+- `passkey.seal` and `passkey.unlockAll` derive a separate AES-GCM key for every stored secret and send it, as a `VaultMessage`, to whatever holds the secrets. The keys are non-extractable `CryptoKey` values, so they can move from the page to a worker without becoming bytes, and plaintext never passes through the vault.
+- The holder encrypts with `passkey.encryptString`, saves with `passkey.saveBlob`, and decrypts with `passkey.decryptString`. Sealed records live in IndexedDB and hold only the ciphertext, the credential id, the salt, and the hosts the value was approved for.
+- `passkey.passkeySupport()` says whether this browser and device can do it, and why not when they cannot.
+
+Keep in mind:
+
+- A passkey is bound to the host name, and sealed records live in that origin's IndexedDB. Another host cannot open them.
+- Losing the passkey makes its sealed secrets unrecoverable.
+- PRF support differs between browsers and authenticators, so call `passkeySupport()` first.
+- Sealing protects secrets at rest. Script running in the same origin can still ask the device to unlock them.
 
 ## Security responsibilities
 
