@@ -99,6 +99,36 @@ async function credentialMaterial(): Promise<Opened> {
   return (opened = { credentialId: enrolled.credentialId, prf: await importPrf(enrolled.prfOutput) });
 }
 
+function primaryOf(all: Opened[]): Opened | undefined {
+  const known = knownCredentialId();
+  return all.find((credential) => known !== null && sameBytes(credential.credentialId, known)) ?? all[0];
+}
+
+async function consolidate(post: Post, entries: SealedEntry[], all: Opened[]): Promise<void> {
+  const primary = primaryOf(all);
+  if (primary === undefined) return;
+  opened = primary;
+  if (all.length <= 1) return;
+  for (const { name, blob } of entries) {
+    const source = all.find((credential) => sameBytes(credential.credentialId, blob.credentialId));
+    if (source === undefined || sameBytes(blob.credentialId, primary.credentialId)) continue;
+    try {
+      const salt = randomSalt();
+      post({
+        type: "passkey-reseal",
+        name,
+        from: await deriveAesKey(source.prf, blob.salt),
+        to: await deriveAesKey(primary.prf, salt),
+        credentialId: primary.credentialId,
+        salt,
+      });
+    } catch {
+      continue;
+    }
+  }
+  rememberCredentialId(primary.credentialId);
+}
+
 export async function seal(post: Post, name: string): Promise<boolean> {
   try {
     const { credentialId, prf } = await credentialMaterial();
@@ -126,6 +156,6 @@ export async function unlockAll(post: Post): Promise<boolean> {
       if (sameBytes(blob.credentialId, credentialId)) post({ type: "unlock-secret", name, key: await deriveAesKey(credential.prf, blob.salt) });
     }
   }
-  if (all[0] !== undefined) opened = all[0];
+  await consolidate(post, entries, all);
   return all.length > 0;
 }

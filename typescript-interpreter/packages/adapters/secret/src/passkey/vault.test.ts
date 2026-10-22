@@ -174,7 +174,7 @@ describe("unlockAll", () => {
     const posted: VaultMessage[] = [];
     await vault.unlockAll((message) => posted.push(message));
     expect(h.ceremonies).toHaveLength(2);
-    expect(posted.map((m) => m.type)).toEqual(["unlock-secret", "unlock-secret"]);
+    expect(posted.filter((m) => m.type === "unlock-secret").map((m) => m.name)).toEqual(["K1", "K2"]);
   });
 
   it("opens nothing, and asks nothing, when no key is sealed", async () => {
@@ -200,5 +200,51 @@ describe("unlockAll", () => {
     await vault.seal(post, "TWO");
     await vault.unlockAll(post);
     expect(h.ceremonies).toHaveLength(1);
+  });
+});
+
+describe("unlockAll with sealed keys under more than one passkey", () => {
+  it("has the secret holder re-seal the stragglers onto one passkey, never touching plaintext itself", async () => {
+    h.known.current = A;
+    put("K1", A, "v1");
+    put("K2", B, "v2");
+    const posted: VaultMessage[] = [];
+    await vault.unlockAll((message) => posted.push(message));
+    expect(h.ceremonies).toHaveLength(2);
+
+    const reseals = posted.filter((m) => m.type === "passkey-reseal");
+    expect(reseals.map((m) => m.name)).toEqual(["K2"]);
+    expect([...(reseals[0] as { credentialId: Uint8Array }).credentialId]).toEqual([...A]);
+    expect(h.store.get("K2")!.credentialId).toBe(B);
+    expect([...h.known.current!]).toEqual([...A]);
+  });
+
+  it("opens the old key with its own salt and seals the new one with a fresh salt", async () => {
+    h.known.current = A;
+    put("K1", A, "v1");
+    h.store.set("K2", { data: new Uint8Array([2]), iv: new Uint8Array([0]), credentialId: B, salt: new Uint8Array([42]) });
+    const posted: VaultMessage[] = [];
+    await vault.unlockAll((message) => posted.push(message));
+    const reseal = posted.find((m) => m.type === "passkey-reseal") as unknown as {
+      from: { salt: Uint8Array };
+      to: { salt: Uint8Array };
+      salt: Uint8Array;
+    };
+    expect([...reseal.from.salt]).toEqual([42]);
+    expect(reseal.to.salt).toBe(reseal.salt);
+  });
+
+  it("makes the first passkey the main one when none is remembered", async () => {
+    put("K1", B, "v1");
+    put("K2", A, "v2");
+    await vault.unlockAll(() => {});
+    expect([...h.known.current!]).toEqual([...B]);
+  });
+
+  it("leaves everything where it is when there is only one passkey", async () => {
+    put("K1", A, "v1");
+    const posted: VaultMessage[] = [];
+    await vault.unlockAll((message) => posted.push(message));
+    expect(posted.map((m) => m.type)).toEqual(["unlock-secret"]);
   });
 });
