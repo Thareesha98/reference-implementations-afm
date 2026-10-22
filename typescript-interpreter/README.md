@@ -50,7 +50,7 @@ The public exports in each package's `src/index.ts` and the colocated tests desc
 
 - A WebAuthn passkey with the PRF extension gives a secret that only the person's authenticator can produce, after the device confirms the person.
 - `passkey.seal` and `passkey.unlockAll` derive a separate AES-GCM key for every stored secret and send it, as a `VaultMessage`, to whatever holds the secrets. The keys are non-extractable `CryptoKey` values, so they can move from the page to a worker without becoming bytes, and plaintext never passes through the vault.
-- The holder encrypts with `passkey.encryptString`, saves with `passkey.saveBlob`, and decrypts with `passkey.decryptString`. Sealed records live in IndexedDB and hold only the ciphertext, the credential id, the salt, and the hosts the value was approved for.
+- The holder encrypts with `passkey.encryptString`, saves with `passkey.saveBlob`, and decrypts with `passkey.decryptString`. Sealed records live in IndexedDB and hold only the ciphertext, the credential id, the salt, and the addresses the value was approved for.
 - `passkey.passkeySupport()` says whether this browser and device can do it, and why not when they cannot.
 
 Keep in mind:

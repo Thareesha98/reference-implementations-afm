@@ -95,9 +95,9 @@ describe("the passkey blob store", () => {
     expect(await loadBlob("A")).toBeNull();
   });
 
-  it("keeps the hosts a value was approved for, so the approval survives a reload", async () => {
-    await saveBlob("TOKEN", { ...blob(), hosts: ["mcp.example.com"] });
-    expect((await loadBlob("TOKEN"))?.hosts).toEqual(["mcp.example.com"]);
+  it("keeps the addresses a value was approved for, so the approval survives a reload", async () => {
+    await saveBlob("TOKEN", { ...blob(), addresses: ["https://mcp.example.com/mcp"] });
+    expect((await loadBlob("TOKEN"))?.addresses).toEqual(["https://mcp.example.com/mcp"]);
   });
 
   it("writes only ciphertext, iv, credentialId and salt - never a key", async () => {

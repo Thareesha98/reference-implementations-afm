@@ -23,7 +23,7 @@ const STORE = "secrets";
 export interface StoredSecret extends SealedValue {
   credentialId: Uint8Array<ArrayBuffer>;
   salt: Uint8Array<ArrayBuffer>;
-  hosts?: string[];
+  addresses?: string[];
 }
 
 const openDb = sharedConnection(
