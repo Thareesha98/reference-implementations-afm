@@ -38,3 +38,14 @@ export function deriveAesKey(prf: CryptoKey, salt: BufferSource): Promise<Crypto
     ["encrypt", "decrypt"],
   );
 }
+
+export async function encryptString(key: CryptoKey, text: string): Promise<SealedValue> {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const data = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, new TextEncoder().encode(text));
+  return { iv, data: new Uint8Array(data) };
+}
+
+export async function decryptString(key: CryptoKey, sealed: SealedValue): Promise<string> {
+  const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: sealed.iv }, key, sealed.data);
+  return new TextDecoder().decode(plain);
+}
