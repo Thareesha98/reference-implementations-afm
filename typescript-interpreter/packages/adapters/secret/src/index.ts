@@ -16,6 +16,8 @@
 
 import type { SecretPort, SecretRef } from "@afm/engine";
 
+export * as passkey from "./passkey/index";
+
 export function configSecretPort(values: Record<string, string>): SecretPort {
   return {
     async resolve(ref) {
