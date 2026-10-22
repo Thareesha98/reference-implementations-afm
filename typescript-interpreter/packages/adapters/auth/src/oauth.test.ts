@@ -512,6 +512,91 @@ describe("createAuthorizationCodeSession", () => {
     });
   });
 
+  describe("restoring a saved sign-in", () => {
+    const saved = () => {
+      const store = fakeStore();
+      store.set(refreshKey, "saved-rt");
+      return store;
+    };
+
+    it("says a sign-in is saved only while there is a refresh token and no session", async () => {
+      expect(createAuthorizationCodeSession(config, fakeStore()).hasSavedSession()).toBe(false);
+      const session = createAuthorizationCodeSession(config, saved());
+      expect(session.hasSavedSession()).toBe(true);
+      await session.restore(server, fakeFetch(tokensFor("fresh", "rt2")).fn);
+      expect(session.hasSavedSession()).toBe(false);
+    });
+
+    it("trades the saved refresh token for a session, and keeps the one the server hands back", async () => {
+      const store = saved();
+      const session = createAuthorizationCodeSession(config, store);
+      const { fn, calls } = fakeFetch(tokensFor("fresh", "rt2"));
+
+      expect(await session.restore(server, fn)).toBe(true);
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0]!.url).toBe(config.tokenUrl);
+      expect(new URLSearchParams(calls[0]!.body).get("refresh_token")).toBe("saved-rt");
+      expect(session.hasSession()).toBe(true);
+      expect(await session.getAccessToken()).toBe("fresh");
+      expect(store.get(refreshKey)).toBe("rt2");
+    });
+
+    it("does nothing when no sign-in was saved", async () => {
+      const session = createAuthorizationCodeSession(config, fakeStore());
+      const { fn, calls } = fakeFetch(tokensFor("fresh"));
+      expect(await session.restore(server, fn)).toBe(false);
+      expect(calls).toEqual([]);
+      expect(session.hasSession()).toBe(false);
+    });
+
+    it.each([
+      ["another token endpoint", { tokenUrl: "https://other.example.com/oauth2/token" }],
+      ["another authorization endpoint", { authorizeUrl: "https://other.example.com/oauth2/authorize" }],
+      ["another client", { clientId: "client-999" }],
+    ])("sends the saved token nowhere but where it was issued: %s", async (_label, changed) => {
+      const store = saved();
+      const session = createAuthorizationCodeSession(config, store);
+      const { fn, calls } = fakeFetch(tokensFor("fresh"));
+
+      expect(await session.restore({ ...server, ...changed }, fn)).toBe(false);
+
+      expect(calls).toEqual([]);
+      expect(session.hasSession()).toBe(false);
+      expect(store.get(refreshKey)).toBe("saved-rt");
+    });
+
+    it("keeps the saved token when the server turns the refresh down, so a later try can still work", async () => {
+      const store = saved();
+      const session = createAuthorizationCodeSession(config, store);
+      await expect(session.restore(server, fakeFetch({}, false).fn)).rejects.toThrow(/refresh failed/);
+      expect(session.hasSession()).toBe(false);
+      expect(store.get(refreshKey)).toBe("saved-rt");
+    });
+
+    it("leaves a sign-in that finished in the meantime alone", async () => {
+      const store = saved();
+      const session = createAuthorizationCodeSession(config, store);
+      const refresh = pausedFetch(tokensFor("stale", "stale-rt"));
+      const restoring = session.restore(server, refresh.fn);
+      await session.startSignIn(server, redirectTo.capture);
+      await session.completeSignIn("abc", redirectTo.state(), fakeFetch(tokensFor("newer", "newer-rt")).fn);
+      refresh.release();
+
+      expect(await restoring).toBe(false);
+      expect(await session.getAccessToken()).toBe("newer");
+      expect(store.get(refreshKey)).toBe("newer-rt");
+    });
+
+    it("does not bring a session back after sign-out", async () => {
+      const store = saved();
+      const session = createAuthorizationCodeSession(config, store);
+      session.signOut();
+      expect(session.hasSavedSession()).toBe(false);
+      expect(await session.restore(server, fakeFetch(tokensFor("fresh")).fn)).toBe(false);
+    });
+  });
+
   it("signOut clears the session and the persisted refresh token", async () => {
     const { session, store } = await signedIn(3600);
 
