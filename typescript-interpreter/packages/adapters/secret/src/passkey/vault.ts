@@ -14,6 +14,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { deriveAesKey, importPrf, randomSalt } from "./crypto";
+import { loadBlob, listNames, type StoredSecret } from "./store";
+import { enrollPasskey } from "./enroll";
+import { unlockWithPasskey } from "./unlock";
+import { knownCredentialId, rememberCredentialId, forgetCredentialId } from "./credential";
+
 export type VaultMessage =
   | { type: "unlock-secret"; name: string; key: CryptoKey }
   | {
@@ -33,3 +39,66 @@ export type VaultMessage =
     };
 
 export type Post = (message: VaultMessage) => void;
+
+interface SealedEntry {
+  name: string;
+  blob: StoredSecret;
+}
+
+interface Opened {
+  credentialId: Uint8Array<ArrayBuffer>;
+  prf: CryptoKey;
+}
+
+let opened: Opened | null = null;
+
+function sameBytes(a: Uint8Array<ArrayBuffer>, b: Uint8Array<ArrayBuffer>): boolean {
+  if (a.length !== b.length) return false;
+  for (let index = 0; index < a.length; index += 1) if (a[index] !== b[index]) return false;
+  return true;
+}
+
+async function sealedEntries(): Promise<SealedEntry[]> {
+  const entries: SealedEntry[] = [];
+  for (const name of await listNames()) {
+    const blob = await loadBlob(name);
+    if (blob !== null) entries.push({ name, blob });
+  }
+  return entries;
+}
+
+async function hasSecretsUnder(credentialId: Uint8Array<ArrayBuffer>): Promise<boolean> {
+  return (await sealedEntries()).some((entry) => sameBytes(entry.blob.credentialId, credentialId));
+}
+
+async function ceremony(credentialId: Uint8Array<ArrayBuffer>): Promise<Opened> {
+  if (opened !== null && sameBytes(opened.credentialId, credentialId)) return opened;
+  return { credentialId, prf: await importPrf(await unlockWithPasskey(credentialId)) };
+}
+
+async function credentialMaterial(): Promise<Opened> {
+  if (opened !== null) return opened;
+  const existing = knownCredentialId();
+  if (existing !== null) {
+    try {
+      return (opened = await ceremony(existing));
+    } catch (error) {
+      if (await hasSecretsUnder(existing)) throw error;
+      forgetCredentialId();
+    }
+  }
+  const enrolled = await enrollPasskey();
+  return (opened = { credentialId: enrolled.credentialId, prf: await importPrf(enrolled.prfOutput) });
+}
+
+export async function seal(post: Post, name: string): Promise<boolean> {
+  try {
+    const { credentialId, prf } = await credentialMaterial();
+    rememberCredentialId(credentialId);
+    const salt = randomSalt();
+    post({ type: "passkey-remember", name, key: await deriveAesKey(prf, salt), credentialId, salt });
+    return true;
+  } catch {
+    return false;
+  }
+}
