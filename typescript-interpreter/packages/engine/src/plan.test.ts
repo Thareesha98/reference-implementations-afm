@@ -122,4 +122,22 @@ describe("planForBrowser", () => {
       "stdio-transport-unsupported",
     ]);
   });
+
+  it("keeps spec-valid unsupported capabilities as browser warnings or blockers", () => {
+    const metadata = validateMetadata({
+      model: { provider: "openai", url: "https://custom.example.com/v1" },
+      interfaces: [
+        { type: "platformchat", platform: "slack", mode: "notification" },
+        { type: "webchat", signature: { input: { type: "object" } } },
+        { type: "webhook" },
+      ],
+      skills: [{ type: "local", path: "./skills" }],
+    });
+    const plan = planForBrowser(metadata);
+    expect(plan.runnable).toBe(true);
+    expect(plan.issues.map((issue) => issue.code)).toEqual([
+      "interface-unsupported", "structured-signature-unsupported", "interface-unsupported", "model-url-unsupported", "local-skill-unsupported",
+    ]);
+    expect(planForBrowser(validateMetadata({ model: { provider: "other" } })).issues[0]).toMatchObject({ severity: "blocked", code: "model-provider-unsupported" });
+  });
 });

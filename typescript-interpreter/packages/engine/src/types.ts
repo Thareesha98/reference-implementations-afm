@@ -67,7 +67,7 @@ export type ModelEvent =
   | { type: "text-delta"; text: string }
   | { type: "tool-call"; id: string; name: string; args: unknown }
   | { type: "usage"; inputTokens: number; outputTokens: number }
-  | { type: "finish"; reason: "stop" | "tool-calls" | "length" };
+  | { type: "finish"; reason: "stop" | "tool-calls" | "length" | "content-filter" | "error" | "other" };
 
 export interface ToolPort {
   list(): Promise<ToolDescriptor[]>;

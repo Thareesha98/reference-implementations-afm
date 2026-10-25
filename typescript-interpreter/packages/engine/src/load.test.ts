@@ -106,6 +106,24 @@ i
     );
   });
 
+  it("loads a browser chat without resolving inactive platform, stdio, or skill fields", async () => {
+    const file = `---\nmodel:\n  provider: openai\n  name: gpt-4o\n  url: https://custom.example.com/v1\n  authentication:\n    type: api-key\n    api_key: "\${env:MODEL_KEY}"\ninterfaces:\n  - type: platformchat\n    platform: telegram\n    mode: polling\n    authentication:\n      type: api-key\n      api_key: "\${env:PLATFORM_KEY}"\ntools:\n  mcp:\n    - name: local\n      transport:\n        type: stdio\n        command: node\n        env:\n          TOKEN: "\${env:LOCAL_KEY}"\nskills:\n  - type: local\n    path: ./skills\n---\n# Role\nr\n# Instructions\ni\n`;
+    const loaded = await loadAfm(file, fakeSecrets({ MODEL_KEY: "sk-test" }), true);
+    expect(loaded.metadata.model?.url).toBeUndefined();
+    expect(loaded.metadata.interfaces).toEqual([]);
+    expect(loaded.metadata.tools?.mcp).toEqual([]);
+    expect(loaded.metadata.skills).toBeUndefined();
+    expect(loaded.plan.issues.map((issue) => issue.code)).toEqual([
+      "interface-unsupported", "model-url-unsupported", "stdio-transport-unsupported", "local-skill-unsupported",
+    ]);
+  });
+
+  it("retains active variable-backed settings in a browser preview", async () => {
+    const file = `---\nmax_iterations: "\${env:STEPS}"\nmodel:\n  provider: openai\n  name: gpt-4o\n---\n# Role\nr\n# Instructions\ni\n`;
+    const loaded = await loadAfm(file, fakeSecrets({ STEPS: "12" }), true);
+    expect(loaded.metadata.max_iterations).toBe(12);
+  });
+
   it("throws VariableResolutionError when a secret is missing", async () => {
     await expect(loadAfm(FULL, fakeSecrets({}))).rejects.toThrow(VariableResolutionError);
   });

@@ -25,6 +25,7 @@ describe("validateMetadata", () => {
 
   it("leaves a number written as a variable unchecked until it is resolved", () => {
     expect(validateMetadata({ max_iterations: "${env:STEPS}" }).max_iterations).toBeUndefined();
+    expect(() => validateMetadata({ max_iterations: "before-${env:STEPS}" })).toThrow(AfmValidationError);
   });
 
   it("accepts valid metadata and returns typed data", () => {
@@ -57,8 +58,8 @@ describe("validateMetadata", () => {
   it("applies the default string signature when omitted", () => {
     const md = validateMetadata({ interfaces: [{ type: "consolechat" }] });
     const iface = md.interfaces?.[0];
-    expect(iface?.signature.input).toEqual({ type: "string" });
-    expect(iface?.signature.output).toEqual({ type: "string" });
+    expect(iface?.type === "consolechat" ? iface.signature.input : undefined).toEqual({ type: "string" });
+    expect(iface?.type === "consolechat" ? iface.signature.output : undefined).toEqual({ type: "string" });
   });
 
   it("applies the default webchat exposure path /chat", () => {
@@ -138,6 +139,39 @@ describe("validateMetadata", () => {
       });
       expect(md.interfaces?.[0]?.type).toBe("webhook");
     });
+
+    it("accepts webhook without subscription and with an empty HTTP exposure", () => {
+      const md = validateMetadata({ interfaces: [{ type: "webhook", exposure: { http: {} }, signature: { output: { type: "object" } } }] });
+      expect(md.interfaces?.[0]?.type).toBe("webhook");
+    });
+
+    it("accepts all three platformchat modes and their mode-specific fields", () => {
+      const md = validateMetadata({ interfaces: [
+        { type: "platformchat", platform: "slack", mode: "notification", prompt: "${http:payload.event}", platform_config: { signing_secret: "${env:SLACK_SECRET}" }, signature: { input: { type: "object" } }, exposure: { http: {} } },
+        { type: "platformchat", platform: "gchat", mode: "request", signature: { output: { type: "object", properties: { text: { type: "string" } } } }, exposure: { http: { path: "/gchat" } } },
+        { type: "platformchat", platform: "telegram", mode: "polling", polling: { interval: 30, timeout: 25 }, authentication: { type: "api-key", api_key: "${env:BOT_TOKEN}" } },
+      ] });
+      expect(md.interfaces?.map((iface) => iface.type)).toEqual(["platformchat", "platformchat", "platformchat"]);
+    });
+
+    it("accepts a variable-backed poll interval until it can be resolved", () => {
+      expect(() => validateMetadata({ interfaces: [{ type: "platformchat", platform: "telegram", mode: "polling", polling: { interval: "${env:POLL_SECONDS}" } }] })).not.toThrow();
+      expect(() => validateMetadata({ interfaces: [{ type: "platformchat", platform: "telegram", mode: "polling", polling: { interval: -1 } }] })).toThrow(AfmValidationError);
+    });
+
+    it("rejects fields forbidden by a platformchat mode", () => {
+      const cases = [
+        { mode: "notification", signature: { output: { type: "string" } } },
+        { mode: "polling", signature: { output: { type: "string" } } },
+        { mode: "polling", exposure: { http: {} } },
+        { mode: "request", polling: { interval: 5 } },
+      ];
+      for (const fields of cases) {
+        expect(() => validateMetadata({ interfaces: [{ type: "platformchat", platform: "slack", ...fields }] })).toThrow(AfmValidationError);
+      }
+      expect(() => validateMetadata({ interfaces: [{ type: "platformchat", platform: "slack", mode: "later" }] })).toThrow(AfmValidationError);
+      expect(() => validateMetadata({ interfaces: [{ type: "platformchat", mode: "request" }] })).toThrow(AfmValidationError);
+    });
   });
 
   describe("authentication required fields", () => {
@@ -147,10 +181,9 @@ describe("validateMetadata", () => {
       ).toThrow(/bearer/);
     });
 
-    it("rejects an unrecognized auth type", () => {
-      expect(() =>
-        validateMetadata({ model: { authentication: { type: "carrier-pigeon" } } }),
-      ).toThrow(/unknown authentication type\. Supported types/);
+    it("accepts an implementation-specific authentication type", () => {
+      const md = validateMetadata({ model: { authentication: { type: "carrier-pigeon", address: "coop" } } });
+      expect(md.model?.authentication?.type).toBe("carrier-pigeon");
     });
 
     it("accepts an x-* extension type with arbitrary fields, unvalidated", () => {
@@ -355,7 +388,35 @@ describe("validateMetadata", () => {
         ],
       });
       const iface = md.interfaces?.[0];
-      expect(iface?.signature.input.type).toBe("object");
+      expect(iface?.type === "webchat" ? iface.signature.input : undefined).toEqual({
+        type: "object", properties: { x: { type: "string" } }, required: ["x"],
+      });
     });
+
+    it("accepts boolean and reference schemas and rejects invalid nested keywords", () => {
+      expect(() => validateMetadata({ interfaces: [{ type: "webchat", signature: { input: { $ref: "#/$defs/Message", $defs: { Message: { type: "string" } } }, output: true } }] })).not.toThrow();
+      expect(() => validateMetadata({ interfaces: [{ type: "webchat", signature: { input: { type: "object", properties: { x: { type: "bogus" } } } } }] })).toThrow(/Invalid JSON Schema/);
+    });
+
+    it("validates declared JSON Schema dialects", () => {
+      for (const dialect of [
+        "http://json-schema.org/draft-07/schema#",
+        "https://json-schema.org/draft/2019-09/schema",
+        "https://json-schema.org/draft/2020-12/schema",
+      ]) {
+        expect(() => validateMetadata({ interfaces: [{ type: "webchat", signature: {
+          input: { $schema: dialect, type: "object", properties: { value: { type: "string" } } },
+        } }] })).not.toThrow();
+      }
+    });
+  });
+
+  it("requires unique MCP connection names and valid HTTP URLs", () => {
+    expect(() => validateMetadata({ tools: { mcp: [
+      { name: "same", transport: { type: "http", url: "https://example.com/a" } },
+      { name: "same", transport: { type: "stdio", command: "node" } },
+    ] } })).toThrow(/Duplicate MCP server name/);
+    expect(() => validateMetadata({ model: { url: "not-a-url" } })).toThrow(/model.url/);
+    expect(() => validateMetadata({ tools: { mcp: [{ name: "x", transport: { type: "http", url: "example.com/mcp" } }] } })).toThrow(/transport.url/);
   });
 });

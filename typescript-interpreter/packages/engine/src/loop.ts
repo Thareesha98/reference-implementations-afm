@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type { ModelPort, ToolPort, ChatMessage, ToolCall, ToolResult, ToolResultMedia } from "./types";
+import type { ModelPort, ToolPort, ChatMessage, ToolCall, ToolResult, ToolResultMedia, ModelEvent } from "./types";
 import { describeError, isRateLimited, retryAfterMs } from "./errors";
 
 export interface Budget {
@@ -42,6 +42,7 @@ export type LoopEvent =
   | { type: "tool-call"; id: string; name: string; args: unknown }
   | { type: "tool-result"; id: string; name: string; ok: boolean; content: string; media?: ToolResultMedia[] }
   | { type: "waiting"; attempt: number; ofAttempts: number; delayMs: number; reason: string }
+  | { type: "turn-checkpoint"; messages: ChatMessage[] }
   | { type: "turn-complete"; messages: ChatMessage[] }
   | {
       type: "budget-update";
@@ -54,7 +55,7 @@ export type LoopEvent =
       elapsedMs: number;
       maxWallClockMs?: number;
     }
-  | { type: "finish"; reason: "stop" | "max-iterations" | "budget" | "aborted" };
+  | { type: "finish"; reason: "stop" | "max-iterations" | "budget" | "aborted" | "length" | "content-filter" | "error" | "other" };
 
 const RATE_LIMIT_BACKOFF_MS = [5_000, 15_000, 30_000];
 
@@ -110,7 +111,7 @@ export async function* runAgentTurn(input: AgentTurnInput): AsyncIterable<LoopEv
   let totalOutputTokens = 0;
   const startedAt = Date.now();
 
-  let reason: "stop" | "max-iterations" | "budget" | "aborted" = "max-iterations";
+  let reason: Extract<LoopEvent, { type: "finish" }>["reason"] = "max-iterations";
 
   turn: for (let iteration = 0; iteration < maxIterations; iteration++) {
     if (signal.aborted) {
@@ -124,6 +125,7 @@ export async function* runAgentTurn(input: AgentTurnInput): AsyncIterable<LoopEv
 
     let assistantText = "";
     const toolCalls: ToolCall[] = [];
+    let modelFinish: Extract<ModelEvent, { type: "finish" }>["reason"] | null = null;
     let attempt = 0;
 
     for (;;) {
@@ -159,10 +161,13 @@ export async function* runAgentTurn(input: AgentTurnInput): AsyncIterable<LoopEv
               elapsedMs: Date.now() - startedAt,
               maxWallClockMs: input.budget?.maxWallClockMs,
             };
+          } else if (event.type === "finish") {
+            modelFinish = event.reason;
           }
         }
         break;
       } catch (error) {
+        if (signal.aborted) break;
         const started = assistantText !== "" || toolCalls.length > 0;
         const waitMs = retryAfterMs(error) ?? RATE_LIMIT_BACKOFF_MS[attempt];
         if (
@@ -199,8 +204,28 @@ export async function* runAgentTurn(input: AgentTurnInput): AsyncIterable<LoopEv
       );
     }
 
+    if (signal.aborted) {
+      reason = "aborted";
+      for (const call of toolCalls) {
+        conversation.push({ role: "tool", toolCallId: call.id, content: CANCELLED.content });
+        yield { type: "tool-result", id: call.id, name: call.name, ok: false, content: CANCELLED.content };
+      }
+      break turn;
+    }
+
+    if (modelFinish === null || modelFinish === "length" || modelFinish === "content-filter" ||
+      modelFinish === "error" || modelFinish === "other") {
+      reason = modelFinish ?? "other";
+      for (const call of toolCalls) {
+        const content = "The model stopped before this tool call could run.";
+        conversation.push({ role: "tool", toolCallId: call.id, content });
+        yield { type: "tool-result", id: call.id, name: call.name, ok: false, content };
+      }
+      break turn;
+    }
+
     if (toolCalls.length === 0) {
-      reason = "stop";
+      reason = modelFinish === "tool-calls" ? "other" : "stop";
       break turn;
     }
 
@@ -209,15 +234,15 @@ export async function* runAgentTurn(input: AgentTurnInput): AsyncIterable<LoopEv
       if (signal.aborted) {
         result = CANCELLED;
       } else {
-        const decision = await permission.request(call, signal);
-        if (decision === "deny") {
-          result = signal.aborted ? CANCELLED : { ok: false, content: "Tool call was denied by the user." };
-        } else {
-          try {
+        try {
+          const decision = await permission.request(call, signal);
+          if (decision === "deny") {
+            result = signal.aborted ? CANCELLED : { ok: false, content: "Tool call was denied by the user." };
+          } else {
             result = await tools.execute(call, signal);
-          } catch (error) {
-            result = { ok: false, content: `Tool '${call.name}' failed: ${describeError(error)}` };
           }
+        } catch (error) {
+          result = { ok: false, content: `Tool '${call.name}' failed: ${describeError(error)}` };
         }
       }
       const content = clipToolResult(result.content);
@@ -231,6 +256,8 @@ export async function* runAgentTurn(input: AgentTurnInput): AsyncIterable<LoopEv
         media: result.media,
       };
     }
+
+    yield { type: "turn-checkpoint", messages: [...conversation] };
 
     if (signal.aborted) {
       reason = "aborted";
