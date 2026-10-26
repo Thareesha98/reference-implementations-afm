@@ -24,13 +24,6 @@ A Python-based AFM interpreter using LangChain for agent execution.
 > [!NOTE]
 > Python-based implementations are available via a single CLI tool (`pip install afm-cli`). LangChain is currently the supported backend, with additional frameworks planned.
 
-### TypeScript
-
-A TypeScript interpreter with an execution engine and adapters for models, authentication, secrets, and tools.
-
-- **Source:** [`typescript-interpreter/`](./typescript-interpreter/)
-- **[Getting Started →](./typescript-interpreter/)**
-
 ## Repository Structure
 
 ```text
@@ -38,7 +31,6 @@ reference-implementations-afm/
 ├── ballerina-interpreter/          # Ballerina-based AFM interpreter
 ├── python-interpreter/             # Python-based AFM interpreters (plugin-based)
 │   └── packages/afm-langchain/     # LangChain execution backend
-├── typescript-interpreter/         # TypeScript engine and adapters
 └── .github/workflows/              # CI/CD
 ```
 
