@@ -37,7 +37,7 @@ describe("modelEventsFromPart", () => {
     ]);
   });
 
-  it("maps finish to usage + finish, collapsing unknown reasons to stop", () => {
+  it("preserves the content-filter finish reason", () => {
     const part = {
       type: "finish",
       finishReason: "content-filter",
@@ -46,8 +46,13 @@ describe("modelEventsFromPart", () => {
     } as unknown as TextStreamPart<ToolSet>;
     expect(modelEventsFromPart(part)).toEqual([
       { type: "usage", inputTokens: 10, outputTokens: 5 },
-      { type: "finish", reason: "stop" },
+      { type: "finish", reason: "content-filter" },
     ]);
+  });
+
+  it("treats unknown finish reasons as incomplete", () => {
+    const part = { type: "finish", finishReason: "surprise", totalUsage: { inputTokens: 0, outputTokens: 0 } } as unknown as TextStreamPart<ToolSet>;
+    expect(modelEventsFromPart(part).at(-1)).toEqual({ type: "finish", reason: "other" });
   });
 
   it("preserves the tool-calls finish reason", () => {

@@ -30,10 +30,16 @@ type FrontmatterScan =
   | { kind: "found"; yamlStart: number; end: number; bodyStart: number };
 
 function scanFrontmatter(content: string): FrontmatterScan {
-  const firstStart = content.length - content.trimStart().length;
+  let firstStart = content.charCodeAt(0) === 0xfeff ? 1 : 0;
+  while (firstStart < content.length) {
+    const end = content.indexOf("\n", firstStart);
+    const lineEnd = end === -1 ? content.length : end;
+    if (content.slice(firstStart, lineEnd).trim() !== "") break;
+    firstStart = end === -1 ? content.length : end + 1;
+  }
   const firstBreak = content.indexOf("\n", firstStart);
   const firstEnd = firstBreak === -1 ? content.length : firstBreak;
-  const firstLine = content.slice(firstStart, firstEnd).trim();
+  const firstLine = content.slice(firstStart, firstEnd).trimEnd();
   if (firstLine !== DELIMITER) {
     return { kind: "none" };
   }
@@ -43,7 +49,7 @@ function scanFrontmatter(content: string): FrontmatterScan {
   while (lineStart < content.length) {
     const breakAt = content.indexOf("\n", lineStart);
     const lineEnd = breakAt === -1 ? content.length : breakAt;
-    if (content.slice(lineStart, lineEnd).trim() === DELIMITER) {
+    if (content.slice(lineStart, lineEnd).trimEnd() === DELIMITER) {
       return {
         kind: "found",
         yamlStart,
@@ -105,32 +111,28 @@ export interface RoleAndInstructions {
   instructions: string;
 }
 
-function fenceMarker(line: string): string | null {
-  const match = /^(`{3,}|~{3,})/.exec(line.trim());
-  return match === null ? null : match[1]![0]!;
-}
-
 export function extractRoleAndInstructions(body: string): RoleAndInstructions {
   const lines = body.split(/\r?\n/);
 
   const roleLines: string[] = [];
   const instructionsLines: string[] = [];
   let current: "role" | "instructions" | null = null;
-  let fence: string | null = null;
+  let fence: { marker: string; length: number } | null = null;
 
   for (const line of lines) {
-    const marker = fenceMarker(line);
-    if (marker !== null) {
+    const marker = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+    if (marker !== undefined) {
       if (fence === null) {
-        fence = marker;
-      } else if (marker === fence) {
+        fence = { marker: marker[0]!, length: marker.length };
+      } else if (marker[0] === fence.marker && marker.length >= fence.length &&
+        /^\s*$/.test(line.slice(line.indexOf(marker) + marker.length))) {
         fence = null;
       }
     }
 
-    const stripped = line.trim();
-    if (fence === null && stripped.startsWith("# ")) {
-      const heading = stripped.slice(2).trim().toLowerCase();
+    const headingLine = marker === undefined && fence === null ? /^ {0,3}#\s+(\S.*?)\s*$/.exec(line) : null;
+    if (headingLine !== null) {
+      const heading = headingLine[1]!.toLowerCase();
       if (heading === "role") {
         current = "role";
         continue;

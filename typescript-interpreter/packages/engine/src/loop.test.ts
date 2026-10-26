@@ -30,6 +30,9 @@ function scriptedModel(turns: ModelEvent[][]): { port: ModelPort; calls: ModelRe
       for (const event of events) {
         yield event;
       }
+      if (!events.some((event) => event.type === "finish")) {
+        yield { type: "finish", reason: events.some((event) => event.type === "tool-call") ? "tool-calls" : "stop" };
+      }
     },
   };
   return { port, calls };
@@ -96,6 +99,46 @@ describe("runAgentTurn", () => {
     expect(joinText(events)).toBe("Hello world");
     expect(events.at(-1)).toEqual({ type: "finish", reason: "stop" });
     expect(calls).toHaveLength(1);
+  });
+
+  it("reports an output limit as incomplete and never runs a truncated tool call", async () => {
+    const { port: model } = scriptedModel([[{ type: "text-delta", text: "Partial" }, { type: "tool-call", id: "c1", name: "write", args: {} }, { type: "finish", reason: "length" }]]);
+    const { port: tools, executed } = scriptedTools({ write: { ok: true, content: "written" } });
+    const events = await collect(runAgentTurn({ system: "S", messages: [{ role: "user", content: "go" }], model, tools, permission: allowAllPermissions }));
+    expect(executed).toEqual([]);
+    expect(events.at(-1)).toEqual({ type: "finish", reason: "length" });
+    expect(events).toContainEqual(expect.objectContaining({ type: "tool-result", id: "c1", ok: false }));
+  });
+
+  it("keeps filtered and unknown model finishes distinct from a normal stop", async () => {
+    for (const finish of ["content-filter", "error", "other"] as const) {
+      const { port: model } = scriptedModel([[{ type: "text-delta", text: "Partial" }, { type: "finish", reason: finish }]]);
+      const { port: tools } = scriptedTools({});
+      const events = await collect(runAgentTurn({ system: "S", messages: [], model, tools, permission: allowAllPermissions }));
+      expect(events.at(-1)).toEqual({ type: "finish", reason: finish });
+    }
+  });
+
+  it("checkpoints a completed tool result before a later model failure", async () => {
+    let requests = 0;
+    const model: ModelPort = {
+      async *stream() {
+        if (requests++ === 0) {
+          yield { type: "tool-call", id: "c1", name: "write", args: {} };
+          yield { type: "finish", reason: "tool-calls" };
+          return;
+        }
+        throw new Error("provider failed");
+      },
+    };
+    const { port: tools, executed } = scriptedTools({ write: { ok: true, content: "saved" } });
+    const events: LoopEvent[] = [];
+    await expect((async () => {
+      for await (const event of runAgentTurn({ system: "S", messages: [{ role: "user", content: "save" }], model, tools, permission: allowAllPermissions })) events.push(event);
+    })()).rejects.toThrow("provider failed");
+    const checkpoint = events.find((event) => event.type === "turn-checkpoint");
+    expect(checkpoint?.type === "turn-checkpoint" ? checkpoint.messages.at(-1) : undefined).toEqual({ role: "tool", toolCallId: "c1", content: "saved" });
+    expect(executed).toHaveLength(1);
   });
 
   it("runs a tool, feeds the result back, then answers", async () => {
@@ -575,6 +618,7 @@ function modelCalling(name: string): ModelPort {
       if (done) return;
       done = true;
       yield { type: "tool-call", id: "c1", name, args: {} };
+      yield { type: "finish", reason: "tool-calls" };
     },
   };
 }
@@ -752,6 +796,27 @@ async function collectTurn(model: ModelPort): Promise<LoopEvent[]> {
 }
 
 describe("rate limit retry", () => {
+  it("reports a stopped model stream as aborted instead of a provider error", async () => {
+    const controller = new AbortController();
+    const model: ModelPort = {
+      async *stream() {
+        yield { type: "text-delta", text: "partial" };
+        if (controller.signal.aborted) throw new DOMException("Stopped", "AbortError");
+      },
+    };
+    const events: LoopEvent[] = [];
+    for await (const event of runAgentTurn({
+      system: "s", messages: [{ role: "user", content: "hi" }], model, tools: noTools,
+      permission: allowAllPermissions, signal: controller.signal,
+    })) {
+      events.push(event);
+      if (event.type === "text-delta") controller.abort();
+    }
+    expect(events.at(-1)).toMatchObject({ type: "finish", reason: "aborted" });
+    const complete = events.find((event) => event.type === "turn-complete");
+    expect(complete?.type === "turn-complete" ? complete.messages.at(-1) : undefined).toEqual({ role: "assistant", content: "partial" });
+  });
+
   it("retries a rate-limited turn and succeeds, rather than failing the whole turn", async () => {
     const { port, calls } = flakyModel(2, RATE_LIMITED, [
       { type: "text-delta", text: "done" },

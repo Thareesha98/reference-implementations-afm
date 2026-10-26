@@ -48,6 +48,16 @@ describe("parseAfm", () => {
     expect(r.instructions).toBe("Instructions here.");
   });
 
+  it("does not close frontmatter at an indented YAML block-scalar line", () => {
+    const text = `---\ndescription: |\n  A rule follows:\n  ---\nmodel:\n  name: gpt-4o\n---\n# Role\nr\n# Instructions\ni\n`;
+    expect(parseAfm(text).frontmatter.model).toEqual({ name: "gpt-4o" });
+  });
+
+  it("does not accept an indented opening delimiter as YAML frontmatter", () => {
+    const text = `  ---\nname: ignored\n---\n# Role\nr\n# Instructions\ni\n`;
+    expect(parseAfm(text).frontmatter).toEqual({});
+  });
+
   it("keeps multi-line sections", () => {
     const text = `---
 name: x

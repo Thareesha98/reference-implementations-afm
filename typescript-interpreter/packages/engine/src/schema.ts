@@ -15,28 +15,45 @@
 // under the License.
 
 import { z } from "zod";
+import Ajv from "ajv";
+import Ajv2019 from "ajv/dist/2019.js";
+import Ajv2020 from "ajv/dist/2020.js";
 import { AfmValidationError } from "./errors";
 
-export type JsonSchemaData = {
-  type: string;
-  properties?: Record<string, JsonSchemaData>;
-  required?: string[];
-  items?: JsonSchemaData;
-  description?: string;
-  [key: string]: unknown;
+export type JsonSchemaData = boolean | { type?: string | string[]; [key: string]: unknown };
+
+const schemaValidators = {
+  draft7: new Ajv({ strict: false, allErrors: true }),
+  draft2019: new Ajv2019({ strict: false, allErrors: true }),
+  draft2020: new Ajv2020({ strict: false, allErrors: true }),
 };
 
-export const jsonSchema: z.ZodType<JsonSchemaData> = z.lazy(() =>
-  z
-    .object({
-      type: z.string(),
-      properties: z.record(z.string(), jsonSchema).optional(),
-      required: z.array(z.string()).optional(),
-      items: jsonSchema.optional(),
-      description: z.string().optional(),
-    })
-    .passthrough(),
-);
+function validatorFor(schema: JsonSchemaData) {
+  const dialect = typeof schema === "object" ? schema.$schema : undefined;
+  if (typeof dialect !== "string" || dialect.includes("2020-12")) return schemaValidators.draft2020;
+  if (dialect.includes("2019-09")) return schemaValidators.draft2019;
+  if (dialect.includes("draft-07")) return schemaValidators.draft7;
+  return null;
+}
+
+export const jsonSchema: z.ZodType<JsonSchemaData> = z
+  .union([z.boolean(), z.record(z.string(), z.unknown())])
+  .superRefine((value, ctx) => {
+    const validator = validatorFor(value);
+    if (validator === null) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Unsupported JSON Schema dialect" });
+      return;
+    }
+    try {
+      if (validator.validateSchema(value)) return;
+    } catch {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Unsupported JSON Schema dialect" });
+      return;
+    }
+    for (const error of validator.errors ?? []) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Invalid JSON Schema: ${error.message ?? "invalid keyword"}` });
+    }
+  });
 
 const stringSchema: JsonSchemaData = { type: "string" };
 
@@ -47,11 +64,13 @@ const signatureSchema = z
   })
   .strict();
 
+const eventSignatureSchema = z.object({ input: jsonSchema.optional(), output: jsonSchema.optional() }).strict();
+
 const WHOLE_NUMBER = /^\s*[+-]?\d+\s*$/;
 
 function numberFromText(value: unknown): unknown {
   if (typeof value !== "string") return value;
-  if (value.includes("${")) return undefined;
+  if (value.includes("${")) return /^\$\{[^{}]+\}$/.test(value.trim()) ? undefined : value;
   return WHOLE_NUMBER.test(value) ? Number(value) : value;
 }
 
@@ -77,6 +96,7 @@ function httpUrl(field: string): z.ZodType<string> {
     try {
       protocol = new URL(value).protocol;
     } catch {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `${field} must be an absolute http:// or https:// URL` });
       return;
     }
     if (protocol !== "http:" && protocol !== "https:") {
@@ -112,7 +132,7 @@ export function postsSecretsToTokenUrl(grantType: unknown): boolean {
 
 const clientAuthentication = z
   .object({
-    type: z.string(),
+    type: z.string().min(1),
     token: z.string().optional(),
     username: z.string().optional(),
     password: z.string().optional(),
@@ -139,13 +159,7 @@ const clientAuthentication = z
   .passthrough()
   .superRefine((auth, ctx) => {
     const type = auth.type.toLowerCase();
-    if (type.startsWith("x-")) return;
-
     if (!RECOGNIZED_AUTH_TYPES.includes(type)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: `unknown authentication type. Supported types: ${RECOGNIZED_AUTH_TYPES.join(", ")}`,
-      });
       return;
     }
 
@@ -277,7 +291,7 @@ const toolsSchema = z
   })
   .strict();
 
-const httpExposure = z.object({ path: z.string() }).strict();
+const httpExposure = z.object({ path: z.string().optional() }).strict();
 const exposure = z.object({ http: httpExposure.optional() }).strict();
 
 const subscription = z
@@ -312,9 +326,26 @@ const webhookInterface = z
   .object({
     type: z.literal("webhook"),
     prompt: z.string().optional(),
-    signature: signatureSchema.default(defaultSignature),
+    signature: eventSignatureSchema.optional(),
     exposure: exposure.default({ http: { path: "/webhook" } }),
-    subscription,
+    subscription: subscription.optional(),
+  })
+  .strict();
+
+const platformChatInterface = z
+  .object({
+    type: z.literal("platformchat"),
+    platform: z.string().min(1),
+    mode: z.enum(["notification", "request", "polling"]),
+    prompt: z.string().optional(),
+    signature: eventSignatureSchema.optional(),
+    platform_config: z.record(z.string(), z.unknown()).optional(),
+    exposure: exposure.optional(),
+    polling: z.object({
+      interval: z.preprocess(numberFromText, z.number().int().positive().optional()),
+      timeout: z.preprocess(numberFromText, z.number().int().positive().optional()),
+    }).strict().optional(),
+    authentication: clientAuthentication.optional(),
   })
   .strict();
 
@@ -322,6 +353,7 @@ const interfaceSchema = z.discriminatedUnion("type", [
   consoleChatInterface,
   webChatInterface,
   webhookInterface,
+  platformChatInterface,
 ]);
 
 const localSkillSource = z
@@ -350,7 +382,31 @@ export const agentMetadataSchema = z
     skills: z.array(skillSource).optional(),
     max_iterations: z.preprocess(numberFromText, z.number().int().positive().optional()),
   })
-  .strict();
+  .strict()
+  .superRefine((metadata, ctx) => {
+    const names = new Set<string>();
+    metadata.tools?.mcp?.forEach((server, index) => {
+      if (names.has(server.name)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["tools", "mcp", index, "name"], message: `Duplicate MCP server name '${server.name}'` });
+      }
+      names.add(server.name);
+    });
+    metadata.interfaces?.forEach((iface, index) => {
+      if (iface.type !== "platformchat") return;
+      if (iface.mode !== "request" && iface.signature?.output !== undefined) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["interfaces", index, "signature", "output"], message: `platformchat mode '${iface.mode}' must not set signature.output` });
+      }
+      if (iface.mode === "polling" && iface.exposure !== undefined) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["interfaces", index, "exposure"], message: "platformchat polling must not set exposure" });
+      }
+      if (iface.mode !== "polling" && iface.polling !== undefined) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["interfaces", index, "polling"], message: `platformchat mode '${iface.mode}' must not set polling` });
+      }
+      if (iface.mode !== "polling" && iface.authentication !== undefined) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["interfaces", index, "authentication"], message: `platformchat mode '${iface.mode}' must not set authentication` });
+      }
+    });
+  });
 
 export type AgentMetadata = z.infer<typeof agentMetadataSchema>;
 export type ClientAuthentication = z.infer<typeof clientAuthentication>;

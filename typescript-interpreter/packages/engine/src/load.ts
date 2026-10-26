@@ -20,7 +20,7 @@ import type { Plan } from "./plan";
 import { resolveVariables } from "./variables";
 import { parseAfm } from "./parse";
 import { validateMetadata } from "./schema";
-import { planForBrowser } from "./plan";
+import { browserRunMetadata, planForBrowser } from "./plan";
 
 export interface LoadedAfm {
   metadata: AgentMetadata;
@@ -30,11 +30,12 @@ export interface LoadedAfm {
   plan: Plan;
 }
 
-export async function loadAfm(content: string, secrets: SecretPort): Promise<LoadedAfm> {
+export async function loadAfm(content: string, secrets: SecretPort, forBrowser = false): Promise<LoadedAfm> {
   const parsed = parseAfm(content);
-  const frontmatter = await resolveVariables(parsed.frontmatter, secrets);
+  const declared = validateMetadata(parsed.frontmatter);
+  const frontmatter = await resolveVariables(forBrowser ? browserRunMetadata(parsed.frontmatter) : parsed.frontmatter, secrets);
   const metadata = validateMetadata(frontmatter);
-  const plan = planForBrowser(metadata);
+  const plan = planForBrowser(forBrowser ? declared : metadata);
 
   return {
     metadata,

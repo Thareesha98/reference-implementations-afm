@@ -28,7 +28,7 @@ export interface ModelOptions {
 
 export function createOpenAIModel(options: ModelOptions): ModelPort {
   const provider = createOpenAI({ apiKey: options.apiKey, fetch: options.fetch });
-  return streamingModelPort(provider(options.model ?? "gpt-4o"));
+  return streamingModelPort(provider(options.model ?? "gpt-4o"), { openai: { store: false } });
 }
 
 export function createAnthropicModel(options: ModelOptions): ModelPort {
@@ -74,23 +74,80 @@ export async function checkModelKey(
   }
 }
 
-function streamingModelPort(model: LanguageModel): ModelPort {
+type AssistantMessage = Extract<ChatMessage, { role: "assistant" }>;
+
+interface Continuation {
+  system: string;
+  visible: ChatMessage[];
+  native: ModelMessage[];
+}
+
+function sameMessage(left: ChatMessage, right: ChatMessage): boolean {
+  if (left === right) return true;
+  if (left.role !== right.role || JSON.stringify(left.content) !== JSON.stringify(right.content)) return false;
+  if (left.role === "tool" && right.role === "tool") return left.toolCallId === right.toolCallId;
+  if (left.role === "assistant" && right.role === "assistant") {
+    const calls = (message: AssistantMessage) =>
+      (message.toolCalls ?? []).map(({ id, name, args }) => ({ id, name, args }));
+    return JSON.stringify(calls(left)) === JSON.stringify(calls(right));
+  }
+  return true;
+}
+
+function streamingModelPort(
+  model: LanguageModel,
+  providerOptions?: Parameters<typeof streamText>[0]["providerOptions"],
+): ModelPort {
+  const continuations: Continuation[] = [];
   return {
     async *stream(request: ModelRequest, signal: AbortSignal): AsyncIterable<ModelEvent> {
       const tools = toToolSet(request.tools);
+      const converted = toModelMessages(request.messages);
+      let previous: Continuation | undefined;
+      for (let index = continuations.length - 1; index >= 0; index--) {
+        const candidate = continuations[index]!;
+        if (candidate.system === request.system &&
+            candidate.visible.length <= request.messages.length &&
+            candidate.visible.every((message, at) => sameMessage(message, request.messages[at]!))) {
+          previous = candidate;
+          break;
+        }
+      }
+      const messages = previous === undefined
+        ? converted
+        : [...previous.native, ...converted.slice(previous.visible.length)];
       const result = streamText({
         model,
         system: request.system.trim() === "" ? undefined : request.system,
-        messages: toModelMessages(request.messages),
+        messages,
         tools: Object.keys(tools).length > 0 ? tools : undefined,
+        providerOptions,
         abortSignal: signal,
       });
 
+      const assistant: AssistantMessage = { role: "assistant", content: "" };
+      let finished = false;
       for await (const part of result.fullStream) {
         if (part.type === "error") {
           throw part.error;
         }
-        yield* modelEventsFromPart(part);
+        for (const event of modelEventsFromPart(part)) {
+          if (event.type === "text-delta") assistant.content += event.text;
+          if (event.type === "tool-call") {
+            (assistant.toolCalls ??= []).push({ id: event.id, name: event.name, args: event.args });
+          }
+          if (event.type === "finish") finished = event.reason === "stop" || event.reason === "tool-calls";
+          yield event;
+        }
+      }
+      if (finished && !signal.aborted && (assistant.content !== "" || assistant.toolCalls?.length)) {
+        const response = await result.response;
+        continuations.push({
+          system: request.system,
+          visible: [...request.messages, assistant],
+          native: [...messages, ...response.messages],
+        });
+        if (continuations.length > 64) continuations.shift();
       }
     },
   };
@@ -195,8 +252,9 @@ export function modelEventsFromPart(part: TextStreamPart<ToolSet>): ModelEvent[]
   }
 }
 
-function mapFinishReason(reason: string): "stop" | "tool-calls" | "length" {
-  if (reason === "tool-calls") return "tool-calls";
-  if (reason === "length") return "length";
-  return "stop";
+function mapFinishReason(reason: string): "stop" | "tool-calls" | "length" | "content-filter" | "error" | "other" {
+  if (["stop", "tool-calls", "length", "content-filter", "error"].includes(reason)) {
+    return reason as "stop" | "tool-calls" | "length" | "content-filter" | "error";
+  }
+  return "other";
 }
