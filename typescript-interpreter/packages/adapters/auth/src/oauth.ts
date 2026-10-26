@@ -363,9 +363,7 @@ export async function discoverSignInServer(
 
 export interface AuthorizationCodeSession {
   hasSession(): boolean;
-  hasSavedSession(): boolean;
   getAccessToken(fetchFn?: typeof fetch): Promise<string | null>;
-  restore(server: SignInServer, fetchFn?: typeof fetch): Promise<boolean>;
   startSignIn(server: SignInServer, redirect: (url: string) => void): Promise<void>;
   completeSignIn(code: string, state: string, fetchFn?: typeof fetch, iss?: string): Promise<void>;
   declineSignIn(state: string, iss?: string): void;
@@ -427,10 +425,6 @@ export function createAuthorizationCodeSession(
       return current !== null;
     },
 
-    hasSavedSession(): boolean {
-      return current === null && persistentStore.get(REFRESH_KEY) !== null;
-    },
-
     async getAccessToken(fetchFn: typeof fetch = fetch): Promise<string | null> {
       const signedIn = current;
       if (signedIn === null) return null;
@@ -459,20 +453,6 @@ export function createAuthorizationCodeSession(
       current = { provider, tokens };
       persistentStore.remove(REFRESH_KEY);
       await persist();
-    },
-
-    async restore(server: SignInServer, fetchFn: typeof fetch = fetch): Promise<boolean> {
-      const refreshToken = persistentStore.get(REFRESH_KEY);
-      if (current !== null || refreshToken === null) return false;
-      if (!sameUrl(server.authorizeUrl, config.authorizeUrl) || !sameUrl(server.tokenUrl, config.tokenUrl) || server.clientId !== config.clientId) {
-        return false;
-      }
-      const provider = providerFor(server);
-      const tokens = await refreshAuthorizationCodeTokens(provider, refreshToken, fetchFn);
-      if (current !== null) return false;
-      current = { provider, tokens };
-      await persist();
-      return true;
     },
 
     declineSignIn(state: string, iss?: string): void {
